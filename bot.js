@@ -215,9 +215,7 @@ function createTicketInfoMessage(ticketReport) {
     return infoMessage;
 }
 
-// ... (остальной код класса WTRegimentTracker и функций остается без изменений)
-
-// Класс для работы с War Thunder полками (без изменений)
+// Класс для работы с War Thunder полками
 class WTRegimentTracker {
     constructor() {
         this.apiUrl = 'https://srebot-meow.ing/api/squadron-leaderboard';
@@ -895,4 +893,45 @@ client.on('messageCreate', async message => {
             
             // Сохраняем в файл
             const fileName = `transcript-${ticketReport.ticketInfo.channelName}.txt`;
-            await
+            await fs.writeFile(fileName, transcriptContent, 'utf8');
+            
+            // Отправляем в канал для транскриптов
+            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+            
+            if (transcriptChannel && transcriptChannel.isTextBased()) {
+                // Отправляем основной транскрипт
+                await transcriptChannel.send({
+                    content: `📄 Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server}`,
+                    files: [fileName]
+                });
+                
+                // Отправляем отдельное сообщение с информацией о тикете
+                const ticketInfoMessage = createTicketInfoMessage(ticketReport);
+                await transcriptChannel.send(`\`\`\`${ticketInfoMessage}\`\`\``);
+                
+                await message.channel.send('✅ Transcript sent to transcripts channel!');
+                console.log(`✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
+                
+                // Удаляем временный файл
+                await fs.unlink(fileName).catch(() => {});
+            } else {
+                await message.channel.send('❌ Transcript channel not found!');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error creating transcript:', error);
+            await message.channel.send('❌ Error creating transcript: ' + error.message);
+        }
+    }
+});
+
+// Обработка ошибок
+process.on('unhandledRejection', error => {
+    console.error('❌ Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('❌ Uncaught exception:', error);
+});
+
+console.log('🚀 Bot starting...');
