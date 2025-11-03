@@ -208,7 +208,7 @@ const wtTracker = new WTRegimentTracker();
 const translationCooldown = new Set();
 const TRANSLATION_COOLDOWN_TIME = 5000; // 5 секунд
 
-client.login(config.token);
+client.login(token);
 
 client.on('ready', () => {
     console.log("✅ Bot has logged in.");
