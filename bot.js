@@ -7,8 +7,6 @@ const client = new Client({
         GatewayIntentBits.GuildMessageReactions
     ]
 });
-
-const config = require('./config.json');
 const fs = require('fs').promises;
 const axios = require('axios');
 
