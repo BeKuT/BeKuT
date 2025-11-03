@@ -26,7 +26,126 @@ const client = new Client({
 });
 
 // Хранилище для связи реакций с сообщениями переводов
-const translationMessages = new Map(); // Format: messageId -> translationMessageId
+const translationMessages = new Map();
+
+// ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ ТРАНСКРИПТА ⬇️⬇️⬇️
+
+// Функция для сбора информации о тикете
+async function collectTicketInfo(channel, messages) {
+    const participants = new Set();
+    let ticketCreator = null;
+    let firstMessage = null;
+
+    // Собираем участников и находим первое сообщение
+    messages.forEach(msg => {
+        // Добавляем участника
+        participants.add({
+            id: msg.author.id,
+            username: msg.author.tag,
+            bot: msg.author.bot
+        });
+
+        // Ищем первое сообщение для определения создателя
+        if (!firstMessage || msg.createdTimestamp < firstMessage.createdTimestamp) {
+            firstMessage = msg;
+        }
+    });
+
+    // Создатель тикета - автор первого сообщения
+    if (firstMessage) {
+        ticketCreator = {
+            id: firstMessage.author.id,
+            username: firstMessage.author.tag
+        };
+    }
+
+    return {
+        ticketId: channel.name.split('-').pop() || 'unknown',
+        server: channel.guild.name,
+        createdAt: channel.createdAt.toLocaleString('ru-RU'),
+        createdBy: ticketCreator ? `${ticketCreator.username} (${ticketCreator.id})` : 'unknown',
+        channelName: channel.name,
+        participants: Array.from(participants).map(p => ({
+            username: p.username,
+            userId: p.id,
+            role: p.bot ? 'system' : (p.id === ticketCreator?.id ? 'Ticket Owner' : 'participant')
+        }))
+    };
+}
+
+// Функция для генерации отчета о тикете
+function generateTicketReport(ticketData) {
+    const report = {
+        ticketInfo: {
+            id: ticketData.ticketId,
+            server: ticketData.server,
+            createdAt: ticketData.createdAt,
+            createdBy: ticketData.createdBy,
+            channelName: ticketData.channelName
+        },
+        participants: ticketData.participants,
+        messageCount: 0
+    };
+
+    return report;
+}
+
+// Функция для создания форматированного транскрипта
+function createFormattedTranscript(ticketReport, messages) {
+    let transcriptContent = `Transcript for #ticket-${ticketReport.ticketInfo.id} in ${ticketReport.ticketInfo.server}\n`;
+    transcriptContent += `Created: ${ticketReport.ticketInfo.createdAt}\n`;
+    transcriptContent += '='.repeat(60) + '\n\n';
+    
+    // Информация о тикете
+    transcriptContent += '📋 TICKET INFORMATION:\n';
+    transcriptContent += `• ID: #${ticketReport.ticketInfo.id}\n`;
+    transcriptContent += `• Server: ${ticketReport.ticketInfo.server}\n`;
+    transcriptContent += `• Created: ${ticketReport.ticketInfo.createdAt}\n`;
+    transcriptContent += `• Created by: ${ticketReport.ticketInfo.createdBy}\n`;
+    transcriptContent += `• Channel: ${ticketReport.ticketInfo.channelName}\n\n`;
+    
+    // Участники
+    transcriptContent += '👥 PARTICIPANTS:\n';
+    ticketReport.participants.forEach(participant => {
+        const roleIcon = participant.role === 'Ticket Owner' ? '👑' : 
+                        participant.role === 'system' ? '🤖' : '👤';
+        transcriptContent += `• ${roleIcon} ${participant.username} (${participant.userId}) - ${participant.role}\n`;
+    });
+    
+    transcriptContent += '\n' + '='.repeat(60) + '\n\n';
+    transcriptContent += '💬 MESSAGES:\n\n';
+    
+    // Сообщения
+    let messageCount = 0;
+    messages.forEach(msg => {
+        const timestamp = msg.createdAt.toLocaleString('ru-RU');
+        const author = msg.author.tag;
+        const content = msg.content || '[No text content]';
+        
+        transcriptContent += `[${timestamp}] ${author}: ${content}\n`;
+        
+        if (msg.attachments.size > 0) {
+            transcriptContent += `📎 [Attachments: ${Array.from(msg.attachments.values()).map(a => a.url).join(', ')}]\n`;
+        }
+        
+        if (msg.embeds.length > 0) {
+            transcriptContent += `🔗 [Embeds: ${msg.embeds.length}]\n`;
+        }
+        
+        transcriptContent += '\n';
+        messageCount++;
+    });
+    
+    // Обновляем количество сообщений
+    ticketReport.messageCount = messageCount;
+    
+    // Статистика в конце
+    transcriptContent += '='.repeat(60) + '\n';
+    transcriptContent += `📊 STATISTICS: ${messageCount} messages, ${ticketReport.participants.length} participants\n`;
+    transcriptContent += `⏰ Transcript generated: ${new Date().toLocaleString('ru-RU')}\n`;
+    
+    return transcriptContent;
+}
 
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
@@ -35,9 +154,10 @@ class WTRegimentTracker {
         this.cache = {
             topRegiments: null,
             lastUpdate: null,
-            cacheTime: 10 * 60 * 1000 // 10 минут кэш
+            cacheTime: 10 * 60 * 1000
         };
     }
+
     async getRegimentInfo(regimentName) {
         try {
             const topRegiments = await this.getRealTopRegiments(200);
@@ -80,7 +200,6 @@ class WTRegimentTracker {
         }
     }
 
-    // ПАРСИНГ РЕАЛЬНЫХ ДАННЫХ С SREBOT-MEOW API
     async getRealTopRegiments(limit = 50) {
         if (this.cache.topRegiments && this.cache.lastUpdate && 
             Date.now() - this.cache.lastUpdate < this.cache.cacheTime) {
@@ -90,7 +209,6 @@ class WTRegimentTracker {
         try {
             console.log('🔍 Получение реальных данных с srebot-meow API...');
             
-            // Пробуем получить данные через API
             const response = await axios.get(this.apiUrl, {
                 timeout: 15000,
                 headers: {
@@ -128,24 +246,13 @@ class WTRegimentTracker {
         }
     }
 
-    // РЕАЛИСТИЧНЫЕ ЗАПАСНЫЕ ДАННЫЕ НА ОСНОВЕ САЙТА
     getRealisticFallbackData(limit = 20) {
         const regiments = [
             { rank: 1, name: "ZTEAM", rating: 15420, battles: 892, wins: 645, winRate: 72.3, players: 45 },
             { rank: 2, name: "S_Q_U_A_D", rating: 14850, battles: 765, wins: 520, winRate: 68.0, players: 38 },
             { rank: 3, name: "RED_STORM", rating: 14210, battles: 821, wins: 583, winRate: 71.0, players: 42 },
             { rank: 4, name: "PANZER_ELITE", rating: 13890, battles: 734, wins: 507, winRate: 69.1, players: 36 },
-            { rank: 5, name: "BLUE_FLAMES", rating: 13560, battles: 689, wins: 462, winRate: 67.1, players: 34 },
-            { rank: 6, name: "THUNDER_WARRIORS", rating: 13240, battles: 712, wins: 498, winRate: 70.0, players: 39 },
-            { rank: 7, name: "RUSSIAN_BEAR", rating: 12980, battles: 654, wins: 432, winRate: 66.1, players: 32 },
-            { rank: 8, name: "AMERICAN_EAGLE", rating: 12650, battles: 698, wins: 475, winRate: 68.1, players: 37 },
-            { rank: 9, name: "GERMAN_WOLF", rating: 12370, battles: 723, wins: 513, winRate: 71.0, players: 41 },
-            { rank: 10, name: "BRITISH_LION", rating: 12090, battles: 645, wins: 419, winRate: 65.0, players: 31 },
-            { rank: 11, name: "JAPANESE_TIGER", rating: 11820, battles: 587, wins: 370, winRate: 63.0, players: 28 },
-            { rank: 12, name: "FRENCH_PANTHER", rating: 11560, battles: 612, wins: 410, winRate: 67.0, players: 33 },
-            { rank: 13, name: "ITALIAN_FOX", rating: 11300, battles: 534, wins: 331, winRate: 62.0, players: 26 },
-            { rank: 14, name: "CHINESE_DRAGON", rating: 11040, battles: 589, wins: 377, winRate: 64.0, players: 29 },
-            { rank: 15, name: "SWEDISH_VALKYRIE", rating: 10780, battles: 498, wins: 304, winRate: 61.0, players: 25 }
+            { rank: 5, name: "BLUE_FLAMES", rating: 13560, battles: 689, wins: 462, winRate: 67.1, players: 34 }
         ];
         
         return regiments.slice(0, limit);
@@ -154,8 +261,7 @@ class WTRegimentTracker {
     generateRegimentData(regiment) {
         const vehicles = [
             "T-80BVM", "Leopard 2A6", "M1A2 Abrams", "Challenger 2", "Type 10",
-            "Leclerc", "Ariete", "ZTZ99", "MiG-29", "F-16A", "F-14 Tomcat",
-            "Eurofighter", "Su-27", "F-15J", "Mirage 2000", "Ka-52", "AH-64D"
+            "Leclerc", "Ariete", "ZTZ99", "MiG-29", "F-16A", "F-14 Tomcat"
         ];
         
         const players = Array.from({length: 8}, (_, i) => ({
@@ -217,12 +323,67 @@ const wtTracker = new WTRegimentTracker();
 
 // Система кд для переводов
 const translationCooldown = new Set();
-const TRANSLATION_COOLDOWN_TIME = 5000; // 5 секунд
+const TRANSLATION_COOLDOWN_TIME = 5000;
 
-client.login(token);
+// Словарь для перевода
+const translationDict = {
+    'hello': 'привет', 'world': 'мир', 'good': 'хороший', 'bad': 'плохой',
+    'cat': 'кот', 'dog': 'собака', 'house': 'дом', 'car': 'машина',
+    'computer': 'компьютер', 'phone': 'телефон', 'book': 'книга',
+    'water': 'вода', 'food': 'еда', 'friend': 'друг', 'family': 'семья'
+};
+
+function detectLanguage(text) {
+    const cyrillicPattern = /[а-яА-ЯёЁ]/;
+    return cyrillicPattern.test(text) ? 'ru' : 'en';
+}
+
+function translateText(text, targetLang) {
+    const words = text.split(' ');
+    const translatedWords = words.map(word => {
+        const lowerWord = word.toLowerCase();
+        
+        if (targetLang === 'ru') {
+            return translationDict[lowerWord] || word;
+        } else {
+            const reverseDict = Object.fromEntries(
+                Object.entries(translationDict).map(([key, value]) => [value, key])
+            );
+            return reverseDict[lowerWord] || word;
+        }
+    });
+    return translatedWords.join(' ');
+}
+
+async function translateWithAPI(text, targetLang) {
+    try {
+        const sourceLang = detectLanguage(text) === 'ru' ? 'ru' : 'en';
+        
+        if ((sourceLang === 'ru' && targetLang === 'ru') || (sourceLang === 'en' && targetLang === 'en')) {
+            return text;
+        }
+        
+        const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`);
+        const data = await response.json();
+        
+        if (data.responseStatus === 200) {
+            return data.responseData.translatedText;
+        } else {
+            return translateText(text, targetLang);
+        }
+    } catch (error) {
+        console.error('Translation API error:', error);
+        return translateText(text, targetLang);
+    }
+}
+
+client.login(token).catch(error => {
+    console.error('❌ Login failed:', error);
+    process.exit(1);
+});
 
 client.on('ready', () => {
-    console.log("✅ Bot has logged in.");
+    console.log(`✅ Bot has logged in as ${client.user.tag}`);
     
     // Устанавливаем первый статус сразу
     setCustomStatus();
@@ -250,13 +411,6 @@ function setCustomStatus() {
         { name: 'Twitch', type: ActivityType.Watching, status: 'online' },
         { name: 'BeKuT', type: ActivityType.Watching, status: 'online' },
         { name: 'BeKuT', type: ActivityType.Listening, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Listening, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Listening, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Streaming, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Streaming, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Playing, status: 'online' },
         { name: `${client.guilds.cache.size} серверов`, type: ActivityType.Watching, status: 'online' },
         { name: `${client.users.cache.size} пользователей`, type: ActivityType.Listening, status: 'online' },
         { name: 'War Thunder', type: ActivityType.Playing, status: 'online' },
@@ -272,82 +426,14 @@ function setCustomStatus() {
             type: randomStatus.type
         }],
         status: randomStatus.status
+    }).catch(error => {
+        console.error('❌ Error setting status:', error);
     });
-    
-    console.log(`🔄 Status updated: ${randomStatus.type} ${randomStatus.name}`);
 }
 
-// ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
-
-// Простой словарь для перевода
-const translationDict = {
-    'hello': 'привет', 'world': 'мир', 'good': 'хороший', 'bad': 'плохой',
-    'cat': 'кот', 'dog': 'собака', 'house': 'дом', 'car': 'машина',
-    'computer': 'компьютер', 'phone': 'телефон', 'book': 'книга',
-    'water': 'вода', 'food': 'еда', 'friend': 'друг', 'family': 'семья',
-    'time': 'время', 'day': 'день', 'night': 'ночь', 'love': 'любовь',
-    
-    'привет': 'hello', 'мир': 'world', 'хороший': 'good', 'плохой': 'bad',
-    'кот': 'cat', 'собака': 'dog', 'дом': 'house', 'машина': 'car',
-    'компьютер': 'computer', 'телефон': 'phone', 'книга': 'book',
-    'вода': 'water', 'еда': 'food', 'друг': 'friend', 'семья': 'family',
-    'время': 'time', 'день': 'day', 'ночь': 'night', 'любовь': 'love'
-};
-
-// Функция для определения языка текста
-function detectLanguage(text) {
-    const cyrillicPattern = /[а-яА-ЯёЁ]/;
-    return cyrillicPattern.test(text) ? 'ru' : 'en';
-}
-
-// Функция для перевода текста
-function translateText(text, targetLang) {
-    const words = text.split(' ');
-    const translatedWords = words.map(word => {
-        const lowerWord = word.toLowerCase();
-        
-        if (targetLang === 'ru') {
-            // Переводим с английского на русский
-            return translationDict[lowerWord] || word;
-        } else {
-            // Переводим с русского на английский
-            const reverseDict = Object.fromEntries(
-                Object.entries(translationDict).map(([key, value]) => [value, key])
-            );
-            return reverseDict[lowerWord] || word;
-        }
-    });
-    return translatedWords.join(' ');
-}
-
-// Функция для перевода с помощью API
-async function translateWithAPI(text, targetLang) {
-    try {
-        const sourceLang = detectLanguage(text) === 'ru' ? 'ru' : 'en';
-        
-        // Если целевой язык совпадает с исходным, возвращаем оригинал
-        if ((sourceLang === 'ru' && targetLang === 'ru') || (sourceLang === 'en' && targetLang === 'en')) {
-            return text;
-        }
-        
-        const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`);
-        const data = await response.json();
-        
-        if (data.responseStatus === 200) {
-            return data.responseData.translatedText;
-        } else {
-            return translateText(text, targetLang);
-        }
-    } catch (error) {
-        console.error('Translation API error:', error);
-        return translateText(text, targetLang);
-    }
-}
-
-// ⬇️⬇️⬇️ ОБНОВЛЕННАЯ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ДВУСТОРОННЕГО ПЕРЕВОДА ⬇️⬇️⬇️
+// ⬇️⬇️⬇️ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
 
 client.on('messageReactionAdd', async (reaction, user) => {
-    // Проверяем, что реакция - это флаг России 🇷🇺 или флаг Великобритании 🇬🇧
     if ((reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') && !user.bot) {
         
         // Проверка кд
@@ -378,12 +464,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
             
             // Определяем направление перевода на основе реакции
             if (reaction.emoji.name === '🇷🇺') {
-                // 🇷🇺 - переводим на русский
                 targetLang = 'ru';
                 flagEmoji = '🇷🇺';
                 languageName = 'Русский';
             } else {
-                // 🇬🇧 - переводим на английский
                 targetLang = 'en';
                 flagEmoji = '🇬🇧';
                 languageName = 'Английский';
@@ -417,7 +501,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             translationMessages.set(message.id, translationMessage.id);
             console.log(`✅ Translation ${sourceLang}→${targetLang} sent: "${originalText.substring(0, 50)}..."`);
             
-            // ⬇️⬇️⬇️ УДАЛЕНИЕ ЧЕРЕЗ 10 СЕКУНД ⬇️⬇️⬇️
+            // УДАЛЕНИЕ ЧЕРЕЗ 10 СЕКУНД
             const deleteTimeout = setTimeout(async () => {
                 try {
                     // Удаляем сообщение с переводом
@@ -434,7 +518,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 } catch (deleteError) {
                     console.error('❌ Error deleting translation/reaction:', deleteError);
                 }
-            }, 10000); // 10 секунд = 10000 мс
+            }, 10000);
             
             // Сохраняем timeout для возможной отмены
             translationMessages.set(`${message.id}_timeout`, deleteTimeout);
@@ -448,7 +532,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // ⬇️⬇️⬇️ ОБРАБОТКА УДАЛЕНИЯ РЕАКЦИЙ ⬇️⬇️⬇️
 
 client.on('messageReactionRemove', async (reaction, user) => {
-    // Проверяем, что удаленная реакция - это флаг России 🇷🇺 или флаг Великобритании 🇬🇧
     if ((reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') && !user.bot) {
         try {
             // Получаем полное сообщение
@@ -546,7 +629,7 @@ client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
     // КОМАНДЫ WAR THUNDER
-    if(message.content.toLowerCase().startsWith('!test36')) {
+    if(message.content.toLowerCase().startsWith('!полк ')) {
         const regimentName = message.content.slice(6).trim();
         
         if (!regimentName) {
@@ -703,14 +786,12 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // КОМАНДА ТРАНСКРИПТА (упрощенная версия без jsdom)
+    // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА
     else if(message.content.toLowerCase() === '-transcript') {
-        await message.delete();
-        
-        const channelName = message.channel.name.replace(/[^a-z0-9]/gi, '_');
-        const fileName = `transcript-${channelName}.txt`;
+        await message.delete().catch(() => {});
         
         try {
+            // Собираем все сообщения из канала
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
             messageCollection = messageCollection.concat(channelMessages);
@@ -731,29 +812,17 @@ client.on('messageCreate', async message => {
                 }
             }
 
-            const msgs = Array.from(messageCollection.values()).reverse();
+            const allMessages = Array.from(messageCollection.values()).reverse();
             
-            // Создаем простой текстовый файл
-            let transcriptContent = `Transcript for #${message.channel.name}\n`;
-            transcriptContent += `Server: ${message.guild.name}\n`;
-            transcriptContent += `Created: ${new Date().toLocaleString()}\n`;
-            transcriptContent += '='.repeat(50) + '\n\n';
+            // Собираем информацию о тикете
+            const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
+            const ticketReport = generateTicketReport(ticketInfo);
             
-            for (let msg of msgs) {
-                const timestamp = msg.createdAt.toLocaleString();
-                const author = msg.author.tag;
-                const content = msg.content;
-                
-                transcriptContent += `[${timestamp}] ${author}: ${content}\n`;
-                
-                if (msg.attachments.size > 0) {
-                    transcriptContent += `[Attachments: ${Array.from(msg.attachments.values()).map(a => a.url).join(', ')}]\n`;
-                }
-                
-                transcriptContent += '\n';
-            }
+            // Создаем форматированный транскрипт
+            const transcriptContent = createFormattedTranscript(ticketReport, allMessages);
             
-            // Сохраняем файл
+            // Сохраняем в файл
+            const fileName = `transcript-ticket_${ticketReport.ticketInfo.id}.txt`;
             await fs.writeFile(fileName, transcriptContent, 'utf8');
             
             // Отправляем в канал для транскриптов
@@ -761,19 +830,33 @@ client.on('messageCreate', async message => {
             
             if (transcriptChannel && transcriptChannel.isTextBased()) {
                 await transcriptChannel.send({
-                    content: `📄 Transcript for #${message.channel.name} in ${message.guild.name}`,
+                    content: `📄 Transcript for #ticket-${ticketReport.ticketInfo.id} in ${ticketReport.ticketInfo.server}`,
                     files: [fileName]
                 });
                 
                 await message.channel.send('✅ Transcript sent to transcripts channel!');
-                console.log("✅ Transcript created and sent successfully!");
+                console.log(`✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
+                
+                // Удаляем временный файл
+                await fs.unlink(fileName).catch(() => {});
             } else {
                 await message.channel.send('❌ Transcript channel not found!');
             }
             
         } catch (error) {
-            console.error('❌ Error:', error);
+            console.error('❌ Error creating transcript:', error);
             await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
     }
 });
+
+// Обработка ошибок
+process.on('unhandledRejection', error => {
+    console.error('❌ Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('❌ Uncaught exception:', error);
+});
+
+console.log('🚀 Bot starting...');
