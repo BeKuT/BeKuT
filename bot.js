@@ -62,9 +62,11 @@ async function collectTicketInfo(channel, messages) {
     return {
         ticketId: channel.name.split('-').pop() || 'unknown',
         server: channel.guild.name,
+        serverId: channel.guild.id,
         createdAt: channel.createdAt.toLocaleString('ru-RU'),
         createdBy: ticketCreator ? `${ticketCreator.username} (${ticketCreator.id})` : 'unknown',
         channelName: channel.name,
+        channelId: channel.id,
         participants: Array.from(participants).map(p => ({
             username: p.username,
             userId: p.id,
@@ -79,9 +81,11 @@ function generateTicketReport(ticketData) {
         ticketInfo: {
             id: ticketData.ticketId,
             server: ticketData.server,
+            serverId: ticketData.serverId,
             createdAt: ticketData.createdAt,
             createdBy: ticketData.createdBy,
-            channelName: ticketData.channelName
+            channelName: ticketData.channelName,
+            channelId: ticketData.channelId
         },
         participants: ticketData.participants,
         messageCount: 0
@@ -92,31 +96,82 @@ function generateTicketReport(ticketData) {
 
 // Функция для создания форматированного транскрипта
 function createFormattedTranscript(ticketReport, messages) {
-    let transcriptContent = `Transcript for #ticket-${ticketReport.ticketInfo.id} in ${ticketReport.ticketInfo.server}\n`;
-    transcriptContent += `Created: ${ticketReport.ticketInfo.createdAt}\n`;
-    transcriptContent += '='.repeat(60) + '\n\n';
+    let transcriptContent = `Server-Info>\n`;
+    transcriptContent += `    Server: ${ticketReport.ticketInfo.server} (${ticketReport.ticketInfo.serverId})\n`;
+    transcriptContent += `    Channel: ${ticketReport.ticketInfo.channelName} (${ticketReport.ticketInfo.channelId})\n`;
     
-    // Информация о тикете
-    transcriptContent += '📋 TICKET INFORMATION:\n';
-    transcriptContent += `• ID: #${ticketReport.ticketInfo.id}\n`;
-    transcriptContent += `• Server: ${ticketReport.ticketInfo.server}\n`;
-    transcriptContent += `• Created: ${ticketReport.ticketInfo.createdAt}\n`;
-    transcriptContent += `• Created by: ${ticketReport.ticketInfo.createdBy}\n`;
-    transcriptContent += `• Channel: ${ticketReport.ticketInfo.channelName}\n\n`;
+    // Подсчет сообщений и вложений
+    let messageCount = 0;
+    let attachmentsCount = 0;
     
-    // Участники
-    transcriptContent += '👥 PARTICIPANTS:\n';
-    ticketReport.participants.forEach(participant => {
-        const roleIcon = participant.role === 'Ticket Owner' ? '👑' : 
-                        participant.role === 'system' ? '🤖' : '👤';
-        transcriptContent += `• ${roleIcon} ${participant.username} (${participant.userId}) - ${participant.role}\n`;
+    messages.forEach(msg => {
+        messageCount++;
+        if (msg.attachments.size > 0) {
+            attachmentsCount += msg.attachments.size;
+        }
     });
     
-    transcriptContent += '\n' + '='.repeat(60) + '\n\n';
-    transcriptContent += '💬 MESSAGES:\n\n';
+    transcriptContent += `    Messages: ${messageCount}\n`;
+    transcriptContent += `    Attachments Saved: 0\n`;
+    transcriptContent += `    Attachments Skipped: ${attachmentsCount} (due maximum file size Lim\n\n`;
+    
+    transcriptContent += '📌 Раскрыть  \n';
+    transcriptContent += `transcript-${ticketReport.ticketInfo.channelName}.html\n\n`;
+    
+    // Информация о владельце тикета
+    const ticketOwner = ticketReport.participants.find(p => p.role === 'Ticket Owner');
+    if (ticketOwner) {
+        const usernameParts = ticketOwner.username.split('#');
+        const displayName = usernameParts[0];
+        const discriminator = usernameParts[1] || '0';
+        
+        transcriptContent += `🚠️ ${displayName}#${discriminator}\n\n`;
+        transcriptContent += `Ticket Owner\n`;
+        transcriptContent += `@${displayName}\n\n`;
+    }
+    
+    // Основная информация о тикете
+    transcriptContent += `Ticket Name\n`;
+    transcriptContent += `${ticketReport.ticketInfo.channelName}\n\n`;
+    
+    transcriptContent += `Panel Name\n`;
+    transcriptContent += `Заявка в полк\n\n`;
+    
+    transcriptContent += `Direct Transcript\n`;
+    transcriptContent += `Use Button\n\n`;
+    
+    // Участники с сортировкой по количеству сообщений
+    transcriptContent += `Users in transcript\n`;
+    
+    // Считаем количество сообщений каждого участника
+    const userMessageCounts = {};
+    messages.forEach(msg => {
+        const userId = msg.author.id;
+        userMessageCounts[userId] = (userMessageCounts[userId] || 0) + 1;
+    });
+    
+    // Сортируем участников по количеству сообщений (по убыванию)
+    const sortedParticipants = ticketReport.participants
+        .map(p => ({
+            ...p,
+            messageCount: userMessageCounts[p.userId] || 0
+        }))
+        .sort((a, b) => b.messageCount - a.messageCount);
+    
+    // Выводим участников
+    sortedParticipants.forEach(participant => {
+        const usernameParts = participant.username.split('#');
+        const displayName = usernameParts[0];
+        const discriminator = usernameParts[1] || '0';
+        
+        transcriptContent += `${participant.messageCount} - @${displayName} - ${displayName.toLowerCase()}#${discriminator}\n`;
+    });
+    
+    transcriptContent += `\n🔍 Direct Link\n\n`;
+    transcriptContent += '='.repeat(50) + '\n\n';
     
     // Сообщения
-    let messageCount = 0;
+    messageCount = 0;
     messages.forEach(msg => {
         const timestamp = msg.createdAt.toLocaleString('ru-RU');
         const author = msg.author.tag;
@@ -125,11 +180,11 @@ function createFormattedTranscript(ticketReport, messages) {
         transcriptContent += `[${timestamp}] ${author}: ${content}\n`;
         
         if (msg.attachments.size > 0) {
-            transcriptContent += `📎 [Attachments: ${Array.from(msg.attachments.values()).map(a => a.url).join(', ')}]\n`;
+            transcriptContent += `[Attachments: ${Array.from(msg.attachments.values()).map(a => a.url).join(', ')}]\n`;
         }
         
         if (msg.embeds.length > 0) {
-            transcriptContent += `🔗 [Embeds: ${msg.embeds.length}]\n`;
+            transcriptContent += `[Embeds: ${msg.embeds.length}]\n`;
         }
         
         transcriptContent += '\n';
@@ -139,15 +194,30 @@ function createFormattedTranscript(ticketReport, messages) {
     // Обновляем количество сообщений
     ticketReport.messageCount = messageCount;
     
-    // Статистика в конце
-    transcriptContent += '='.repeat(60) + '\n';
-    transcriptContent += `📊 STATISTICS: ${messageCount} messages, ${ticketReport.participants.length} participants\n`;
-    transcriptContent += `⏰ Transcript generated: ${new Date().toLocaleString('ru-RU')}\n`;
-    
     return transcriptContent;
 }
 
-// Класс для работы с War Thunder полками
+// Функция для создания отдельного сообщения с информацией о тикете
+function createTicketInfoMessage(ticketReport) {
+    const createdByMatch = ticketReport.ticketInfo.createdBy.match(/(.+) \((\d+)\)/);
+    const username = createdByMatch ? createdByMatch[1] : ticketReport.ticketInfo.createdBy;
+    const userId = createdByMatch ? createdByMatch[2] : 'unknown';
+    
+    let infoMessage = `📋 TICKET INFORMATION:\n`;
+    infoMessage += `• ID: #${ticketReport.ticketInfo.id}\n`;
+    infoMessage += `• Server: ${ticketReport.ticketInfo.server}\n`;
+    infoMessage += `• Created: ${ticketReport.ticketInfo.createdAt}\n`;
+    infoMessage += `• Created by: ${username} (${userId})\n`;
+    infoMessage += `• Channel: ${ticketReport.ticketInfo.channelName}\n`;
+    infoMessage += `• Messages: ${ticketReport.messageCount}\n`;
+    infoMessage += `• Participants: ${ticketReport.participants.length}`;
+    
+    return infoMessage;
+}
+
+// ... (остальной код класса WTRegimentTracker и функций остается без изменений)
+
+// Класс для работы с War Thunder полками (без изменений)
 class WTRegimentTracker {
     constructor() {
         this.apiUrl = 'https://srebot-meow.ing/api/squadron-leaderboard';
@@ -824,41 +894,5 @@ client.on('messageCreate', async message => {
             const transcriptContent = createFormattedTranscript(ticketReport, allMessages);
             
             // Сохраняем в файл
-            const fileName = `transcript-ticket_${ticketReport.ticketInfo.id}.txt`;
-            await fs.writeFile(fileName, transcriptContent, 'utf8');
-            
-            // Отправляем в канал для транскриптов
-            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-            
-            if (transcriptChannel && transcriptChannel.isTextBased()) {
-                await transcriptChannel.send({
-                    content: `📄 Transcript for #ticket-${ticketReport.ticketInfo.id} in ${ticketReport.ticketInfo.server}`,
-                    files: [fileName]
-                });
-                
-                await message.channel.send('✅ Transcript sent to transcripts channel!');
-                console.log(`✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
-                
-                // Удаляем временный файл
-                await fs.unlink(fileName).catch(() => {});
-            } else {
-                await message.channel.send('❌ Transcript channel not found!');
-            }
-            
-        } catch (error) {
-            console.error('❌ Error creating transcript:', error);
-            await message.channel.send('❌ Error creating transcript: ' + error.message);
-        }
-    }
-});
-
-// Обработка ошибок
-process.on('unhandledRejection', error => {
-    console.error('❌ Unhandled promise rejection:', error);
-});
-
-process.on('uncaughtException', error => {
-    console.error('❌ Uncaught exception:', error);
-});
-
-console.log('🚀 Bot starting...');
+            const fileName = `transcript-${ticketReport.ticketInfo.channelName}.txt`;
+            await
