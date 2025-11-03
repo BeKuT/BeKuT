@@ -1,4 +1,21 @@
 const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder } = require('discord.js');
+const fs = require('fs').promises;
+const axios = require('axios');
+
+// ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
+const token = process.env.DISCORD_TOKEN;
+const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433801353313910966';
+
+// Проверка наличия токена
+if (!token) {
+    console.error('❌ CRITICAL ERROR: DISCORD_TOKEN not found!');
+    console.log('💡 Set DISCORD_TOKEN in Railway Variables');
+    process.exit(1);
+}
+
+console.log('✅ Token loaded successfully');
+console.log(`📝 Channel ID: ${TRANSCRIPT_CHANNEL_ID}`);
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -7,11 +24,6 @@ const client = new Client({
         GatewayIntentBits.GuildMessageReactions
     ]
 });
-const fs = require('fs').promises;
-const axios = require('axios');
-
-// ⬇️⬇️⬇️ ВАШ ID КАНАЛА ДЛЯ ТРАНСКРИПТОВ ⬇️⬇️⬇️
-const TRANSCRIPT_CHANNEL_ID = '1433801353313910966';
 
 // Хранилище для связи реакций с сообщениями переводов
 const translationMessages = new Map(); // Format: messageId -> translationMessageId
@@ -26,7 +38,6 @@ class WTRegimentTracker {
             cacheTime: 10 * 60 * 1000 // 10 минут кэш
         };
     }
-
     async getRegimentInfo(regimentName) {
         try {
             const topRegiments = await this.getRealTopRegiments(200);
