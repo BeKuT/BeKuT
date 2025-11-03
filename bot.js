@@ -420,15 +420,17 @@ function setCustomStatus() {
     
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
     
-    client.user.setPresence({
-        activities: [{
-            name: randomStatus.name,
-            type: randomStatus.type
-        }],
-        status: randomStatus.status
-    }).catch(error => {
+    try {
+        client.user.setPresence({
+            activities: [{
+                name: randomStatus.name,
+                type: randomStatus.type
+            }],
+            status: randomStatus.status
+        });
+    } catch (error) {
         console.error('❌ Error setting status:', error);
-    });
+    }
 }
 
 // ⬇️⬇️⬇️ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
