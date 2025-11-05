@@ -870,12 +870,14 @@ function generateTranscriptId() {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    // В продакшене используем Railway URL
-    if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
-        return process.env.RAILWAY_STATIC_URL || 
-               `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` ||
-               'https://your-app-name.railway.app';
+    // В Railway используем предоставленный домен
+    if (process.env.RAILWAY_STATIC_URL) {
+        return process.env.RAILWAY_STATIC_URL;
     }
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
+    // Для локальной разработки
     return `http://localhost:${process.env.PORT || 3000}`;
 }
 // Класс для работы с War Thunder полками
@@ -1369,9 +1371,9 @@ client.on('messageCreate', async message => {
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
     else if(message.content.toLowerCase() === '-transcript') {
-        await message.delete().catch(() => {});
-        
-        try {
+    await message.delete().catch(() => {});
+    
+    try {
             // Собираем все сообщения из канала
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
@@ -1405,55 +1407,66 @@ client.on('messageCreate', async message => {
             
             // Генерируем уникальный ID и сохраняем транскрипт
             const transcriptId = generateTranscriptId();
-            transcriptsStorage.set(transcriptId, {
-                html: htmlContent,
-                createdAt: Date.now(),
-                ticketInfo: {
-                    ...ticketReport.ticketInfo,
-                    messageCount: ticketReport.messageCount,
-                    participantsCount: ticketReport.participants.length
-                }
+        console.log(`🆔 Generated transcript ID: ${transcriptId}`);
+        
+        // Создаем HTML транскрипт
+        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+        
+        // Сохраняем транскрипт ПЕРЕД созданием URL
+        transcriptsStorage.set(transcriptId, {
+            html: htmlContent,
+            createdAt: Date.now(),
+            ticketInfo: {
+                ...ticketReport.ticketInfo,
+                messageCount: ticketReport.messageCount,
+                participantsCount: ticketReport.participants.length
+            }
+        });
+        
+        console.log(`💾 Transcript saved: ${transcriptId}`);
+        console.log(`📊 Storage size: ${transcriptsStorage.size}`);
+        
+        // Создаем URL для просмотра транскрипта
+        const baseUrl = getBaseUrl();
+        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+        
+        // Проверяем URL
+        try {
+            new URL(transcriptUrl);
+            console.log(`🔗 Valid URL: ${transcriptUrl}`);
+        } catch (urlError) {
+            console.error('❌ Invalid URL:', transcriptUrl);
+            // Fallback: используем только ID
+            await transcriptChannel.send({
+                embeds: [ticketInfoEmbed],
+                content: `📄 **Transcript Created**\nID: \`${transcriptId}\`\nURL: ${transcriptUrl}`
             });
-            
-            // Удаляем старые транскрипты (старше 24 часов)
-            const now = Date.now();
-            for (const [id, transcript] of transcriptsStorage.entries()) {
-                if (now - transcript.createdAt > 24 * 60 * 60 * 1000) {
-                    transcriptsStorage.delete(id);
-                    console.log(`🗑️ Deleted expired transcript: ${id}`);
-                }
-            }
-            
-            // Создаем URL для просмотра транскрипта
-            const baseUrl = getBaseUrl();
-            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
-            
-            // Проверяем и исправляем URL
-            let validTranscriptUrl = transcriptUrl;
-            
-            // Если URL начинается с localhost, заменяем на реальный домен Railway
-            if (transcriptUrl.includes('localhost')) {
-                // Получаем реальный URL Railway
-                const railwayUrl = process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-                if (railwayUrl && !railwayUrl.includes('localhost')) {
-                    validTranscriptUrl = `${railwayUrl}/transcript/${transcriptId}`;
-                } else {
-                    // Если нет реального URL, используем placeholder
-                    validTranscriptUrl = `https://your-railway-app.railway.app/transcript/${transcriptId}`;
-                    console.warn('⚠️ Using placeholder URL for transcript button');
-                }
-            }
-            
-            console.log(`🔗 Transcript URL: ${validTranscriptUrl}`);
-            
-            // Проверяем, что URL валидный
-            try {
-                new URL(validTranscriptUrl);
-            } catch (urlError) {
-                console.error('❌ Invalid transcript URL:', validTranscriptUrl);
-                await message.channel.send('❌ Error: Cannot generate valid transcript URL');
-                return;
-            }
+            return;
+        }
+        
+        // Создаем кнопку
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('📄 Open Transcript')
+                    .setURL(transcriptUrl)
+                    .setStyle(ButtonStyle.Link)
+            );
+        
+        // Отправляем сообщение
+        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+        await transcriptChannel.send({
+            embeds: [ticketInfoEmbed],
+            components: [row]
+        });
+        
+        console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
+        
+    } catch (error) {
+        console.error('❌ Error creating transcript:', error);
+        await message.channel.send('❌ Error creating transcript: ' + error.message);
+    }
+}
             
             // Отправляем в канал для транскриптов
             const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
