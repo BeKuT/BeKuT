@@ -1368,140 +1368,127 @@ client.on('messageCreate', async message => {
     }
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
-   else if(message.content.toLowerCase() === '-transcript') {
-    await message.delete().catch(() => {});
+    else if(message.content.toLowerCase() === '-transcript') {
+        await message.delete().catch(() => {});
+        
+        try {
+            // Собираем все сообщения из канала
+            let messageCollection = new Collection();
+            let channelMessages = await message.channel.messages.fetch({ limit: 100 });
+            messageCollection = messageCollection.concat(channelMessages);
 
-    try {
-        // Собираем все сообщения из канала
-        let messageCollection = new Collection();
-        let channelMessages = await message.channel.messages.fetch({ limit: 100 });
-        messageCollection = messageCollection.concat(channelMessages);
+            let lastMessage = channelMessages.last();
+            while(channelMessages.size === 100 && lastMessage) {
+                let lastMessageId = lastMessage.id;
+                channelMessages = await message.channel.messages.fetch({ 
+                    limit: 100, 
+                    before: lastMessageId 
+                });
+                
+                if(channelMessages && channelMessages.size > 0) {
+                    messageCollection = messageCollection.concat(channelMessages);
+                    lastMessage = channelMessages.last();
+                } else {
+                    break;
+                }
+            }
 
-        let lastMessage = channelMessages.last();
-        while(channelMessages.size === 100 && lastMessage) {
-            let lastMessageId = lastMessage.id;
-            channelMessages = await message.channel.messages.fetch({ 
-                limit: 100, 
-                before: lastMessageId 
+            const allMessages = Array.from(messageCollection.values()).reverse();
+            
+            // Собираем информацию о тикете
+            const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
+            const ticketReport = generateTicketReport(ticketInfo);
+            ticketReport.messageCount = allMessages.length;
+            
+            // Создаем HTML транскрипт
+            const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+            
+            // Генерируем уникальный ID и сохраняем транскрипт
+            const transcriptId = generateTranscriptId();
+            transcriptsStorage.set(transcriptId, {
+                html: htmlContent,
+                createdAt: Date.now(),
+                ticketInfo: {
+                    ...ticketReport.ticketInfo,
+                    messageCount: ticketReport.messageCount,
+                    participantsCount: ticketReport.participants.length
+                }
             });
             
-            if(channelMessages && channelMessages.size > 0) {
-                messageCollection = messageCollection.concat(channelMessages);
-                lastMessage = channelMessages.last();
-            } else {
-                break;
+            // Удаляем старые транскрипты (старше 24 часов)
+            const now = Date.now();
+            for (const [id, transcript] of transcriptsStorage.entries()) {
+                if (now - transcript.createdAt > 24 * 60 * 60 * 1000) {
+                    transcriptsStorage.delete(id);
+                    console.log(`🗑️ Deleted expired transcript: ${id}`);
+                }
             }
-        }
-
-        const allMessages = Array.from(messageCollection.values()).reverse();
-        
-        // Собираем информацию о тикете
-        const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
-        const ticketReport = generateTicketReport(ticketInfo);
-        ticketReport.messageCount = allMessages.length;
-        
-        // Создаем HTML транскрипт
-        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
-        
-        // Генерируем уникальный ID и сохраняем транскрипт
-        const transcriptId = generateTranscriptId();
-        transcriptsStorage.set(transcriptId, {
-            html: htmlContent,
-            createdAt: Date.now(),
-            ticketInfo: {
-                ...ticketReport.ticketInfo,
-                messageCount: ticketReport.messageCount,
-                participantsCount: ticketReport.participants.length
-            }
-        });
-        
-        // Удаляем старые транскрипты (старше 24 часов)
-        const now = Date.now();
-        for (const [id, transcript] of transcriptsStorage.entries()) {
-            if (now - transcript.createdAt > 24 * 60 * 60 * 1000) {
-                transcriptsStorage.delete(id);
-                console.log(`🗑️ Deleted expired transcript: ${id}`);
-            }
-        }
-        
-        // Создаем URL для просмотра транскрипта
-        else if(message.content.toLowerCase() === '-transcript') {
-    await message.delete().catch(() => {});
-    
-    try {
-        // [ваш существующий код сбора сообщений...]
-        
-        // Создаем URL для просмотра транскрипта
-        const baseUrl = getBaseUrl();
-        const transcriptId = generateTranscriptId();
-        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
-        
-        // ✅ ПРОВЕРЯЕМ И ИСПРАВЛЯЕМ URL
-        let validTranscriptUrl = transcriptUrl;
-        
-        // Если URL начинается с localhost, заменяем на реальный домен Railway
-        if (transcriptUrl.includes('localhost')) {
-            // Получаем реальный URL Railway
-            const railwayUrl = process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-            if (railwayUrl && !railwayUrl.includes('localhost')) {
-                validTranscriptUrl = `${railwayUrl}/transcript/${transcriptId}`;
-            } else {
-                // Если нет реального URL, используем placeholder
-                validTranscriptUrl = `https://your-railway-app.railway.app/transcript/${transcriptId}`;
-                console.warn('⚠️ Using placeholder URL for transcript button');
-            }
-        }
-        
-        console.log(`🔗 Transcript URL: ${validTranscriptUrl}`);
-        
-        // Проверяем, что URL валидный
-        try {
-            new URL(validTranscriptUrl);
-        } catch (urlError) {
-            console.error('❌ Invalid transcript URL:', validTranscriptUrl);
-            await message.channel.send('❌ Error: Cannot generate valid transcript URL');
-            return;
-        }
-        
-        // Сохраняем транскрипт в хранилище
-        transcriptsStorage.set(transcriptId, {
-            html: htmlContent,
-            createdAt: Date.now(),
-            ticketInfo: {
-                ...ticketReport.ticketInfo,
-                messageCount: ticketReport.messageCount,
-                participantsCount: ticketReport.participants.length
-            }
-        });
-        
-        // Создаем кнопку
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('📄 Open Transcript')
-                    .setURL(validTranscriptUrl)
-                    .setStyle(ButtonStyle.Link)
-            );
-        
-        // Отправляем сообщение с embed и кнопкой
-        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-        await transcriptChannel.send({
-            embeds: [ticketInfoEmbed],
-            components: [row]
-        });
-        
-            await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-            console.log(`✅ HTML transcript created: ${transcriptUrl}`);
             
-        } else {
-            await message.channel.send('❌ Transcript channel not found!');
+            // Создаем URL для просмотра транскрипта
+            const baseUrl = getBaseUrl();
+            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+            
+            // Проверяем и исправляем URL
+            let validTranscriptUrl = transcriptUrl;
+            
+            // Если URL начинается с localhost, заменяем на реальный домен Railway
+            if (transcriptUrl.includes('localhost')) {
+                // Получаем реальный URL Railway
+                const railwayUrl = process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                if (railwayUrl && !railwayUrl.includes('localhost')) {
+                    validTranscriptUrl = `${railwayUrl}/transcript/${transcriptId}`;
+                } else {
+                    // Если нет реального URL, используем placeholder
+                    validTranscriptUrl = `https://your-railway-app.railway.app/transcript/${transcriptId}`;
+                    console.warn('⚠️ Using placeholder URL for transcript button');
+                }
+            }
+            
+            console.log(`🔗 Transcript URL: ${validTranscriptUrl}`);
+            
+            // Проверяем, что URL валидный
+            try {
+                new URL(validTranscriptUrl);
+            } catch (urlError) {
+                console.error('❌ Invalid transcript URL:', validTranscriptUrl);
+                await message.channel.send('❌ Error: Cannot generate valid transcript URL');
+                return;
+            }
+            
+            // Отправляем в канал для транскриптов
+            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+            
+            if (transcriptChannel && transcriptChannel.isTextBased()) {
+                // Создаем embed с информацией о тикете (с участниками)
+                const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+                
+                // Создаем кнопку
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setLabel('📄 Open Transcript')
+                            .setURL(validTranscriptUrl)
+                            .setStyle(ButtonStyle.Link)
+                    );
+                
+                // ✅ ОТПРАВЛЯЕМ ВСЕ В ОДНОМ СООБЩЕНИИ
+                await transcriptChannel.send({
+                    embeds: [ticketInfoEmbed],
+                    components: [row]
+                });
+                
+                await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
+                console.log(`✅ HTML transcript created: ${validTranscriptUrl}`);
+                
+            } else {
+                await message.channel.send('❌ Transcript channel not found!');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error creating transcript:', error);
+            await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
-        
-    } catch (error) {
-        console.error('❌ Error creating transcript:', error);
-        await message.channel.send('❌ Error creating transcript: ' + error.message);
     }
-}
 });
 
 // Обработка ошибок
