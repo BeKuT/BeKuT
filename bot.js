@@ -42,7 +42,9 @@ async function collectTicketInfo(channel, messages) {
         participants.add({
             id: msg.author.id,
             username: msg.author.tag,
-            bot: msg.author.bot
+            displayName: msg.author.displayName || msg.author.username,
+            bot: msg.author.bot,
+            avatar: msg.author.displayAvatarURL({ format: 'png', size: 64 })
         });
 
         // Ищем первое сообщение для определения создателя
@@ -55,7 +57,8 @@ async function collectTicketInfo(channel, messages) {
     if (firstMessage) {
         ticketCreator = {
             id: firstMessage.author.id,
-            username: firstMessage.author.tag
+            username: firstMessage.author.tag,
+            displayName: firstMessage.author.displayName || firstMessage.author.username
         };
     }
 
@@ -63,13 +66,20 @@ async function collectTicketInfo(channel, messages) {
         ticketId: channel.name.split('-').pop() || 'unknown',
         server: channel.guild.name,
         serverId: channel.guild.id,
-        createdAt: channel.createdAt.toLocaleString('ru-RU'),
-        createdBy: ticketCreator ? `${ticketCreator.username} (${ticketCreator.id})` : 'unknown',
+        serverIcon: channel.guild.iconURL({ format: 'png', size: 64 }),
+        createdAt: channel.createdAt,
+        createdBy: ticketCreator ? {
+            username: ticketCreator.username,
+            displayName: ticketCreator.displayName,
+            id: ticketCreator.id
+        } : null,
         channelName: channel.name,
         channelId: channel.id,
         participants: Array.from(participants).map(p => ({
             username: p.username,
+            displayName: p.displayName,
             userId: p.id,
+            avatar: p.avatar,
             role: p.bot ? 'system' : (p.id === ticketCreator?.id ? 'Ticket Owner' : 'participant')
         }))
     };
@@ -82,6 +92,7 @@ function generateTicketReport(ticketData) {
             id: ticketData.ticketId,
             server: ticketData.server,
             serverId: ticketData.serverId,
+            serverIcon: ticketData.serverIcon,
             createdAt: ticketData.createdAt,
             createdBy: ticketData.createdBy,
             channelName: ticketData.channelName,
@@ -94,120 +105,551 @@ function generateTicketReport(ticketData) {
     return report;
 }
 
-// Функция для создания форматированного транскрипта
-function createFormattedTranscript(ticketReport, messages) {
-    let transcriptContent = `Server-Info>\n`;
-    transcriptContent += `    Server: ${ticketReport.ticketInfo.server} (${ticketReport.ticketInfo.serverId})\n`;
-    transcriptContent += `    Channel: ${ticketReport.ticketInfo.channelName} (${ticketReport.ticketInfo.channelId})\n`;
-    
-    // Подсчет сообщений и вложений
-    let messageCount = 0;
-    let attachmentsCount = 0;
-    
-    messages.forEach(msg => {
-        messageCount++;
-        if (msg.attachments.size > 0) {
-            attachmentsCount += msg.attachments.size;
-        }
-    });
-    
-    transcriptContent += `    Messages: ${messageCount}\n`;
-    transcriptContent += `    Attachments Saved: 0\n`;
-    transcriptContent += `    Attachments Skipped: ${attachmentsCount} (due maximum file size Lim\n\n`;
-    
-    transcriptContent += '📌 Раскрыть  \n';
-    transcriptContent += `transcript-${ticketReport.ticketInfo.channelName}.html\n\n`;
-    
-    // Информация о владельце тикета
-    const ticketOwner = ticketReport.participants.find(p => p.role === 'Ticket Owner');
-    if (ticketOwner) {
-        const usernameParts = ticketOwner.username.split('#');
-        const displayName = usernameParts[0];
-        const discriminator = usernameParts[1] || '0';
-        
-        transcriptContent += `🚠️ ${displayName}#${discriminator}\n\n`;
-        transcriptContent += `Ticket Owner\n`;
-        transcriptContent += `@${displayName}\n\n`;
-    }
-    
-    // Основная информация о тикете
-    transcriptContent += `Ticket Name\n`;
-    transcriptContent += `${ticketReport.ticketInfo.channelName}\n\n`;
-    
-    transcriptContent += `Panel Name\n`;
-    transcriptContent += `Заявка в полк\n\n`;
-    
-    transcriptContent += `Direct Transcript\n`;
-    transcriptContent += `Use Button\n\n`;
-    
-    // Участники с сортировкой по количеству сообщений
-    transcriptContent += `Users in transcript\n`;
-    
-    // Считаем количество сообщений каждого участника
-    const userMessageCounts = {};
-    messages.forEach(msg => {
-        const userId = msg.author.id;
-        userMessageCounts[userId] = (userMessageCounts[userId] || 0) + 1;
-    });
-    
-    // Сортируем участников по количеству сообщений (по убыванию)
-    const sortedParticipants = ticketReport.participants
-        .map(p => ({
-            ...p,
-            messageCount: userMessageCounts[p.userId] || 0
-        }))
-        .sort((a, b) => b.messageCount - a.messageCount);
-    
-    // Выводим участников
-    sortedParticipants.forEach(participant => {
-        const usernameParts = participant.username.split('#');
-        const displayName = usernameParts[0];
-        const discriminator = usernameParts[1] || '0';
-        
-        transcriptContent += `${participant.messageCount} - @${displayName} - ${displayName.toLowerCase()}#${discriminator}\n`;
-    });
-    
-    transcriptContent += `\n🔍 Direct Link\n\n`;
-    transcriptContent += '='.repeat(50) + '\n\n';
-    
-    // Сообщения
-    messageCount = 0;
-    messages.forEach(msg => {
+// Функция для создания HTML транскрипта в стиле Discord
+function createHTMLTranscript(ticketReport, messages) {
+    const participantsHTML = ticketReport.participants.map(participant => `
+        <div class="participant">
+            <img src="${participant.avatar}" alt="${participant.displayName}" class="avatar">
+            <div class="participant-info">
+                <div class="username">${participant.displayName}</div>
+                <div class="discriminator">${participant.username}</div>
+            </div>
+            <div class="role">${participant.role}</div>
+        </div>
+    `).join('');
+
+    const messagesHTML = messages.map(msg => {
         const timestamp = msg.createdAt.toLocaleString('ru-RU');
-        const author = msg.author.tag;
-        const content = msg.content || '[No text content]';
-        
-        transcriptContent += `[${timestamp}] ${author}: ${content}\n`;
-        
-        if (msg.attachments.size > 0) {
-            transcriptContent += `[Attachments: ${Array.from(msg.attachments.values()).map(a => a.url).join(', ')}]\n`;
+        const author = msg.author;
+        const content = msg.content || '';
+        const attachments = msg.attachments.size > 0 ? Array.from(msg.attachments.values()) : [];
+        const embeds = msg.embeds || [];
+
+        return `
+        <div class="message" id="message-${msg.id}">
+            <img src="${author.displayAvatarURL({ format: 'png', size: 64 })}" alt="${author.tag}" class="message-avatar">
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name">${author.displayName || author.username}</span>
+                    <span class="message-time">${timestamp}</span>
+                </div>
+                <div class="message-text">${formatMessageContent(content)}</div>
+                ${attachments.length > 0 ? `
+                <div class="attachments">
+                    ${attachments.map(attachment => `
+                        <div class="attachment">
+                            ${attachment.contentType && attachment.contentType.startsWith('image/') ? 
+                                `<img src="${attachment.url}" alt="Attachment" class="attachment-image">` :
+                                `<a href="${attachment.url}" class="attachment-link" target="_blank">📎 ${attachment.name}</a>`
+                            }
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+                ${embeds.length > 0 ? `
+                <div class="embeds">
+                    ${embeds.map(embed => createEmbedHTML(embed)).join('')}
+                </div>
+                ` : ''}
+            </div>
+        </div>
+        `;
+    }).join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Транскрипт #${ticketReport.ticketInfo.channelName}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        
-        if (msg.embeds.length > 0) {
-            transcriptContent += `[Embeds: ${msg.embeds.length}]\n`;
+
+        body {
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: #36393f;
+            color: #dcddde;
+            line-height: 1.4;
         }
-        
-        transcriptContent += '\n';
-        messageCount++;
-    });
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: #2f3136;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #7289da;
+        }
+
+        .server-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .server-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+
+        .server-details h1 {
+            color: #fff;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .server-details .channel-name {
+            color: #8e9297;
+            font-size: 16px;
+        }
+
+        .ticket-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat {
+            background: #40444b;
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        .stat-label {
+            color: #8e9297;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .participants-section {
+            background: #2f3136;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            color: #fff;
+            font-size: 18px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .participants-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+        }
+
+        .participant {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background: #40444b;
+            border-radius: 4px;
+        }
+
+        .participant .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .participant-info {
+            flex: 1;
+        }
+
+        .participant .username {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .participant .discriminator {
+            color: #8e9297;
+            font-size: 12px;
+        }
+
+        .participant .role {
+            background: #7289da;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .messages-section {
+            background: #2f3136;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .messages-header {
+            background: #36393f;
+            padding: 15px 20px;
+            border-bottom: 1px solid #40444b;
+        }
+
+        .messages-container {
+            padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 20px;
+            padding: 5px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .message:hover {
+            background: #32353b;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .message-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .author-name {
+            color: #fff;
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .message-time {
+            color: #72767d;
+            font-size: 12px;
+        }
+
+        .message-text {
+            color: #dcddde;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+
+        .attachments {
+            margin-top: 10px;
+        }
+
+        .attachment {
+            margin-top: 5px;
+        }
+
+        .attachment-image {
+            max-width: 400px;
+            max-height: 300px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .attachment-link {
+            color: #00aff4;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            background: #2f3136;
+            border-radius: 4px;
+            border: 1px solid #40444b;
+        }
+
+        .attachment-link:hover {
+            text-decoration: underline;
+        }
+
+        .embeds {
+            margin-top: 10px;
+        }
+
+        .embed {
+            background: #2f3136;
+            border-left: 4px solid #40444b;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 8px;
+            max-width: 400px;
+        }
+
+        .embed-title {
+            color: #00aff4;
+            font-weight: 600;
+            margin-bottom: 8px;
+            text-decoration: none;
+        }
+
+        .embed-title:hover {
+            text-decoration: underline;
+        }
+
+        .embed-description {
+            color: #dcddde;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .embed-footer {
+            margin-top: 8px;
+            color: #72767d;
+            font-size: 12px;
+        }
+
+        .mention {
+            background: #3a3c42;
+            color: #dee0fc;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+
+        .code-block {
+            background: #2f3136;
+            border: 1px solid #40444b;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+
+        .inline-code {
+            background: #2f3136;
+            border: 1px solid #40444b;
+            border-radius: 3px;
+            padding: 2px 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #72767d;
+            font-size: 12px;
+            padding: 20px;
+            border-top: 1px solid #40444b;
+        }
+
+        /* Scrollbar styling */
+        .messages-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .messages-container::-webkit-scrollbar-track {
+            background: #2f3136;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb {
+            background: #202225;
+            border-radius: 4px;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: #1a1c20;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="server-info">
+                ${ticketReport.ticketInfo.serverIcon ? `<img src="${ticketReport.ticketInfo.serverIcon}" alt="${ticketReport.ticketInfo.server}" class="server-icon">` : ''}
+                <div class="server-details">
+                    <h1>${ticketReport.ticketInfo.server}</h1>
+                    <div class="channel-name">#${ticketReport.ticketInfo.channelName}</div>
+                </div>
+            </div>
+            <div class="ticket-stats">
+                <div class="stat">
+                    <div class="stat-label">Создан</div>
+                    <div class="stat-value">${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Сообщений</div>
+                    <div class="stat-value">${ticketReport.messageCount}</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Участников</div>
+                    <div class="stat-value">${ticketReport.participants.length}</div>
+                </div>
+                ${ticketReport.ticketInfo.createdBy ? `
+                <div class="stat">
+                    <div class="stat-label">Создатель</div>
+                    <div class="stat-value">${ticketReport.ticketInfo.createdBy.displayName}</div>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+
+        <div class="participants-section">
+            <div class="section-title">Участники тикета</div>
+            <div class="participants-grid">
+                ${participantsHTML}
+            </div>
+        </div>
+
+        <div class="messages-section">
+            <div class="messages-header">
+                <div class="section-title">История сообщений</div>
+            </div>
+            <div class="messages-container">
+                ${messagesHTML}
+            </div>
+        </div>
+
+        <div class="footer">
+            Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}
+        </div>
+    </div>
+
+    <script>
+        // Добавляем функциональность для изображений
+        document.addEventListener('DOMContentLoaded', function() {
+            // Открытие изображений в полном размере при клике
+            const images = document.querySelectorAll('.attachment-image');
+            images.forEach(img => {
+                img.addEventListener('click', function() {
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = \`
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0,0,0,0.8);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 1000;
+                        cursor: pointer;
+                    \`;
+                    
+                    const fullImage = document.createElement('img');
+                    fullImage.src = this.src;
+                    fullImage.style.cssText = \`
+                        max-width: 90%;
+                        max-height: 90%;
+                        border-radius: 8px;
+                    \`;
+                    
+                    overlay.appendChild(fullImage);
+                    overlay.addEventListener('click', function() {
+                        document.body.removeChild(overlay);
+                    });
+                    
+                    document.body.appendChild(overlay);
+                });
+            });
+
+            // Плавная прокрутка к сообщению при клике на ссылку
+            const messageLinks = document.querySelectorAll('a[href^="#message-"]');
+            messageLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const targetId = this.getAttribute('href').substring(1);
+                    const targetElement = document.getElementById(targetId);
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth' });
+                        targetElement.style.backgroundColor = '#3a3c42';
+                        setTimeout(() => {
+                            targetElement.style.backgroundColor = '';
+                        }, 2000);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
+    `;
+}
+
+// Вспомогательные функции для форматирования
+function formatMessageContent(content) {
+    if (!content) return '';
     
-    // Обновляем количество сообщений
-    ticketReport.messageCount = messageCount;
+    // Форматирование упоминаний
+    content = content.replace(/<@!?(\d+)>/g, '<span class="mention">@user</span>');
     
-    return transcriptContent;
+    // Форматирование каналов
+    content = content.replace(/<#(\d+)>/g, '<span class="mention">#channel</span>');
+    
+    // Форматирование код-блоков
+    content = content.replace(/```([\s\S]*?)```/g, '<div class="code-block">$1</div>');
+    
+    // Форматирование инлайн-кода
+    content = content.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+    
+    // Форматирование ссылок
+    content = content.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #00aff4;">$1</a>');
+    
+    // Сохранение переносов строк
+    content = content.replace(/\n/g, '<br>');
+    
+    return content;
+}
+
+function createEmbedHTML(embed) {
+    if (!embed) return '';
+    
+    return `
+    <div class="embed">
+        ${embed.title ? `<a href="${embed.url || '#'}" class="embed-title" target="_blank">${embed.title}</a>` : ''}
+        ${embed.description ? `<div class="embed-description">${formatMessageContent(embed.description)}</div>` : ''}
+        ${embed.footer ? `<div class="embed-footer">${embed.footer.text}</div>` : ''}
+    </div>
+    `;
 }
 
 // Функция для создания отдельного сообщения с информацией о тикете
 function createTicketInfoMessage(ticketReport) {
-    const createdByMatch = ticketReport.ticketInfo.createdBy.match(/(.+) \((\d+)\)/);
-    const username = createdByMatch ? createdByMatch[1] : ticketReport.ticketInfo.createdBy;
-    const userId = createdByMatch ? createdByMatch[2] : 'unknown';
+    const createdBy = ticketReport.ticketInfo.createdBy;
     
     let infoMessage = `📋 TICKET INFORMATION:\n`;
     infoMessage += `• ID: #${ticketReport.ticketInfo.id}\n`;
     infoMessage += `• Server: ${ticketReport.ticketInfo.server}\n`;
-    infoMessage += `• Created: ${ticketReport.ticketInfo.createdAt}\n`;
-    infoMessage += `• Created by: ${username} (${userId})\n`;
+    infoMessage += `• Created: ${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}\n`;
+    if (createdBy) {
+        infoMessage += `• Created by: ${createdBy.displayName} (${createdBy.id})\n`;
+    }
     infoMessage += `• Channel: ${ticketReport.ticketInfo.channelName}\n`;
     infoMessage += `• Messages: ${ticketReport.messageCount}\n`;
     infoMessage += `• Participants: ${ticketReport.participants.length}`;
@@ -470,20 +912,20 @@ client.on('ready', () => {
 
 function setCustomStatus() {
     const statuses = [
-        { name: 'Minecraft', type: ActivityType.Playing, status: 'online' },
-        { name: 'GTA V', type: ActivityType.Playing, status: 'online' },
-        { name: 'Cyberpunk 2077', type: ActivityType.Playing, status: 'online' },
-        { name: 'Fortnite', type: ActivityType.Playing, status: 'online' },
-        { name: 'VALORANT', type: ActivityType.Playing, status: 'online' },
-        { name: 'YouTube', type: ActivityType.Watching, status: 'online' },
-        { name: 'Twitch', type: ActivityType.Watching, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Watching, status: 'online' },
-        { name: 'BeKuT', type: ActivityType.Listening, status: 'online' },
-        { name: `${client.guilds.cache.size} серверов`, type: ActivityType.Watching, status: 'online' },
-        { name: `${client.users.cache.size} пользователей`, type: ActivityType.Listening, status: 'online' },
-        { name: 'War Thunder', type: ActivityType.Playing, status: 'online' },
-        { name: '!полк ZTEAM', type: ActivityType.Playing, status: 'online' },
-        { name: 'srebot-meow', type: ActivityType.Watching, status: 'online' }
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Listening, status: 'online' },
+        { name: `Тех.Админ BeKuT`, type: ActivityType.Watching, status: 'online' },
+        { name: `Тех.Админ BeKuT`, type: ActivityType.Listening, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' }
     ];
     
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
@@ -706,71 +1148,72 @@ client.on('messageCreate', async message => {
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
     else if(message.content.toLowerCase() === '-transcript') {
-        await message.delete().catch(() => {});
-        
-        try {
-            // Собираем все сообщения из канала
-            let messageCollection = new Collection();
-            let channelMessages = await message.channel.messages.fetch({ limit: 100 });
-            messageCollection = messageCollection.concat(channelMessages);
+    await message.delete().catch(() => {});
+    
+    try {
+        // Собираем все сообщения из канала
+        let messageCollection = new Collection();
+        let channelMessages = await message.channel.messages.fetch({ limit: 100 });
+        messageCollection = messageCollection.concat(channelMessages);
 
-            let lastMessage = channelMessages.last();
-            while(channelMessages.size === 100 && lastMessage) {
-                let lastMessageId = lastMessage.id;
-                channelMessages = await message.channel.messages.fetch({ 
-                    limit: 100, 
-                    before: lastMessageId 
-                });
-                
-                if(channelMessages && channelMessages.size > 0) {
-                    messageCollection = messageCollection.concat(channelMessages);
-                    lastMessage = channelMessages.last();
-                } else {
-                    break;
-                }
-            }
-
-            const allMessages = Array.from(messageCollection.values()).reverse();
+        let lastMessage = channelMessages.last();
+        while(channelMessages.size === 100 && lastMessage) {
+            let lastMessageId = lastMessage.id;
+            channelMessages = await message.channel.messages.fetch({ 
+                limit: 100, 
+                before: lastMessageId 
+            });
             
-            // Собираем информацию о тикете
-            const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
-            const ticketReport = generateTicketReport(ticketInfo);
-            
-            // Создаем форматированный транскрипт
-            const transcriptContent = createFormattedTranscript(ticketReport, allMessages);
-            
-            // Сохраняем в файл (ИСПРАВЛЕННАЯ СТРОКА)
-            const fileName = `transcript-${ticketReport.ticketInfo.channelName}.txt`;
-            await fs.writeFile(fileName, transcriptContent, 'utf8');
-            
-            // Отправляем в канал для транскриптов
-            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-            
-            if (transcriptChannel && transcriptChannel.isTextBased()) {
-                // Отправляем основной транскрипт (ИСПРАВЛЕННЫЕ КАВЫЧКИ)
-                await transcriptChannel.send({
-                    content: `📄 Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server}`,
-                    files: [fileName]
-                });
-                
-                // Отправляем отдельное сообщение с информацией о тикете (ИСПРАВЛЕННЫЕ КАВЫЧКИ)
-                const ticketInfoMessage = createTicketInfoMessage(ticketReport);
-                await transcriptChannel.send(`\\${ticketInfoMessage}\\`);
-                
-                await message.channel.send('✅ Transcript sent to transcripts channel!');
-                console.log(`✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
-                
-                // Удаляем временный файл
-                await fs.unlink(fileName).catch(() => {});
+            if(channelMessages && channelMessages.size > 0) {
+                messageCollection = messageCollection.concat(channelMessages);
+                lastMessage = channelMessages.last();
             } else {
-                await message.channel.send('❌ Transcript channel not found!');
+                break;
             }
-            
-        } catch (error) {
-            console.error('❌ Error creating transcript:', error);
-            await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
+
+        const allMessages = Array.from(messageCollection.values()).reverse();
+        
+        // Собираем информацию о тикете
+        const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
+        const ticketReport = generateTicketReport(ticketInfo);
+        ticketReport.messageCount = allMessages.length;
+        
+        // Создаем HTML транскрипт
+        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+        
+        // Сохраняем в файл
+        const fileName = `transcript-${ticketReport.ticketInfo.channelName}.html`;
+        await fs.writeFile(fileName, htmlContent, 'utf8');
+        
+        // Отправляем в канал для транскриптов
+        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+        
+        if (transcriptChannel && transcriptChannel.isTextBased()) {
+            // Отправляем HTML файл
+            await transcriptChannel.send({
+                content: `📄 HTML Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server}`,
+                files: [fileName]
+            });
+            
+            // Отправляем отдельное сообщение с информацией о тикете
+            const ticketInfoMessage = createTicketInfoMessage(ticketReport);
+            await transcriptChannel.send(`\`\`\`${ticketInfoMessage}\`\`\``);
+            
+            await message.channel.send('✅ HTML transcript sent to transcripts channel!');
+            console.log(`✅ HTML transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
+            
+            // Удаляем временный файл
+            await fs.unlink(fileName).catch(() => {});
+        } else {
+            await message.channel.send('❌ Transcript channel not found!');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error creating transcript:', error);
+        await message.channel.send('❌ Error creating transcript: ' + error.message);
     }
+}
 });
 
 // Обработка ошибок
