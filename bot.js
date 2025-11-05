@@ -781,6 +781,7 @@ function createEmbedHTML(embed) {
 }
 
 // Функция для создания отдельного сообщения с информацией о тикете
+// Функция для создания отдельного сообщения с информацией о тикете в виде Embed с участниками
 function createTicketInfoEmbedWithParticipants(ticketReport) {
     const createdBy = ticketReport.ticketInfo.createdBy;
     
@@ -849,7 +850,7 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
             },
             {
                 name: `🎯 Participants (${uniqueParticipants.length})`,
-                value: participantsList + moreParticipants,
+                value: participantsList + moreParticipants || 'No participants',
                 inline: false
             }
         )
@@ -857,6 +858,11 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
         .setTimestamp();
 
     return embed;
+}
+
+// Старая функция (оставьте для совместимости)
+function createTicketInfoEmbed(ticketReport) {
+    return createTicketInfoEmbedWithParticipants(ticketReport);
 }
 // Генерируем уникальный ID для транскрипта
 function generateTranscriptId() {
@@ -1361,7 +1367,7 @@ client.on('messageCreate', async message => {
     }
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
-    else if(message.content.toLowerCase() === '-transcript') {
+   else if(message.content.toLowerCase() === '-transcript') {
     await message.delete().catch(() => {});
     
     try {
@@ -1401,27 +1407,34 @@ client.on('messageCreate', async message => {
         await fs.writeFile(fileName, htmlContent, 'utf8');
         
         // Отправляем в канал для транскриптов
-        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+       const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+    
+    if (transcriptChannel && transcriptChannel.isTextBased()) {
+        // Создаем embed с информацией о тикете (с участниками)
+        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
         
-        if (transcriptChannel && transcriptChannel.isTextBased()) {
-            // Отправляем HTML файл
-            await transcriptChannel.send({
-                content: `📄 HTML Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server}`,
-                files: [fileName]
-            });
-            
-            // Отправляем отдельное сообщение с информацией о тикете
-            const ticketInfoEmbed = createTicketInfoEmbed(ticketReport);
-            await transcriptChannel.send({ embeds: [ticketInfoEmbed] });
-            
-            await message.channel.send('✅ HTML transcript sent to transcripts channel!');
-            console.log(`✅ HTML transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
-            
-            // Удаляем временный файл
-            await fs.unlink(fileName).catch(() => {});
-        } else {
-            await message.channel.send('❌ Transcript channel not found!');
-        }
+        // Создаем кнопку
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('📄 Open Transcript')
+                    .setURL(transcriptUrl)
+                    .setStyle(ButtonStyle.Link)
+            );
+        
+        // ✅ ОТПРАВЛЯЕМ ВСЕ В ОДНОМ СООБЩЕНИИ
+        await transcriptChannel.send({
+            embeds: [ticketInfoEmbed],
+            components: [row]
+        });
+        
+        await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
+        console.log(`✅ HTML transcript created: ${transcriptUrl}`);
+        
+    } else {
+        await message.channel.send('❌ Transcript channel not found!');
+    }
+}
         
     } catch (error) {
         console.error('❌ Error creating transcript:', error);
