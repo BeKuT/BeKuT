@@ -1402,39 +1402,59 @@ client.on('messageCreate', async message => {
         // Создаем HTML транскрипт
         const htmlContent = createHTMLTranscript(ticketReport, allMessages);
         
-        // Сохраняем в файл
-        const fileName = `transcript-${ticketReport.ticketInfo.channelName}.html`;
-        await fs.writeFile(fileName, htmlContent, 'utf8');
-        
-        // Отправляем в канал для транскриптов
-       const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-    
-    if (transcriptChannel && transcriptChannel.isTextBased()) {
-        // Создаем embed с информацией о тикете (с участниками)
-        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-        
-        // Создаем кнопку
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('📄 Open Transcript')
-                    .setURL(transcriptUrl)
-                    .setStyle(ButtonStyle.Link)
-            );
-        
-        // ✅ ОТПРАВЛЯЕМ ВСЕ В ОДНОМ СООБЩЕНИИ
-        await transcriptChannel.send({
-            embeds: [ticketInfoEmbed],
-            components: [row]
+        // Генерируем уникальный ID и сохраняем транскрипт
+        const transcriptId = generateTranscriptId();
+        transcriptsStorage.set(transcriptId, {
+            html: htmlContent,
+            createdAt: Date.now(),
+            ticketInfo: {
+                ...ticketReport.ticketInfo,
+                messageCount: ticketReport.messageCount,
+                participantsCount: ticketReport.participants.length
+            }
         });
         
-        await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-        console.log(`✅ HTML transcript created: ${transcriptUrl}`);
+        // Удаляем старые транскрипты (старше 24 часов)
+        const now = Date.now();
+        for (const [id, transcript] of transcriptsStorage.entries()) {
+            if (now - transcript.createdAt > 24 * 60 * 60 * 1000) {
+                transcriptsStorage.delete(id);
+                console.log(`🗑️ Deleted expired transcript: ${id}`);
+            }
+        }
         
-    } else {
-        await message.channel.send('❌ Transcript channel not found!');
-    }
-}
+        // Создаем URL для просмотра транскрипта
+        const baseUrl = getBaseUrl();
+        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+        
+        // Отправляем в канал для транскриптов
+        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+        
+        if (transcriptChannel && transcriptChannel.isTextBased()) {
+            // Создаем embed с информацией о тикете (с участниками)
+            const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+            
+            // Создаем кнопку
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setLabel('📄 Open Transcript')
+                        .setURL(transcriptUrl)
+                        .setStyle(ButtonStyle.Link)
+                );
+            
+            // ✅ ОТПРАВЛЯЕМ ВСЕ В ОДНОМ СООБЩЕНИИ
+            await transcriptChannel.send({
+                embeds: [ticketInfoEmbed],
+                components: [row]
+            });
+            
+            await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
+            console.log(`✅ HTML transcript created: ${transcriptUrl}`);
+            
+        } else {
+            await message.channel.send('❌ Transcript channel not found!');
+        }
         
     } catch (error) {
         console.error('❌ Error creating transcript:', error);
