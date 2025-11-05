@@ -781,37 +781,76 @@ function createEmbedHTML(embed) {
 }
 
 // Функция для создания отдельного сообщения с информацией о тикете
-function createTicketInfoEmbedDetailed(ticketReport) {
+function createTicketInfoEmbed(ticketReport) {
     const createdBy = ticketReport.ticketInfo.createdBy;
     
     const embed = new EmbedBuilder()
         .setColor(0x00FF00) // Зеленая полоса слева
-        .setTitle('📋 TICKET TRANSCRIPT INFORMATION')
-        .setThumbnail(ticketReport.ticketInfo.serverIcon)
+        .setTitle('📋 TICKET INFORMATION')
         .addFields(
             {
-                name: '🏠 Server Information',
-                value: `**Name:** ${ticketReport.ticketInfo.server}\n**ID:** \`${ticketReport.ticketInfo.serverId}\``,
-                inline: false
-            },
-            {
-                name: '💬 Channel Information',
-                value: `**Name:** #${ticketReport.ticketInfo.channelName}\n**ID:** \`${ticketReport.ticketInfo.channelId}\``,
-                inline: false
-            },
-            {
-                name: '📊 Statistics',
-                value: `**Messages:** ${ticketReport.messageCount}\n**Participants:** ${ticketReport.participants.length}\n**Created:** ${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}`,
+                name: '🆔 ID',
+                value: `#${ticketReport.ticketInfo.id}`,
                 inline: true
             },
             {
-                name: '👤 Creator',
-                value: createdBy ? `**Name:** ${createdBy.displayName}\n**ID:** \`${createdBy.id}\`` : '**Unknown**',
+                name: '🏠 Server',
+                value: ticketReport.ticketInfo.server,
+                inline: true
+            },
+            {
+                name: '📅 Created',
+                value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'),
                 inline: true
             }
         )
-        .setFooter({ text: `Ticket ID: #${ticketReport.ticketInfo.id} • Transcript generated` })
         .setTimestamp();
+    
+    // Добавляем создателя, если есть
+    if (createdBy) {
+        embed.addFields({
+            name: '👤 Created by',
+            value: `${createdBy.displayName} (\`${createdBy.id}\`)`,
+            inline: true
+        });
+    }
+    
+    // Добавляем остальную информацию
+    embed.addFields(
+        {
+            name: '💬 Channel',
+            value: `#${ticketReport.ticketInfo.channelName}`,
+            inline: true
+        },
+        {
+            name: '💭 Messages',
+            value: `${ticketReport.messageCount}`,
+            inline: true
+        },
+        {
+            name: '👥 Participants',
+            value: `${ticketReport.participants.length}`,
+            inline: true
+        }
+    );
+    
+    // Добавляем информацию об участниках
+    const participantsList = ticketReport.participants
+        .slice(0, 10) // Ограничиваем список до 10 участников
+        .map(p => {
+            const roleIcon = p.role === 'Ticket Owner' ? '👑' : 
+                           p.role === 'system' ? '🤖' : '👤';
+            return `${roleIcon} ${p.displayName} (\`${p.userId}\`)`;
+        })
+        .join('\n');
+    
+    if (participantsList) {
+        embed.addFields({
+            name: `🎯 Participants (${ticketReport.participants.length})`,
+            value: participantsList.length > 0 ? participantsList : 'No participants',
+            inline: false
+        });
+    }
     
     return embed;
 }
@@ -826,24 +865,6 @@ function getBaseUrl() {
         return process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
     }
     return `http://localhost:${process.env.PORT || 3000}`;
-}
-
-// Функция для создания отдельного сообщения с информацией о тикете
-function createTicketInfoMessage(ticketReport) {
-    const createdBy = ticketReport.ticketInfo.createdBy;
-    
-    let infoMessage = `📋 TICKET INFORMATION:\n`;
-    infoMessage += `• ID: #${ticketReport.ticketInfo.id}\n`;
-    infoMessage += `• Server: ${ticketReport.ticketInfo.server}\n`;
-    infoMessage += `• Created: ${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}\n`;
-    if (createdBy) {
-        infoMessage += `• Created by: ${createdBy.displayName} (${createdBy.id})\n`;
-    }
-    infoMessage += `• Channel: ${ticketReport.ticketInfo.channelName}\n`;
-    infoMessage += `• Messages: ${ticketReport.messageCount}\n`;
-    infoMessage += `• Participants: ${ticketReport.participants.length}`;
-    
-    return infoMessage;
 }
 
 // Класс для работы с War Thunder полками
