@@ -1,10 +1,14 @@
-const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fs = require('fs').promises;
 const axios = require('axios');
+const express = require('express');
+const path = require('path');
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
+const PORT = process.env.PORT || 3000;
+const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
 
 // Проверка наличия токена
 if (!token) {
@@ -15,6 +19,82 @@ if (!token) {
 
 console.log('✅ Token loaded successfully');
 console.log(`📝 Channel ID: ${TRANSCRIPT_CHANNEL_ID}`);
+console.log(`🌐 Railway URL: ${RAILWAY_STATIC_URL}`);
+
+// Создаем Express сервер для хостинга транскриптов
+const app = express();
+
+// Важные middleware для Railway
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Хранилище для транскриптов в памяти (в продакшене лучше использовать базу данных)
+const transcriptsStorage = new Map();
+
+// Основной маршрут для проверки работы
+app.get('/', (req, res) => {
+    res.json({ 
+        status: 'Transcript Server is Running',
+        transcripts: transcriptsStorage.size,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Маршрут для просмотра транскрипта
+app.get('/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcript = transcriptsStorage.get(transcriptId);
+    
+    if (!transcript) {
+        return res.status(404).send(`
+            <html>
+                <body style="background: #36393f; color: white; font-family: Arial; text-align: center; padding: 50px;">
+                    <h1>📄 Transcript Not Found</h1>
+                    <p>This transcript may have expired or doesn't exist.</p>
+                    <p><small>Transcripts are automatically deleted after 24 hours.</small></p>
+                </body>
+            </html>
+        `);
+    }
+    
+    res.send(transcript.html);
+});
+
+// API endpoint для получения информации о транскриптах
+app.get('/api/transcripts', (req, res) => {
+    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
+        id,
+        channelName: data.ticketInfo.channelName,
+        server: data.ticketInfo.server,
+        messageCount: data.ticketInfo.messageCount,
+        createdAt: new Date(data.createdAt).toISOString()
+    }));
+    
+    res.json({ transcripts });
+});
+
+// Запускаем серсер
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌐 Transcript server running on port ${PORT}`);
+    console.log(`🔗 Access at: ${RAILWAY_STATIC_URL}`);
+});
+
+// Обработка graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🔄 Received SIGTERM, shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('🔄 Received SIGINT, shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
+});
 
 const client = new Client({
     intents: [
@@ -27,6 +107,7 @@ const client = new Client({
 
 // Хранилище для связи реакций с сообщениями переводов
 const translationMessages = new Map();
+
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ ТРАНСКРИПТА ⬇️⬇️⬇️
 
@@ -536,7 +617,8 @@ function createHTMLTranscript(ticketReport, messages) {
         </div>
 
         <div class="footer">
-            Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}
+            Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}<br>
+            <small>Этот транскрипт будет автоматически удален через 24 часа</small>
         </div>
     </div>
 
@@ -595,6 +677,14 @@ function createHTMLTranscript(ticketReport, messages) {
                     }
                 });
             });
+
+            // Автоматическое обновление времени каждую минуту
+            setInterval(() => {
+                const timeElements = document.querySelectorAll('.message-time');
+                timeElements.forEach(el => {
+                    // Здесь можно обновлять время, если нужно
+                });
+            }, 60000);
         });
     </script>
 </body>
@@ -606,20 +696,47 @@ function createHTMLTranscript(ticketReport, messages) {
 function formatMessageContent(content) {
     if (!content) return '';
     
-    // Форматирование упоминаний
+    // Экранирование HTML символов
+    content = content
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    
+    // Форматирование упоминаний пользователей
     content = content.replace(/<@!?(\d+)>/g, '<span class="mention">@user</span>');
     
-    // Форматирование каналов
+    // Форматирование упоминаний каналов
     content = content.replace(/<#(\d+)>/g, '<span class="mention">#channel</span>');
     
-    // Форматирование код-блоков
-    content = content.replace(/```([\s\S]*?)```/g, '<div class="code-block">$1</div>');
+    // Форматирование упоминаний ролей
+    content = content.replace(/<@&(\d+)>/g, '<span class="mention">@role</span>');
+    
+    // Форматирование эмодзи
+    content = content.replace(/<a?:\w+:(\d+)>/g, '<span class="emoji">:emoji:</span>');
+    
+    // Форматирование многострочных код-блоков
+    content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<div class="code-block">$2</div>');
     
     // Форматирование инлайн-кода
     content = content.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
     
+    // Форматирование жирного текста
+    content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Форматирование курсивного текста
+    content = content.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    content = content.replace(/_(.*?)_/g, '<em>$1</em>');
+    
+    // Форматирование подчеркнутого текста
+    content = content.replace(/__(.*?)__/g, '<u>$1</u>');
+    
+    // Форматирование зачеркнутого текста
+    content = content.replace(/~~(.*?)~~/g, '<s>$1</s>');
+    
     // Форматирование ссылок
-    content = content.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #00aff4;">$1</a>');
+    content = content.replace(/(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color: #00aff4; text-decoration: none;">$1</a>');
     
     // Сохранение переносов строк
     content = content.replace(/\n/g, '<br>');
@@ -628,15 +745,87 @@ function formatMessageContent(content) {
 }
 
 function createEmbedHTML(embed) {
-    if (!embed) return '';
+    if (!embed || !embed.title && !embed.description) return '';
     
-    return `
-    <div class="embed">
-        ${embed.title ? `<a href="${embed.url || '#'}" class="embed-title" target="_blank">${embed.title}</a>` : ''}
-        ${embed.description ? `<div class="embed-description">${formatMessageContent(embed.description)}</div>` : ''}
-        ${embed.footer ? `<div class="embed-footer">${embed.footer.text}</div>` : ''}
-    </div>
-    `;
+    let embedHTML = '<div class="embed">';
+    
+    if (embed.title) {
+        const titleUrl = embed.url ? `href="${embed.url}" target="_blank" rel="noopener noreferrer"` : '';
+        embedHTML += `<a ${titleUrl} class="embed-title">${embed.title}</a>`;
+    }
+    
+    if (embed.description) {
+        embedHTML += `<div class="embed-description">${formatMessageContent(embed.description)}</div>`;
+    }
+    
+    if (embed.fields && embed.fields.length > 0) {
+        embedHTML += '<div class="embed-fields">';
+        embed.fields.forEach(field => {
+            embedHTML += `
+                <div class="embed-field">
+                    <div class="embed-field-name">${field.name}</div>
+                    <div class="embed-field-value">${formatMessageContent(field.value)}</div>
+                </div>
+            `;
+        });
+        embedHTML += '</div>';
+    }
+    
+    if (embed.footer) {
+        embedHTML += `<div class="embed-footer">${embed.footer.text}</div>`;
+    }
+    
+    embedHTML += '</div>';
+    
+    return embedHTML;
+}
+
+// Функция для создания отдельного сообщения с информацией о тикете
+function createTicketInfoEmbedDetailed(ticketReport) {
+    const createdBy = ticketReport.ticketInfo.createdBy;
+    
+    const embed = new EmbedBuilder()
+        .setColor(0x00FF00) // Зеленая полоса слева
+        .setTitle('📋 TICKET TRANSCRIPT INFORMATION')
+        .setThumbnail(ticketReport.ticketInfo.serverIcon)
+        .addFields(
+            {
+                name: '🏠 Server Information',
+                value: `**Name:** ${ticketReport.ticketInfo.server}\n**ID:** \`${ticketReport.ticketInfo.serverId}\``,
+                inline: false
+            },
+            {
+                name: '💬 Channel Information',
+                value: `**Name:** #${ticketReport.ticketInfo.channelName}\n**ID:** \`${ticketReport.ticketInfo.channelId}\``,
+                inline: false
+            },
+            {
+                name: '📊 Statistics',
+                value: `**Messages:** ${ticketReport.messageCount}\n**Participants:** ${ticketReport.participants.length}\n**Created:** ${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}`,
+                inline: true
+            },
+            {
+                name: '👤 Creator',
+                value: createdBy ? `**Name:** ${createdBy.displayName}\n**ID:** \`${createdBy.id}\`` : '**Unknown**',
+                inline: true
+            }
+        )
+        .setFooter({ text: `Ticket ID: #${ticketReport.ticketInfo.id} • Transcript generated` })
+        .setTimestamp();
+    
+    return embed;
+}
+// Генерируем уникальный ID для транскрипта
+function generateTranscriptId() {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+}
+
+// Функция для получения базового URL
+function getBaseUrl() {
+    if (process.env.NODE_ENV === 'production') {
+        return process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
+    return `http://localhost:${process.env.PORT || 3000}`;
 }
 
 // Функция для создания отдельного сообщения с информацией о тикете
@@ -1197,8 +1386,8 @@ client.on('messageCreate', async message => {
             });
             
             // Отправляем отдельное сообщение с информацией о тикете
-            const ticketInfoMessage = createTicketInfoMessage(ticketReport);
-            await transcriptChannel.send(`\`\`\`${ticketInfoMessage}\`\`\``);
+            const ticketInfoEmbed = createTicketInfoEmbed(ticketReport);
+            await transcriptChannel.send({ embeds: [ticketInfoEmbed] });
             
             await message.channel.send('✅ HTML transcript sent to transcripts channel!');
             console.log(`✅ HTML transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
