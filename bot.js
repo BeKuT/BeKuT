@@ -781,11 +781,35 @@ function createEmbedHTML(embed) {
 }
 
 // Функция для создания отдельного сообщения с информацией о тикете
-function createTicketInfoEmbed(ticketReport) {
+function createTicketInfoEmbedWithParticipants(ticketReport) {
     const createdBy = ticketReport.ticketInfo.createdBy;
     
+    // Убираем дубликаты участников
+    const uniqueParticipants = [];
+    const seenIds = new Set();
+    
+    ticketReport.participants.forEach(p => {
+        if (!seenIds.has(p.userId)) {
+            seenIds.add(p.userId);
+            uniqueParticipants.push(p);
+        }
+    });
+    
+    // Создаем список уникальных участников
+    const participantsList = uniqueParticipants
+        .slice(0, 10)
+        .map(p => {
+            const roleIcon = p.role === 'Ticket Owner' ? '👑' : 
+                           p.role === 'system' ? '🤖' : '👤';
+            return `${roleIcon} ${p.displayName} (${p.userId})`;
+        })
+        .join('\n');
+    
+    const moreParticipants = uniqueParticipants.length > 10 ? 
+        `\n... и еще ${uniqueParticipants.length - 10} участников` : '';
+
     const embed = new EmbedBuilder()
-        .setColor(0x00FF00) // Зеленая полоса слева
+        .setColor(0x00FF00)
         .setTitle('📋 TICKET INFORMATION')
         .addFields(
             {
@@ -802,56 +826,36 @@ function createTicketInfoEmbed(ticketReport) {
                 name: '📅 Created',
                 value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'),
                 inline: true
+            },
+            {
+                name: '👤 Created by',
+                value: createdBy ? `${createdBy.displayName} (${createdBy.id})` : 'Unknown',
+                inline: false
+            },
+            {
+                name: '💬 Channel',
+                value: `#${ticketReport.ticketInfo.channelName}`,
+                inline: true
+            },
+            {
+                name: '💭 Messages',
+                value: `${ticketReport.messageCount}`,
+                inline: true
+            },
+            {
+                name: '👥 Participants',
+                value: `${uniqueParticipants.length}`,
+                inline: true
+            },
+            {
+                name: `🎯 Participants (${uniqueParticipants.length})`,
+                value: participantsList + moreParticipants,
+                inline: false
             }
         )
+        .setFooter({ text: 'Click the button below to view full transcript' })
         .setTimestamp();
-    
-    // Добавляем создателя, если есть
-    if (createdBy) {
-        embed.addFields({
-            name: '👤 Created by',
-            value: `${createdBy.displayName} (\`${createdBy.id}\`)`,
-            inline: true
-        });
-    }
-    
-    // Добавляем остальную информацию
-    embed.addFields(
-        {
-            name: '💬 Channel',
-            value: `#${ticketReport.ticketInfo.channelName}`,
-            inline: true
-        },
-        {
-            name: '💭 Messages',
-            value: `${ticketReport.messageCount}`,
-            inline: true
-        },
-        {
-            name: '👥 Participants',
-            value: `${ticketReport.participants.length}`,
-            inline: true
-        }
-    );
-    
-    // Добавляем информацию об участниках
-    const participantsList = ticketReport.participants
-        .slice(0, 10) // Ограничиваем список до 10 участников
-        .map(p => {
-            const roleIcon = p.role === 'Ticket Owner' ? '👑' : 
-                           p.role === 'system' ? '🤖' : '👤';
-            return `${roleIcon} ${p.displayName} (\`${p.userId}\`)`;
-        })
-        .join('\n');
-    
-    if (participantsList) {
-        embed.addFields({
-            name: `🎯 Participants (${ticketReport.participants.length})`,
-            value: participantsList.length > 0 ? participantsList : 'No participants',
-            inline: false
-        });
-    }
-    
+
     return embed;
 }
 // Генерируем уникальный ID для транскрипта
