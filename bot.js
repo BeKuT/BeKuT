@@ -739,26 +739,26 @@ client.on('messageCreate', async message => {
             // Создаем форматированный транскрипт
             const transcriptContent = createFormattedTranscript(ticketReport, allMessages);
             
-            // Сохраняем в файл
-            const fileName = transcript-${ticketReport.ticketInfo.channelName}.txt;
+            // Сохраняем в файл (ИСПРАВЛЕННАЯ СТРОКА)
+            const fileName = `transcript-${ticketReport.ticketInfo.channelName}.txt`;
             await fs.writeFile(fileName, transcriptContent, 'utf8');
             
             // Отправляем в канал для транскриптов
             const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
             
             if (transcriptChannel && transcriptChannel.isTextBased()) {
-                // Отправляем основной транскрипт
+                // Отправляем основной транскрипт (ИСПРАВЛЕННЫЕ КАВЫЧКИ)
                 await transcriptChannel.send({
-                    content: 📄 Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server},
+                    content: `📄 Transcript for #${ticketReport.ticketInfo.channelName} in ${ticketReport.ticketInfo.server}`,
                     files: [fileName]
                 });
                 
-                // Отправляем отдельное сообщение с информацией о тикете
+                // Отправляем отдельное сообщение с информацией о тикете (ИСПРАВЛЕННЫЕ КАВЫЧКИ)
                 const ticketInfoMessage = createTicketInfoMessage(ticketReport);
-                await transcriptChannel.send(\\\${ticketInfoMessage}\\\``);
+                await transcriptChannel.send(`\\${ticketInfoMessage}\\`);
                 
                 await message.channel.send('✅ Transcript sent to transcripts channel!');
-                console.log(✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages);
+                console.log(`✅ Transcript created for ticket #${ticketReport.ticketInfo.id} with ${ticketReport.messageCount} messages`);
                 
                 // Удаляем временный файл
                 await fs.unlink(fileName).catch(() => {});
