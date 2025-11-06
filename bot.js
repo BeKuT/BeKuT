@@ -8,7 +8,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
 const PORT = process.env.PORT || 3000;
-const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
+const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 
 // Проверка наличия токена
 if (!token) {
@@ -19,7 +19,6 @@ if (!token) {
 
 console.log('✅ Token loaded successfully');
 console.log(`📝 Channel ID: ${TRANSCRIPT_CHANNEL_ID}`);
-console.log(`🌐 Railway URL: ${RAILWAY_STATIC_URL}`);
 
 // Создаем Express сервер для хостинга транскриптов
 const app = express();
@@ -28,16 +27,62 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Хранилище для транскриптов в памяти (в продакшене лучше использовать базу данных)
+// Хранилище для транскриптов в памяти
 const transcriptsStorage = new Map();
 
 // Основной маршрут для проверки работы
 app.get('/', (req, res) => {
-    res.json({ 
-        status: 'Transcript Server is Running',
-        transcripts: transcriptsStorage.size,
-        timestamp: new Date().toISOString()
-    });
+    const baseUrl = getBaseUrl();
+    res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Transcript Server</title>
+        <style>
+            body { 
+                background: #36393f; 
+                color: white; 
+                font-family: Arial; 
+                padding: 20px;
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            .card {
+                background: #2f3136;
+                padding: 20px;
+                margin: 10px 0;
+                border-radius: 8px;
+                border-left: 4px solid #7289da;
+            }
+            .success { border-left-color: #43b581; }
+            .warning { border-left-color: #faa61a; }
+            a { color: #00aff4; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            code { background: #40444b; padding: 2px 6px; border-radius: 3px; }
+        </style>
+    </head>
+    <body>
+        <h1>📄 Transcript Server</h1>
+        
+        <div class="card success">
+            <h2>✅ Server is Running</h2>
+            <p>Base URL: <code>${baseUrl}</code></p>
+            <p>Transcripts in storage: <strong>${transcriptsStorage.size}</strong></p>
+            <p>Server time: ${new Date().toISOString()}</p>
+        </div>
+        
+        <div class="card">
+            <h2>🔧 Debug Endpoints</h2>
+            <ul>
+                <li><a href="/api/debug">/api/debug</a> - Environment information</li>
+                <li><a href="/api/health">/api/health</a> - Health check</li>
+                <li><a href="/api/transcripts">/api/transcripts</a> - List all transcripts</li>
+                <li><a href="/create-test-transcript">/create-test-transcript</a> - Create test transcript</li>
+            </ul>
+        </div>
+    </body>
+    </html>
+    `);
 });
 
 // Маршрут для просмотра транскрипта
@@ -45,7 +90,11 @@ app.get('/transcript/:id', (req, res) => {
     const transcriptId = req.params.id;
     const transcript = transcriptsStorage.get(transcriptId);
     
+    console.log(`🔍 Looking for transcript: ${transcriptId}`);
+    console.log(`📊 Total transcripts in storage: ${transcriptsStorage.size}`);
+    
     if (!transcript) {
+        console.log(`❌ Transcript ${transcriptId} not found in storage`);
         return res.status(404).send(`
             <html>
                 <body style="background: #36393f; color: white; font-family: Arial; text-align: center; padding: 50px;">
@@ -57,6 +106,7 @@ app.get('/transcript/:id', (req, res) => {
         `);
     }
     
+    console.log(`✅ Found transcript: ${transcriptId}`);
     res.send(transcript.html);
 });
 
@@ -64,19 +114,103 @@ app.get('/transcript/:id', (req, res) => {
 app.get('/api/transcripts', (req, res) => {
     const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
         id,
-        channelName: data.ticketInfo.channelName,
-        server: data.ticketInfo.server,
-        messageCount: data.ticketInfo.messageCount,
+        channelName: data.ticketInfo?.channelName,
+        server: data.ticketInfo?.server,
+        messageCount: data.ticketInfo?.messageCount,
         createdAt: new Date(data.createdAt).toISOString()
     }));
     
     res.json({ transcripts });
 });
 
-// Запускаем серсер
+// Debug endpoint
+app.get('/api/debug', (req, res) => {
+    const environmentInfo = {
+        NODE_ENV: process.env.NODE_ENV,
+        PORT: process.env.PORT,
+        RAILWAY_STATIC_URL: process.env.RAILWAY_STATIC_URL,
+        RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
+        RAILWAY_SERVICE_NAME: process.env.RAILWAY_SERVICE_NAME,
+        RAILWAY_SERVICE_ID: process.env.RAILWAY_SERVICE_ID,
+    };
+    
+    const transcriptsInfo = {
+        total: transcriptsStorage.size,
+        ids: Array.from(transcriptsStorage.keys())
+    };
+    
+    res.json({
+        environment: environmentInfo,
+        transcripts: transcriptsInfo,
+        server: {
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString(),
+            baseUrl: getBaseUrl()
+        }
+    });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        transcripts: transcriptsStorage.size,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Создание тестового транскрипта
+app.get('/create-test-transcript', (req, res) => {
+    const transcriptId = 'test-' + Date.now();
+    const testHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Test Transcript</title>
+        <style>
+            body { background: #36393f; color: white; font-family: Arial; padding: 50px; text-align: center; }
+            .container { max-width: 600px; margin: 0 auto; background: #2f3136; padding: 30px; border-radius: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>✅ Test Transcript Works!</h1>
+            <p>This is a test transcript created at ${new Date().toISOString()}</p>
+            <p>Transcript ID: <strong>${transcriptId}</strong></p>
+            <p>If you can see this, the server is working correctly!</p>
+        </div>
+    </body>
+    </html>
+    `;
+    
+    transcriptsStorage.set(transcriptId, {
+        html: testHtml,
+        createdAt: Date.now(),
+        ticketInfo: {
+            channelName: 'test-channel',
+            server: 'Test Server', 
+            messageCount: 1,
+            participantsCount: 1
+        }
+    });
+    
+    const transcriptUrl = `${getBaseUrl()}/transcript/${transcriptId}`;
+    
+    res.json({
+        success: true,
+        message: 'Test transcript created successfully',
+        transcriptId: transcriptId,
+        url: transcriptUrl,
+        directLink: `<a href="${transcriptUrl}">Open Test Transcript</a>`,
+        storageSize: transcriptsStorage.size
+    });
+});
+
+// Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Transcript server running on port ${PORT}`);
-    console.log(`🔗 Access at: ${RAILWAY_STATIC_URL}`);
+    console.log(`🔗 Access at: ${getBaseUrl()}`);
 });
 
 // Обработка graceful shutdown
@@ -108,7 +242,6 @@ const client = new Client({
 // Хранилище для связи реакций с сообщениями переводов
 const translationMessages = new Map();
 
-
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ ТРАНСКРИПТА ⬇️⬇️⬇️
 
 // Функция для сбора информации о тикете
@@ -117,9 +250,7 @@ async function collectTicketInfo(channel, messages) {
     let ticketCreator = null;
     let firstMessage = null;
 
-    // Собираем участников и находим первое сообщение
     messages.forEach(msg => {
-        // Добавляем участника
         participants.add({
             id: msg.author.id,
             username: msg.author.tag,
@@ -128,13 +259,11 @@ async function collectTicketInfo(channel, messages) {
             avatar: msg.author.displayAvatarURL({ format: 'png', size: 64 })
         });
 
-        // Ищем первое сообщение для определения создателя
         if (!firstMessage || msg.createdTimestamp < firstMessage.createdTimestamp) {
             firstMessage = msg;
         }
     });
 
-    // Создатель тикета - автор первого сообщения
     if (firstMessage) {
         ticketCreator = {
             id: firstMessage.author.id,
@@ -245,327 +374,57 @@ function createHTMLTranscript(ticketReport, messages) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Транскрипт #${ticketReport.ticketInfo.channelName}</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            background: #36393f;
-            color: #dcddde;
-            line-height: 1.4;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            background: #2f3136;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid #7289da;
-        }
-
-        .server-info {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .server-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            margin-right: 15px;
-        }
-
-        .server-details h1 {
-            color: #fff;
-            font-size: 24px;
-            margin-bottom: 5px;
-        }
-
-        .server-details .channel-name {
-            color: #8e9297;
-            font-size: 16px;
-        }
-
-        .ticket-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-
-        .stat {
-            background: #40444b;
-            padding: 12px;
-            border-radius: 4px;
-        }
-
-        .stat-label {
-            color: #8e9297;
-            font-size: 12px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-
-        .stat-value {
-            color: #fff;
-            font-size: 18px;
-            font-weight: bold;
-        }
-
-        .participants-section {
-            background: #2f3136;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .section-title {
-            color: #fff;
-            font-size: 18px;
-            margin-bottom: 15px;
-            font-weight: 600;
-        }
-
-        .participants-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 10px;
-        }
-
-        .participant {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            background: #40444b;
-            border-radius: 4px;
-        }
-
-        .participant .avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            margin-right: 10px;
-        }
-
-        .participant-info {
-            flex: 1;
-        }
-
-        .participant .username {
-            color: #fff;
-            font-weight: 500;
-        }
-
-        .participant .discriminator {
-            color: #8e9297;
-            font-size: 12px;
-        }
-
-        .participant .role {
-            background: #7289da;
-            color: #fff;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .messages-section {
-            background: #2f3136;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .messages-header {
-            background: #36393f;
-            padding: 15px 20px;
-            border-bottom: 1px solid #40444b;
-        }
-
-        .messages-container {
-            padding: 20px;
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        .message {
-            display: flex;
-            margin-bottom: 20px;
-            padding: 5px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
-        }
-
-        .message:hover {
-            background: #32353b;
-        }
-
-        .message-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            margin-right: 15px;
-            flex-shrink: 0;
-        }
-
-        .message-content {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .message-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-
-        .author-name {
-            color: #fff;
-            font-weight: 500;
-            margin-right: 8px;
-        }
-
-        .message-time {
-            color: #72767d;
-            font-size: 12px;
-        }
-
-        .message-text {
-            color: #dcddde;
-            word-wrap: break-word;
-            white-space: pre-wrap;
-        }
-
-        .attachments {
-            margin-top: 10px;
-        }
-
-        .attachment {
-            margin-top: 5px;
-        }
-
-        .attachment-image {
-            max-width: 400px;
-            max-height: 300px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .attachment-link {
-            color: #00aff4;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            padding: 5px 10px;
-            background: #2f3136;
-            border-radius: 4px;
-            border: 1px solid #40444b;
-        }
-
-        .attachment-link:hover {
-            text-decoration: underline;
-        }
-
-        .embeds {
-            margin-top: 10px;
-        }
-
-        .embed {
-            background: #2f3136;
-            border-left: 4px solid #40444b;
-            border-radius: 4px;
-            padding: 12px;
-            margin-top: 8px;
-            max-width: 400px;
-        }
-
-        .embed-title {
-            color: #00aff4;
-            font-weight: 600;
-            margin-bottom: 8px;
-            text-decoration: none;
-        }
-
-        .embed-title:hover {
-            text-decoration: underline;
-        }
-
-        .embed-description {
-            color: #dcddde;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-
-        .embed-footer {
-            margin-top: 8px;
-            color: #72767d;
-            font-size: 12px;
-        }
-
-        .mention {
-            background: #3a3c42;
-            color: #dee0fc;
-            padding: 1px 4px;
-            border-radius: 3px;
-            font-weight: 500;
-        }
-
-        .code-block {
-            background: #2f3136;
-            border: 1px solid #40444b;
-            border-radius: 4px;
-            padding: 10px;
-            margin: 5px 0;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
-            overflow-x: auto;
-        }
-
-        .inline-code {
-            background: #2f3136;
-            border: 1px solid #40444b;
-            border-radius: 3px;
-            padding: 2px 4px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #72767d;
-            font-size: 12px;
-            padding: 20px;
-            border-top: 1px solid #40444b;
-        }
-
-        /* Scrollbar styling */
-        .messages-container::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .messages-container::-webkit-scrollbar-track {
-            background: #2f3136;
-        }
-
-        .messages-container::-webkit-scrollbar-thumb {
-            background: #202225;
-            border-radius: 4px;
-        }
-
-        .messages-container::-webkit-scrollbar-thumb:hover {
-            background: #1a1c20;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #36393f; color: #dcddde; line-height: 1.4; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #7289da; }
+        .server-info { display: flex; align-items: center; margin-bottom: 15px; }
+        .server-icon { width: 48px; height: 48px; border-radius: 50%; margin-right: 15px; }
+        .server-details h1 { color: #fff; font-size: 24px; margin-bottom: 5px; }
+        .server-details .channel-name { color: #8e9297; font-size: 16px; }
+        .ticket-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
+        .stat { background: #40444b; padding: 12px; border-radius: 4px; }
+        .stat-label { color: #8e9297; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
+        .stat-value { color: #fff; font-size: 18px; font-weight: bold; }
+        .participants-section { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .section-title { color: #fff; font-size: 18px; margin-bottom: 15px; font-weight: 600; }
+        .participants-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+        .participant { display: flex; align-items: center; padding: 10px; background: #40444b; border-radius: 4px; }
+        .participant .avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 10px; }
+        .participant-info { flex: 1; }
+        .participant .username { color: #fff; font-weight: 500; }
+        .participant .discriminator { color: #8e9297; font-size: 12px; }
+        .participant .role { background: #7289da; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .messages-section { background: #2f3136; border-radius: 8px; overflow: hidden; }
+        .messages-header { background: #36393f; padding: 15px 20px; border-bottom: 1px solid #40444b; }
+        .messages-container { padding: 20px; max-height: 600px; overflow-y: auto; }
+        .message { display: flex; margin-bottom: 20px; padding: 5px; border-radius: 4px; transition: background-color 0.2s; }
+        .message:hover { background: #32353b; }
+        .message-avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; flex-shrink: 0; }
+        .message-content { flex: 1; min-width: 0; }
+        .message-header { display: flex; align-items: center; margin-bottom: 5px; }
+        .author-name { color: #fff; font-weight: 500; margin-right: 8px; }
+        .message-time { color: #72767d; font-size: 12px; }
+        .message-text { color: #dcddde; word-wrap: break-word; white-space: pre-wrap; }
+        .attachments { margin-top: 10px; }
+        .attachment { margin-top: 5px; }
+        .attachment-image { max-width: 400px; max-height: 300px; border-radius: 4px; cursor: pointer; }
+        .attachment-link { color: #00aff4; text-decoration: none; display: inline-flex; align-items: center; padding: 5px 10px; background: #2f3136; border-radius: 4px; border: 1px solid #40444b; }
+        .attachment-link:hover { text-decoration: underline; }
+        .embeds { margin-top: 10px; }
+        .embed { background: #2f3136; border-left: 4px solid #40444b; border-radius: 4px; padding: 12px; margin-top: 8px; max-width: 400px; }
+        .embed-title { color: #00aff4; font-weight: 600; margin-bottom: 8px; text-decoration: none; }
+        .embed-title:hover { text-decoration: underline; }
+        .embed-description { color: #dcddde; font-size: 14px; line-height: 1.4; }
+        .embed-footer { margin-top: 8px; color: #72767d; font-size: 12px; }
+        .mention { background: #3a3c42; color: #dee0fc; padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+        .code-block { background: #2f3136; border: 1px solid #40444b; border-radius: 4px; padding: 10px; margin: 5px 0; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; overflow-x: auto; }
+        .inline-code { background: #2f3136; border: 1px solid #40444b; border-radius: 3px; padding: 2px 4px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; }
+        .footer { text-align: center; margin-top: 30px; color: #72767d; font-size: 12px; padding: 20px; border-top: 1px solid #40444b; }
+        .messages-container::-webkit-scrollbar { width: 8px; }
+        .messages-container::-webkit-scrollbar-track { background: #2f3136; }
+        .messages-container::-webkit-scrollbar-thumb { background: #202225; border-radius: 4px; }
+        .messages-container::-webkit-scrollbar-thumb:hover { background: #1a1c20; }
     </style>
 </head>
 <body>
@@ -623,45 +482,25 @@ function createHTMLTranscript(ticketReport, messages) {
     </div>
 
     <script>
-        // Добавляем функциональность для изображений
         document.addEventListener('DOMContentLoaded', function() {
-            // Открытие изображений в полном размере при клике
             const images = document.querySelectorAll('.attachment-image');
             images.forEach(img => {
                 img.addEventListener('click', function() {
                     const overlay = document.createElement('div');
                     overlay.style.cssText = \`
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        background: rgba(0,0,0,0.8);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        z-index: 1000;
-                        cursor: pointer;
+                        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                        background: rgba(0,0,0,0.8); display: flex; align-items: center;
+                        justify-content: center; z-index: 1000; cursor: pointer;
                     \`;
-                    
                     const fullImage = document.createElement('img');
                     fullImage.src = this.src;
-                    fullImage.style.cssText = \`
-                        max-width: 90%;
-                        max-height: 90%;
-                        border-radius: 8px;
-                    \`;
-                    
+                    fullImage.style.cssText = \`max-width: 90%; max-height: 90%; border-radius: 8px;\`;
                     overlay.appendChild(fullImage);
-                    overlay.addEventListener('click', function() {
-                        document.body.removeChild(overlay);
-                    });
-                    
+                    overlay.addEventListener('click', function() { document.body.removeChild(overlay); });
                     document.body.appendChild(overlay);
                 });
             });
 
-            // Плавная прокрутка к сообщению при клике на ссылку
             const messageLinks = document.querySelectorAll('a[href^="#message-"]');
             messageLinks.forEach(link => {
                 link.addEventListener('click', function(e) {
@@ -671,20 +510,10 @@ function createHTMLTranscript(ticketReport, messages) {
                     if (targetElement) {
                         targetElement.scrollIntoView({ behavior: 'smooth' });
                         targetElement.style.backgroundColor = '#3a3c42';
-                        setTimeout(() => {
-                            targetElement.style.backgroundColor = '';
-                        }, 2000);
+                        setTimeout(() => { targetElement.style.backgroundColor = ''; }, 2000);
                     }
                 });
             });
-
-            // Автоматическое обновление времени каждую минуту
-            setInterval(() => {
-                const timeElements = document.querySelectorAll('.message-time');
-                timeElements.forEach(el => {
-                    // Здесь можно обновлять время, если нужно
-                });
-            }, 60000);
         });
     </script>
 </body>
@@ -696,49 +525,22 @@ function createHTMLTranscript(ticketReport, messages) {
 function formatMessageContent(content) {
     if (!content) return '';
     
-    // Экранирование HTML символов
     content = content
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     
-    // Форматирование упоминаний пользователей
     content = content.replace(/<@!?(\d+)>/g, '<span class="mention">@user</span>');
-    
-    // Форматирование упоминаний каналов
     content = content.replace(/<#(\d+)>/g, '<span class="mention">#channel</span>');
-    
-    // Форматирование упоминаний ролей
     content = content.replace(/<@&(\d+)>/g, '<span class="mention">@role</span>');
-    
-    // Форматирование эмодзи
     content = content.replace(/<a?:\w+:(\d+)>/g, '<span class="emoji">:emoji:</span>');
-    
-    // Форматирование многострочных код-блоков
     content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<div class="code-block">$2</div>');
-    
-    // Форматирование инлайн-кода
     content = content.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-    
-    // Форматирование жирного текста
     content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    
-    // Форматирование курсивного текста
     content = content.replace(/\*(.*?)\*/g, '<em>$1</em>');
     content = content.replace(/_(.*?)_/g, '<em>$1</em>');
-    
-    // Форматирование подчеркнутого текста
     content = content.replace(/__(.*?)__/g, '<u>$1</u>');
-    
-    // Форматирование зачеркнутого текста
     content = content.replace(/~~(.*?)~~/g, '<s>$1</s>');
-    
-    // Форматирование ссылок
     content = content.replace(/(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color: #00aff4; text-decoration: none;">$1</a>');
-    
-    // Сохранение переносов строк
     content = content.replace(/\n/g, '<br>');
     
     return content;
@@ -748,16 +550,13 @@ function createEmbedHTML(embed) {
     if (!embed || !embed.title && !embed.description) return '';
     
     let embedHTML = '<div class="embed">';
-    
     if (embed.title) {
         const titleUrl = embed.url ? `href="${embed.url}" target="_blank" rel="noopener noreferrer"` : '';
         embedHTML += `<a ${titleUrl} class="embed-title">${embed.title}</a>`;
     }
-    
     if (embed.description) {
         embedHTML += `<div class="embed-description">${formatMessageContent(embed.description)}</div>`;
     }
-    
     if (embed.fields && embed.fields.length > 0) {
         embedHTML += '<div class="embed-fields">';
         embed.fields.forEach(field => {
@@ -770,24 +569,19 @@ function createEmbedHTML(embed) {
         });
         embedHTML += '</div>';
     }
-    
     if (embed.footer) {
         embedHTML += `<div class="embed-footer">${embed.footer.text}</div>`;
     }
-    
     embedHTML += '</div>';
-    
     return embedHTML;
 }
 
-// Функция для создания отдельного сообщения с информацией о тикете в виде Embed с участниками
+// Функция для создания embed с информацией о тикете
 function createTicketInfoEmbedWithParticipants(ticketReport) {
     const createdBy = ticketReport.ticketInfo.createdBy;
     
-    // Убираем дубликаты участников
     const uniqueParticipants = [];
     const seenIds = new Set();
-    
     ticketReport.participants.forEach(p => {
         if (!seenIds.has(p.userId)) {
             seenIds.add(p.userId);
@@ -795,12 +589,10 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
         }
     });
     
-    // Создаем список уникальных участников
     const participantsList = uniqueParticipants
         .slice(0, 10)
         .map(p => {
-            const roleIcon = p.role === 'Ticket Owner' ? '👑' : 
-                           p.role === 'system' ? '🤖' : '👤';
+            const roleIcon = p.role === 'Ticket Owner' ? '👑' : p.role === 'system' ? '🤖' : '👤';
             return `${roleIcon} ${p.displayName} (${p.userId})`;
         })
         .join('\n');
@@ -812,46 +604,14 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
         .setColor(0x00FF00)
         .setTitle('📋 TICKET INFORMATION')
         .addFields(
-            {
-                name: '🆔 ID',
-                value: `#${ticketReport.ticketInfo.id}`,
-                inline: true
-            },
-            {
-                name: '🏠 Server',
-                value: ticketReport.ticketInfo.server,
-                inline: true
-            },
-            {
-                name: '📅 Created',
-                value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'),
-                inline: true
-            },
-            {
-                name: '👤 Created by',
-                value: createdBy ? `${createdBy.displayName} (${createdBy.id})` : 'Unknown',
-                inline: false
-            },
-            {
-                name: '💬 Channel',
-                value: `#${ticketReport.ticketInfo.channelName}`,
-                inline: true
-            },
-            {
-                name: '💭 Messages',
-                value: `${ticketReport.messageCount}`,
-                inline: true
-            },
-            {
-                name: '👥 Participants',
-                value: `${uniqueParticipants.length}`,
-                inline: true
-            },
-            {
-                name: `🎯 Participants (${uniqueParticipants.length})`,
-                value: participantsList + moreParticipants || 'No participants',
-                inline: false
-            }
+            { name: '🆔 ID', value: `#${ticketReport.ticketInfo.id}`, inline: true },
+            { name: '🏠 Server', value: ticketReport.ticketInfo.server, inline: true },
+            { name: '📅 Created', value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'), inline: true },
+            { name: '👤 Created by', value: createdBy ? `${createdBy.displayName} (${createdBy.id})` : 'Unknown', inline: false },
+            { name: '💬 Channel', value: `#${ticketReport.ticketInfo.channelName}`, inline: true },
+            { name: '💭 Messages', value: `${ticketReport.messageCount}`, inline: true },
+            { name: '👥 Participants', value: `${uniqueParticipants.length}`, inline: true },
+            { name: `🎯 Participants (${uniqueParticipants.length})`, value: participantsList + moreParticipants || 'No participants', inline: false }
         )
         .setFooter({ text: 'Click the button below to view full transcript' })
         .setTimestamp();
@@ -859,10 +619,10 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
     return embed;
 }
 
-// Старая функция (оставьте для совместимости)
 function createTicketInfoEmbed(ticketReport) {
     return createTicketInfoEmbedWithParticipants(ticketReport);
 }
+
 // Генерируем уникальный ID для транскрипта
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -870,34 +630,23 @@ function generateTranscriptId() {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    // Проверяем все возможные источники URL в Railway
-    const possibleUrls = [
-        process.env.RAILWAY_STATIC_URL,
-        process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null,
-        `https://${process.env.RAILWAY_SERVICE_NAME}-${process.env.RAILWAY_SERVICE_ID}.railway.app`,
-        'https://your-app-name.railway.app' // замените на реальное имя
-    ].filter(url => url && !url.includes('localhost'));
-    
-    if (possibleUrls.length > 0) {
-        const selectedUrl = possibleUrls[0];
-        console.log(`🌐 Using base URL: ${selectedUrl}`);
-        return selectedUrl;
+    // Используем RAILWAY_STATIC_URL если он есть
+    if (process.env.RAILWAY_STATIC_URL) {
+        return process.env.RAILWAY_STATIC_URL;
     }
-    
+    // Используем RAILWAY_PUBLIC_DOMAIN
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
     // Для локальной разработки
-    const localUrl = `http://localhost:${process.env.PORT || 3000}`;
-    console.log(`🌐 Using local URL: ${localUrl}`);
-    return localUrl;
+    return `http://localhost:${process.env.PORT || 3000}`;
 }
+
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
     constructor() {
         this.apiUrl = 'https://srebot-meow.ing/api/squadron-leaderboard';
-        this.cache = {
-            topRegiments: null,
-            lastUpdate: null,
-            cacheTime: 10 * 60 * 1000
-        };
+        this.cache = { topRegiments: null, lastUpdate: null, cacheTime: 10 * 60 * 1000 };
     }
 
     async getRegimentInfo(regimentName) {
@@ -907,13 +656,10 @@ class WTRegimentTracker {
                 r.name.toLowerCase().includes(regimentName.toLowerCase()) ||
                 regimentName.toLowerCase().includes(r.name.toLowerCase())
             );
-
             if (foundRegiment) {
                 return this.formatReport(foundRegiment.name, this.generateRegimentData(foundRegiment));
             }
-
             return this.formatReport(regimentName, this.generateRegimentData({name: regimentName}));
-            
         } catch (error) {
             console.error('Error getting regiment info:', error);
             return this.getFallbackReport(regimentName);
@@ -922,44 +668,19 @@ class WTRegimentTracker {
 
     async getTopRegiments(limit = 20) {
         try {
-            const realData = await this.getRealTopRegiments(limit);
-            return realData;
+            return await this.getRealTopRegiments(limit);
         } catch (error) {
             console.error('Error getting top regiments:', error);
             return this.getFallbackTopRegiments(limit);
         }
     }
 
-    async searchRegiments(query, page = 1) {
-        try {
-            const allRegiments = await this.getRealTopRegiments(200);
-            return allRegiments.filter(regiment => 
-                regiment.name.toLowerCase().includes(query.toLowerCase())
-            ).slice(0, 10);
-        } catch (error) {
-            console.error('Error searching regiments:', error);
-            return [];
-        }
-    }
-
     async getRealTopRegiments(limit = 50) {
-        if (this.cache.topRegiments && this.cache.lastUpdate && 
-            Date.now() - this.cache.lastUpdate < this.cache.cacheTime) {
+        if (this.cache.topRegiments && Date.now() - this.cache.lastUpdate < this.cache.cacheTime) {
             return this.cache.topRegiments.slice(0, limit);
         }
-
         try {
-            console.log('🔍 Получение реальных данных с srebot-meow API...');
-            
-            const response = await axios.get(this.apiUrl, {
-                timeout: 15000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                    'Accept': 'application/json',
-                    'Referer': 'https://srebot-meow.ing/leaderboard/squadrons'
-                }
-            });
-
+            const response = await axios.get(this.apiUrl, { timeout: 15000 });
             if (response.data && response.data.squadrons) {
                 const regiments = response.data.squadrons.map((squadron, index) => ({
                     rank: index + 1,
@@ -972,18 +693,12 @@ class WTRegimentTracker {
                     kdr: squadron.kdr || 0,
                     players: squadron.player_count || 0
                 }));
-
                 this.cache.topRegiments = regiments;
                 this.cache.lastUpdate = Date.now();
-                
-                console.log(`✅ Успешно получено ${regiments.length} полков через API`);
                 return regiments.slice(0, limit);
             }
-
             throw new Error('No squadron data in API response');
-
         } catch (apiError) {
-            console.log('❌ API не доступен, используем локальные данные...');
             return this.getRealisticFallbackData(limit);
         }
     }
@@ -996,23 +711,16 @@ class WTRegimentTracker {
             { rank: 4, name: "PANZER_ELITE", rating: 13890, battles: 734, wins: 507, winRate: 69.1, players: 36 },
             { rank: 5, name: "BLUE_FLAMES", rating: 13560, battles: 689, wins: 462, winRate: 67.1, players: 34 }
         ];
-        
         return regiments.slice(0, limit);
     }
 
     generateRegimentData(regiment) {
-        const vehicles = [
-            "T-80BVM", "Leopard 2A6", "M1A2 Abrams", "Challenger 2", "Type 10",
-            "Leclerc", "Ariete", "ZTZ99", "MiG-29", "F-16A", "F-14 Tomcat"
-        ];
-        
+        const vehicles = ["T-80BVM", "Leopard 2A6", "M1A2 Abrams", "Challenger 2", "Type 10", "Leclerc", "Ariete", "ZTZ99", "MiG-29", "F-16A", "F-14 Tomcat"];
         const players = Array.from({length: 8}, (_, i) => ({
             name: `Player${i+1}_${regiment.name.slice(0,3)}`,
             vehicle: vehicles[Math.floor(Math.random() * vehicles.length)]
         }));
-
         const compositions = ["4T / 3F / 1AA", "3T / 4F / 1S", "5T / 2F / 1AA", "2T / 5F / 1S"];
-        
         return {
             players,
             composition: compositions[Math.floor(Math.random() * compositions.length)],
@@ -1031,9 +739,7 @@ Registered: ${data.registered || "Недавно"}
 Last seen: ${data.timestamp || "Активен"}
 Comp: ${data.composition || "N/A"}
 
-${data.players.map(player => 
-    `${player.name.padEnd(15)} : ${player.vehicle}`
-).join('\n')}
+${data.players.map(player => `${player.name.padEnd(15)} : ${player.vehicle}`).join('\n')}
 
 Donatei_c0CJ
         `.trim();
@@ -1043,9 +749,7 @@ Donatei_c0CJ
         return `
 Top Regiments Leaderboard
 
-${regiments.map(regiment => 
-    `#${regiment.rank.toString().padEnd(3)} ${regiment.name.padEnd(20)} Rating: ${regiment.rating.toString().padEnd(6)} Battles: ${regiment.battles}`
-).join('\n')}
+${regiments.map(regiment => `#${regiment.rank.toString().padEnd(3)} ${regiment.name.padEnd(20)} Rating: ${regiment.rating.toString().padEnd(6)} Battles: ${regiment.battles}`).join('\n')}
 
 Updated: ${new Date().toLocaleDateString()}
         `.trim();
@@ -1084,13 +788,10 @@ function translateText(text, targetLang) {
     const words = text.split(' ');
     const translatedWords = words.map(word => {
         const lowerWord = word.toLowerCase();
-        
         if (targetLang === 'ru') {
             return translationDict[lowerWord] || word;
         } else {
-            const reverseDict = Object.fromEntries(
-                Object.entries(translationDict).map(([key, value]) => [value, key])
-            );
+            const reverseDict = Object.fromEntries(Object.entries(translationDict).map(([key, value]) => [value, key]));
             return reverseDict[lowerWord] || word;
         }
     });
@@ -1100,14 +801,11 @@ function translateText(text, targetLang) {
 async function translateWithAPI(text, targetLang) {
     try {
         const sourceLang = detectLanguage(text) === 'ru' ? 'ru' : 'en';
-        
         if ((sourceLang === 'ru' && targetLang === 'ru') || (sourceLang === 'en' && targetLang === 'en')) {
             return text;
         }
-        
         const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`);
         const data = await response.json();
-        
         if (data.responseStatus === 200) {
             return data.responseData.translatedText;
         } else {
@@ -1126,14 +824,9 @@ client.login(token).catch(error => {
 
 client.on('ready', () => {
     console.log(`✅ Bot has logged in as ${client.user.tag}`);
-    
-    // Устанавливаем первый статус сразу
     setCustomStatus();
-    
-    // Обновление статуса каждую минуту
     setInterval(setCustomStatus, 5 * 1000);
     
-    // Проверка канала
     const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
     if (transcriptChannel) {
         console.log(`✅ Transcript channel found: #${transcriptChannel.name}`);
@@ -1145,29 +838,13 @@ client.on('ready', () => {
 function setCustomStatus() {
     const statuses = [
         { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
         { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Listening, status: 'online' },
-        { name: `Тех.Админ BeKuT`, type: ActivityType.Watching, status: 'online' },
-        { name: `Тех.Админ BeKuT`, type: ActivityType.Listening, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' }
+        { name: 'Тех.Админ BeKuT', type: ActivityType.Listening, status: 'online' }
     ];
-    
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-    
     try {
         client.user.setPresence({
-            activities: [{
-                name: randomStatus.name,
-                type: randomStatus.type
-            }],
+            activities: [{ name: randomStatus.name, type: randomStatus.type }],
             status: randomStatus.status
         });
     } catch (error) {
@@ -1176,95 +853,50 @@ function setCustomStatus() {
 }
 
 // ⬇️⬇️⬇️ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
-
 client.on('messageReactionAdd', async (reaction, user) => {
     if ((reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') && !user.bot) {
-        
-        // Проверка кд
         const cooldownKey = `${user.id}-${reaction.message.id}`;
-        if (translationCooldown.has(cooldownKey)) {
-            return;
-        }
+        if (translationCooldown.has(cooldownKey)) return;
         translationCooldown.add(cooldownKey);
         setTimeout(() => translationCooldown.delete(cooldownKey), TRANSLATION_COOLDOWN_TIME);
         
         try {
-            // Получаем полное сообщение
-            if (reaction.partial) {
-                await reaction.fetch();
-            }
-            
+            if (reaction.partial) await reaction.fetch();
             const message = reaction.message;
-            
-            // Проверяем, что сообщение не от бота и не пустое
-            if (message.author.bot || !message.content || message.content.trim() === '') {
-                return;
-            }
+            if (message.author.bot || !message.content || message.content.trim() === '') return;
             
             const originalText = message.content;
             const detectedLang = detectLanguage(originalText);
-            
             let targetLang, flagEmoji, languageName;
             
-            // Определяем направление перевода на основе реакции
             if (reaction.emoji.name === '🇷🇺') {
-                targetLang = 'ru';
-                flagEmoji = '🇷🇺';
-                languageName = 'Русский';
+                targetLang = 'ru'; flagEmoji = '🇷🇺'; languageName = 'Русский';
             } else {
-                targetLang = 'en';
-                flagEmoji = '🇬🇧';
-                languageName = 'Английский';
+                targetLang = 'en'; flagEmoji = '🇬🇧'; languageName = 'Английский';
             }
             
-            // Проверяем, нужен ли перевод
             const sourceLang = detectedLang === 'ru' ? 'ru' : 'en';
             if (sourceLang === targetLang) {
-                // Если язык уже соответствует, просто удаляем реакцию
                 setTimeout(async () => {
-                    try {
-                        await reaction.users.remove(user.id);
-                        console.log(`🗑️ Reaction removed (message already in ${languageName})`);
-                    } catch (error) {
-                        console.error('❌ Error removing reaction:', error);
-                    }
+                    try { await reaction.users.remove(user.id); } catch (error) {}
                 }, 3000);
                 return;
             }
             
-            // Выполняем перевод
             const translatedText = await translateWithAPI(originalText, targetLang);
-            
-            // Отправляем перевод как ответ на сообщение
             const translationMessage = await message.reply({
                 content: `**${flagEmoji} Перевод на ${languageName}:**\n${translatedText}`,
                 allowedMentions: { repliedUser: false }
             });
             
-            // Сохраняем связь между оригинальным сообщением и переводом
             translationMessages.set(message.id, translationMessage.id);
-            console.log(`✅ Translation ${sourceLang}→${targetLang} sent: "${originalText.substring(0, 50)}..."`);
-            
-            // УДАЛЕНИЕ ЧЕРЕЗ 10 СЕКУНД
             const deleteTimeout = setTimeout(async () => {
                 try {
-                    // Удаляем сообщение с переводом
                     await translationMessage.delete();
-                    console.log(`🗑️ Translation message deleted (timeout)`);
-                    
-                    // Удаляем реакцию флага
                     await reaction.users.remove(user.id);
-                    console.log(`🗑️ ${reaction.emoji.name} reaction removed from user ${user.tag}`);
-                    
-                    // Удаляем из хранилища
                     translationMessages.delete(message.id);
-                    
-                } catch (deleteError) {
-                    console.error('❌ Error deleting translation/reaction:', deleteError);
-                }
+                } catch (deleteError) {}
             }, 10000);
-            
-            // Сохраняем timeout для возможной отмены
             translationMessages.set(`${message.id}_timeout`, deleteTimeout);
             
         } catch (error) {
@@ -1273,86 +905,47 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 });
 
-// ⬇️⬇️⬇️ ОБРАБОТКА УДАЛЕНИЯ РЕАКЦИЙ ⬇️⬇️⬇️
-
 client.on('messageReactionRemove', async (reaction, user) => {
     if ((reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') && !user.bot) {
         try {
-            // Получаем полное сообщение
-            if (reaction.partial) {
-                await reaction.fetch();
-            }
-            
+            if (reaction.partial) await reaction.fetch();
             const originalMessageId = reaction.message.id;
-            
-            // Проверяем, есть ли связанное сообщение с переводом
             if (translationMessages.has(originalMessageId)) {
                 const translationMessageId = translationMessages.get(originalMessageId);
-                
                 try {
-                    // Получаем канал
                     const channel = reaction.message.channel;
-                    
-                    // Пробуем найти и удалить сообщение с переводом
                     const translationMessage = await channel.messages.fetch(translationMessageId);
-                    if (translationMessage) {
-                        await translationMessage.delete();
-                        console.log(`🗑️ Translation message deleted (reaction removed by user)`);
-                    }
-                    
-                    // Отменяем автоматическое удаление если оно еще не сработало
+                    if (translationMessage) await translationMessage.delete();
                     const timeoutKey = `${originalMessageId}_timeout`;
                     if (translationMessages.has(timeoutKey)) {
                         clearTimeout(translationMessages.get(timeoutKey));
                         translationMessages.delete(timeoutKey);
                     }
-                    
-                } catch (fetchError) {
-                    console.log('❌ Translation message already deleted or not found');
-                }
-                
-                // Удаляем из хранилища
+                } catch (fetchError) {}
                 translationMessages.delete(originalMessageId);
-                console.log(`🗑️ User ${user.tag} removed reaction, translation deleted`);
             }
-            
         } catch (error) {
             console.error('❌ Error processing reaction removal:', error);
         }
     }
 });
 
-// ⬇️⬇️⬇️ ОБРАБОТКА УДАЛЕНИЯ СООБЩЕНИЙ ⬇️⬇️⬇️
-
 client.on('messageDelete', async (message) => {
-    // Если удалено оригинальное сообщение, удаляем и перевод
     if (translationMessages.has(message.id)) {
         const translationMessageId = translationMessages.get(message.id);
-        
         try {
             const channel = message.channel;
             const translationMessage = await channel.messages.fetch(translationMessageId);
-            if (translationMessage) {
-                await translationMessage.delete();
-                console.log(`🗑️ Translation message deleted (original message deleted)`);
-            }
-            
-            // Отменяем автоматическое удаление
+            if (translationMessage) await translationMessage.delete();
             const timeoutKey = `${message.id}_timeout`;
             if (translationMessages.has(timeoutKey)) {
                 clearTimeout(translationMessages.get(timeoutKey));
                 translationMessages.delete(timeoutKey);
             }
-            
-        } catch (fetchError) {
-            console.log('❌ Translation message already deleted');
-        }
-        
-        // Удаляем из хранилища
+        } catch (fetchError) {}
         translationMessages.delete(message.id);
     }
     
-    // Если удалено сообщение с переводом, очищаем хранилище
     for (const [originalId, translationId] of translationMessages.entries()) {
         if (translationId === message.id) {
             const timeoutKey = `${originalId}_timeout`;
@@ -1361,149 +954,111 @@ client.on('messageDelete', async (message) => {
                 translationMessages.delete(timeoutKey);
             }
             translationMessages.delete(originalId);
-            console.log(`🗑️ Translation mapping cleaned (translation message deleted)`);
             break;
         }
     }
 });
 
 // ⬇️⬇️⬇️ ОБРАБОТКА СООБЩЕНИЙ ⬇️⬇️⬇️
-
 client.on('messageCreate', async message => {
-    // Пропускаем только сообщения от других ботов, но разрешаем команду -transcript для всех
     if(message.author.bot && !message.content.toLowerCase().includes('-transcript')) return;
 
-    // КОМАНДЫ WAR THUNDER
     if(message.content.toLowerCase().startsWith('!полк ')) {
         // ... существующий код для War Thunder команд ...
     }
 
-    // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
-   else if(message.content.toLowerCase() === '-transcript') {
-    await message.delete().catch(() => {});
-    
-    try {
-        console.log('🚀 Starting transcript creation process...');
+    else if(message.content.toLowerCase() === '-transcript') {
+        await message.delete().catch(() => {});
         
-        // Собираем все сообщения из канала
-        let messageCollection = new Collection();
-        let channelMessages = await message.channel.messages.fetch({ limit: 100 });
-        messageCollection = messageCollection.concat(channelMessages);
-
-        let lastMessage = channelMessages.last();
-        while(channelMessages.size === 100 && lastMessage) {
-            let lastMessageId = lastMessage.id;
-            channelMessages = await message.channel.messages.fetch({ 
-                limit: 100, 
-                before: lastMessageId 
-            });
-            
-            if(channelMessages && channelMessages.size > 0) {
-                messageCollection = messageCollection.concat(channelMessages);
-                lastMessage = channelMessages.last();
-            } else {
-                break;
-            }
-        }
-
-        const allMessages = Array.from(messageCollection.values()).reverse();
-        
-        console.log(`📨 Collected ${allMessages.length} messages from channel`);
-        
-        // Собираем информацию о тикете
-        const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
-        const ticketReport = generateTicketReport(ticketInfo);
-        ticketReport.messageCount = allMessages.length;
-        
-        // Генерируем уникальный ID ДО создания HTML
-        const transcriptId = generateTranscriptId();
-        console.log(`🆔 Generated transcript ID: ${transcriptId}`);
-        
-        // Создаем HTML транскрипт
-        console.log(`📝 Creating HTML transcript...`);
-        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
-        
-        // Проверяем, что HTML создан
-        if (!htmlContent || htmlContent.length < 100) {
-            throw new Error('HTML transcript creation failed - content too short');
-        }
-        
-        console.log(`✅ HTML transcript created (${htmlContent.length} characters)`);
-        
-        // Сохраняем транскрипт ПЕРЕД созданием URL
-        const transcriptData = {
-            html: htmlContent,
-            createdAt: Date.now(),
-            ticketInfo: {
-                ...ticketReport.ticketInfo,
-                messageCount: ticketReport.messageCount,
-                participantsCount: ticketReport.participants.length
-            }
-        };
-        
-        transcriptsStorage.set(transcriptId, transcriptData);
-        
-        console.log(`💾 Transcript saved to storage: ${transcriptId}`);
-        console.log(`📊 Storage size: ${transcriptsStorage.size}`);
-        
-        // Проверяем, что транскрипт действительно сохранен
-        const savedTranscript = transcriptsStorage.get(transcriptId);
-        if (!savedTranscript) {
-            throw new Error('Failed to save transcript to storage');
-        }
-        
-        // Создаем URL для просмотра транскрипта
-        const baseUrl = getBaseUrl();
-        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
-        
-        console.log(`🔗 Transcript URL: ${transcriptUrl}`);
-        
-        // Проверяем URL
         try {
-            new URL(transcriptUrl);
-            console.log(`✅ URL is valid`);
-        } catch (urlError) {
-            console.error('❌ Invalid URL:', transcriptUrl);
-            throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
+            console.log('🚀 Starting transcript creation process...');
+            
+            let messageCollection = new Collection();
+            let channelMessages = await message.channel.messages.fetch({ limit: 100 });
+            messageCollection = messageCollection.concat(channelMessages);
+
+            let lastMessage = channelMessages.last();
+            while(channelMessages.size === 100 && lastMessage) {
+                let lastMessageId = lastMessage.id;
+                channelMessages = await message.channel.messages.fetch({ limit: 100, before: lastMessageId });
+                if(channelMessages && channelMessages.size > 0) {
+                    messageCollection = messageCollection.concat(channelMessages);
+                    lastMessage = channelMessages.last();
+                } else break;
+            }
+
+            const allMessages = Array.from(messageCollection.values()).reverse();
+            console.log(`📨 Collected ${allMessages.length} messages from channel`);
+            
+            const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
+            const ticketReport = generateTicketReport(ticketInfo);
+            ticketReport.messageCount = allMessages.length;
+            
+            const transcriptId = generateTranscriptId();
+            console.log(`🆔 Generated transcript ID: ${transcriptId}`);
+            
+            const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+            if (!htmlContent || htmlContent.length < 100) {
+                throw new Error('HTML transcript creation failed');
+            }
+            console.log(`✅ HTML transcript created (${htmlContent.length} characters)`);
+            
+            const transcriptData = {
+                html: htmlContent,
+                createdAt: Date.now(),
+                ticketInfo: {
+                    ...ticketReport.ticketInfo,
+                    messageCount: ticketReport.messageCount,
+                    participantsCount: ticketReport.participants.length
+                }
+            };
+            
+            transcriptsStorage.set(transcriptId, transcriptData);
+            console.log(`💾 Transcript saved to storage: ${transcriptId}`);
+            
+            const baseUrl = getBaseUrl();
+            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+            console.log(`🔗 Transcript URL: ${transcriptUrl}`);
+            
+            try {
+                new URL(transcriptUrl);
+                console.log(`✅ URL is valid`);
+            } catch (urlError) {
+                console.error('❌ Invalid URL:', transcriptUrl);
+                throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
+            }
+            
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setLabel('📄 Open Transcript')
+                        .setURL(transcriptUrl)
+                        .setStyle(ButtonStyle.Link)
+                );
+            
+            const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+            
+            if (transcriptChannel && transcriptChannel.isTextBased()) {
+                await transcriptChannel.send({
+                    embeds: [ticketInfoEmbed],
+                    components: [row],
+                    content: `📋 **Transcript Created**\n**ID:** \`${transcriptId}\``
+                });
+                
+                await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
+                console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
+                console.log(`🎉 Transcript creation completed successfully!`);
+                
+            } else {
+                throw new Error('Transcript channel not found or not accessible');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error creating transcript:', error);
+            await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
-        
-        // Создаем кнопку
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('📄 Open Transcript')
-                    .setURL(transcriptUrl)
-                    .setStyle(ButtonStyle.Link)
-            );
-        
-        // Отправляем сообщение
-        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-        
-        if (transcriptChannel && transcriptChannel.isTextBased()) {
-            await transcriptChannel.send({
-                embeds: [ticketInfoEmbed],
-                components: [row],
-                content: `📋 **Transcript Created**\n**ID:** \`${transcriptId}\``
-            });
-            
-            await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-            console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
-            
-            // Логируем успешное создание
-            console.log(`🎉 Transcript creation completed successfully!`);
-            console.log(`📊 Final storage size: ${transcriptsStorage.size}`);
-            
-        } else {
-            throw new Error('Transcript channel not found or not accessible');
-        }
-        
-    } catch (error) {
-        console.error('❌ Error creating transcript:', error);
-        console.error('Error stack:', error.stack);
-        await message.channel.send('❌ Error creating transcript: ' + error.message);
     }
-}
 });
 
 // Обработка ошибок
