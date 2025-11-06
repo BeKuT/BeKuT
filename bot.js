@@ -246,12 +246,13 @@ const translationMessages = new Map();
 
 // Функция для сбора информации о тикете
 async function collectTicketInfo(channel, messages) {
-    const participants = new Set();
+    const participants = new Map(); // Используем Map вместо Set для уникальности по ID
     let ticketCreator = null;
     let firstMessage = null;
 
     messages.forEach(msg => {
-        participants.add({
+        // Добавляем участника в Map по ID (автоматически убирает дубликаты)
+        participants.set(msg.author.id, {
             id: msg.author.id,
             username: msg.author.tag,
             displayName: msg.author.displayName || msg.author.username,
@@ -285,7 +286,7 @@ async function collectTicketInfo(channel, messages) {
         } : null,
         channelName: channel.name,
         channelId: channel.id,
-        participants: Array.from(participants).map(p => ({
+        participants: Array.from(participants.values()).map(p => ({
             username: p.username,
             displayName: p.displayName,
             userId: p.id,
@@ -580,14 +581,8 @@ function createEmbedHTML(embed) {
 function createTicketInfoEmbedWithParticipants(ticketReport) {
     const createdBy = ticketReport.ticketInfo.createdBy;
     
-    const uniqueParticipants = [];
-    const seenIds = new Set();
-    ticketReport.participants.forEach(p => {
-        if (!seenIds.has(p.userId)) {
-            seenIds.add(p.userId);
-            uniqueParticipants.push(p);
-        }
-    });
+    // Уже нет дубликатов, так как исправлено в collectTicketInfo
+    const uniqueParticipants = ticketReport.participants;
     
     const participantsList = uniqueParticipants
         .slice(0, 10)
