@@ -870,15 +870,24 @@ function generateTranscriptId() {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    // В Railway используем предоставленный домен
-    if (process.env.RAILWAY_STATIC_URL) {
-        return process.env.RAILWAY_STATIC_URL;
+    // Проверяем все возможные источники URL в Railway
+    const possibleUrls = [
+        process.env.RAILWAY_STATIC_URL,
+        process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null,
+        `https://${process.env.RAILWAY_SERVICE_NAME}-${process.env.RAILWAY_SERVICE_ID}.railway.app`,
+        'https://your-app-name.railway.app' // замените на реальное имя
+    ].filter(url => url && !url.includes('localhost'));
+    
+    if (possibleUrls.length > 0) {
+        const selectedUrl = possibleUrls[0];
+        console.log(`🌐 Using base URL: ${selectedUrl}`);
+        return selectedUrl;
     }
-    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-    }
+    
     // Для локальной разработки
-    return `http://localhost:${process.env.PORT || 3000}`;
+    const localUrl = `http://localhost:${process.env.PORT || 3000}`;
+    console.log(`🌐 Using local URL: ${localUrl}`);
+    return localUrl;
 }
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
@@ -1370,111 +1379,131 @@ client.on('messageCreate', async message => {
     }
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
-    else if(message.content.toLowerCase() === '-transcript') {
-        await message.delete().catch(() => {});
+   else if(message.content.toLowerCase() === '-transcript') {
+    await message.delete().catch(() => {});
+    
+    try {
+        console.log('🚀 Starting transcript creation process...');
         
-        try {
-            // Собираем все сообщения из канала
-            let messageCollection = new Collection();
-            let channelMessages = await message.channel.messages.fetch({ limit: 100 });
-            messageCollection = messageCollection.concat(channelMessages);
+        // Собираем все сообщения из канала
+        let messageCollection = new Collection();
+        let channelMessages = await message.channel.messages.fetch({ limit: 100 });
+        messageCollection = messageCollection.concat(channelMessages);
 
-            let lastMessage = channelMessages.last();
-            while(channelMessages.size === 100 && lastMessage) {
-                let lastMessageId = lastMessage.id;
-                channelMessages = await message.channel.messages.fetch({ 
-                    limit: 100, 
-                    before: lastMessageId 
-                });
-                
-                if(channelMessages && channelMessages.size > 0) {
-                    messageCollection = messageCollection.concat(channelMessages);
-                    lastMessage = channelMessages.last();
-                } else {
-                    break;
-                }
-            }
-
-            const allMessages = Array.from(messageCollection.values()).reverse();
-            
-            // Собираем информацию о тикете
-            const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
-            const ticketReport = generateTicketReport(ticketInfo);
-            ticketReport.messageCount = allMessages.length;
-            
-            // Генерируем уникальный ID ДО создания HTML
-            const transcriptId = generateTranscriptId();
-            console.log(`🆔 Generated transcript ID: ${transcriptId}`);
-            
-            // Создаем HTML транскрипт
-            const htmlContent = createHTMLTranscript(ticketReport, allMessages);
-            
-            // Сохраняем транскрипт ПЕРЕД созданием URL
-            transcriptsStorage.set(transcriptId, {
-                html: htmlContent,
-                createdAt: Date.now(),
-                ticketInfo: {
-                    ...ticketReport.ticketInfo,
-                    messageCount: ticketReport.messageCount,
-                    participantsCount: ticketReport.participants.length
-                }
+        let lastMessage = channelMessages.last();
+        while(channelMessages.size === 100 && lastMessage) {
+            let lastMessageId = lastMessage.id;
+            channelMessages = await message.channel.messages.fetch({ 
+                limit: 100, 
+                before: lastMessageId 
             });
             
-            console.log(`💾 Transcript saved: ${transcriptId}`);
-            console.log(`📊 Storage size: ${transcriptsStorage.size}`);
-            
-            // Создаем URL для просмотра транскрипта
-            const baseUrl = getBaseUrl();
-            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
-            
-            // Проверяем URL
-            try {
-                new URL(transcriptUrl);
-                console.log(`🔗 Valid URL: ${transcriptUrl}`);
-            } catch (urlError) {
-                console.error('❌ Invalid URL:', transcriptUrl);
-                // Fallback: используем только ID
-                const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-                const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-                if (transcriptChannel) {
-                    await transcriptChannel.send({
-                        embeds: [ticketInfoEmbed],
-                        content: `📄 **Transcript Created**\nID: \`${transcriptId}\`\nURL: ${transcriptUrl}`
-                    });
-                }
-                return;
-            }
-            
-            // Создаем кнопку
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setLabel('📄 Open Transcript')
-                        .setURL(transcriptUrl)
-                        .setStyle(ButtonStyle.Link)
-                );
-            
-            // Отправляем сообщение
-            const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-            
-            if (transcriptChannel && transcriptChannel.isTextBased()) {
-                await transcriptChannel.send({
-                    embeds: [ticketInfoEmbed],
-                    components: [row]
-                });
-                
-                await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-                console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
+            if(channelMessages && channelMessages.size > 0) {
+                messageCollection = messageCollection.concat(channelMessages);
+                lastMessage = channelMessages.last();
             } else {
-                await message.channel.send('❌ Transcript channel not found!');
+                break;
             }
-            
-        } catch (error) {
-            console.error('❌ Error creating transcript:', error);
-            await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
+
+        const allMessages = Array.from(messageCollection.values()).reverse();
+        
+        console.log(`📨 Collected ${allMessages.length} messages from channel`);
+        
+        // Собираем информацию о тикете
+        const ticketInfo = await collectTicketInfo(message.channel, messageCollection);
+        const ticketReport = generateTicketReport(ticketInfo);
+        ticketReport.messageCount = allMessages.length;
+        
+        // Генерируем уникальный ID ДО создания HTML
+        const transcriptId = generateTranscriptId();
+        console.log(`🆔 Generated transcript ID: ${transcriptId}`);
+        
+        // Создаем HTML транскрипт
+        console.log(`📝 Creating HTML transcript...`);
+        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+        
+        // Проверяем, что HTML создан
+        if (!htmlContent || htmlContent.length < 100) {
+            throw new Error('HTML transcript creation failed - content too short');
+        }
+        
+        console.log(`✅ HTML transcript created (${htmlContent.length} characters)`);
+        
+        // Сохраняем транскрипт ПЕРЕД созданием URL
+        const transcriptData = {
+            html: htmlContent,
+            createdAt: Date.now(),
+            ticketInfo: {
+                ...ticketReport.ticketInfo,
+                messageCount: ticketReport.messageCount,
+                participantsCount: ticketReport.participants.length
+            }
+        };
+        
+        transcriptsStorage.set(transcriptId, transcriptData);
+        
+        console.log(`💾 Transcript saved to storage: ${transcriptId}`);
+        console.log(`📊 Storage size: ${transcriptsStorage.size}`);
+        
+        // Проверяем, что транскрипт действительно сохранен
+        const savedTranscript = transcriptsStorage.get(transcriptId);
+        if (!savedTranscript) {
+            throw new Error('Failed to save transcript to storage');
+        }
+        
+        // Создаем URL для просмотра транскрипта
+        const baseUrl = getBaseUrl();
+        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+        
+        console.log(`🔗 Transcript URL: ${transcriptUrl}`);
+        
+        // Проверяем URL
+        try {
+            new URL(transcriptUrl);
+            console.log(`✅ URL is valid`);
+        } catch (urlError) {
+            console.error('❌ Invalid URL:', transcriptUrl);
+            throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
+        }
+        
+        // Создаем кнопку
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('📄 Open Transcript')
+                    .setURL(transcriptUrl)
+                    .setStyle(ButtonStyle.Link)
+            );
+        
+        // Отправляем сообщение
+        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+        const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+        
+        if (transcriptChannel && transcriptChannel.isTextBased()) {
+            await transcriptChannel.send({
+                embeds: [ticketInfoEmbed],
+                components: [row],
+                content: `📋 **Transcript Created**\n**ID:** \`${transcriptId}\``
+            });
+            
+            await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
+            console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
+            
+            // Логируем успешное создание
+            console.log(`🎉 Transcript creation completed successfully!`);
+            console.log(`📊 Final storage size: ${transcriptsStorage.size}`);
+            
+        } else {
+            throw new Error('Transcript channel not found or not accessible');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error creating transcript:', error);
+        console.error('Error stack:', error.stack);
+        await message.channel.send('❌ Error creating transcript: ' + error.message);
     }
+}
 });
 
 // Обработка ошибок
