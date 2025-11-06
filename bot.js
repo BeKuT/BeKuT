@@ -1371,9 +1371,9 @@ client.on('messageCreate', async message => {
 
     // ОБНОВЛЕННАЯ КОМАНДА ТРАНСКРИПТА - ДОСТУПНА ДЛЯ ЛЮДЕЙ И БОТОВ
     else if(message.content.toLowerCase() === '-transcript') {
-    await message.delete().catch(() => {});
-    
-    try {
+        await message.delete().catch(() => {});
+        
+        try {
             // Собираем все сообщения из канала
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
@@ -1402,95 +1402,70 @@ client.on('messageCreate', async message => {
             const ticketReport = generateTicketReport(ticketInfo);
             ticketReport.messageCount = allMessages.length;
             
-            
-            // Генерируем уникальный ID и сохраняем транскрипт
+            // Генерируем уникальный ID ДО создания HTML
             const transcriptId = generateTranscriptId();
-        console.log(`🆔 Generated transcript ID: ${transcriptId}`);
-        
-        // Создаем HTML транскрипт
-        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
-        
-        // Сохраняем транскрипт ПЕРЕД созданием URL
-        transcriptsStorage.set(transcriptId, {
-            html: htmlContent,
-            createdAt: Date.now(),
-            ticketInfo: {
-                ...ticketReport.ticketInfo,
-                messageCount: ticketReport.messageCount,
-                participantsCount: ticketReport.participants.length
-            }
-        });
-        
-        console.log(`💾 Transcript saved: ${transcriptId}`);
-        console.log(`📊 Storage size: ${transcriptsStorage.size}`);
-        
-        // Создаем URL для просмотра транскрипта
-        const baseUrl = getBaseUrl();
-        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
-        
-        // Проверяем URL
-        try {
-            new URL(transcriptUrl);
-            console.log(`🔗 Valid URL: ${transcriptUrl}`);
-        } catch (urlError) {
-            console.error('❌ Invalid URL:', transcriptUrl);
-            // Fallback: используем только ID
-            await transcriptChannel.send({
-                embeds: [ticketInfoEmbed],
-                content: `📄 **Transcript Created**\nID: \`${transcriptId}\`\nURL: ${transcriptUrl}`
-            });
-            return;
-        }
-        
-        // Создаем кнопку
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('📄 Open Transcript')
-                    .setURL(transcriptUrl)
-                    .setStyle(ButtonStyle.Link)
-            );
-        
-        // Отправляем сообщение
-        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-        await transcriptChannel.send({
-            embeds: [ticketInfoEmbed],
-            components: [row]
-        });
-        
-        console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
-        
-    } catch (error) {
-        console.error('❌ Error creating transcript:', error);
-        await message.channel.send('❌ Error creating transcript: ' + error.message);
-    }
-}
+            console.log(`🆔 Generated transcript ID: ${transcriptId}`);
             
-            // Отправляем в канал для транскриптов
+            // Создаем HTML транскрипт
+            const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+            
+            // Сохраняем транскрипт ПЕРЕД созданием URL
+            transcriptsStorage.set(transcriptId, {
+                html: htmlContent,
+                createdAt: Date.now(),
+                ticketInfo: {
+                    ...ticketReport.ticketInfo,
+                    messageCount: ticketReport.messageCount,
+                    participantsCount: ticketReport.participants.length
+                }
+            });
+            
+            console.log(`💾 Transcript saved: ${transcriptId}`);
+            console.log(`📊 Storage size: ${transcriptsStorage.size}`);
+            
+            // Создаем URL для просмотра транскрипта
+            const baseUrl = getBaseUrl();
+            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+            
+            // Проверяем URL
+            try {
+                new URL(transcriptUrl);
+                console.log(`🔗 Valid URL: ${transcriptUrl}`);
+            } catch (urlError) {
+                console.error('❌ Invalid URL:', transcriptUrl);
+                // Fallback: используем только ID
+                const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+                const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+                if (transcriptChannel) {
+                    await transcriptChannel.send({
+                        embeds: [ticketInfoEmbed],
+                        content: `📄 **Transcript Created**\nID: \`${transcriptId}\`\nURL: ${transcriptUrl}`
+                    });
+                }
+                return;
+            }
+            
+            // Создаем кнопку
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setLabel('📄 Open Transcript')
+                        .setURL(transcriptUrl)
+                        .setStyle(ButtonStyle.Link)
+                );
+            
+            // Отправляем сообщение
+            const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
             const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
             
             if (transcriptChannel && transcriptChannel.isTextBased()) {
-                // Создаем embed с информацией о тикете (с участниками)
-                const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-                
-                // Создаем кнопку
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setLabel('📄 Open Transcript')
-                            .setURL(validTranscriptUrl)
-                            .setStyle(ButtonStyle.Link)
-                    );
-                
-                // ✅ ОТПРАВЛЯЕМ ВСЕ В ОДНОМ СООБЩЕНИИ
                 await transcriptChannel.send({
                     embeds: [ticketInfoEmbed],
                     components: [row]
                 });
                 
                 await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-                console.log(`✅ HTML transcript created: ${validTranscriptUrl}`);
-                
+                console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
             } else {
                 await message.channel.send('❌ Transcript channel not found!');
             }
