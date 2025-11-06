@@ -630,18 +630,28 @@ function generateTranscriptId() {
 
 // Функция для получения базового URL
 function getBaseUrl() {
+    let baseUrl = '';
+    
     // Используем RAILWAY_STATIC_URL если он есть
     if (process.env.RAILWAY_STATIC_URL) {
-        return process.env.RAILWAY_STATIC_URL;
+        baseUrl = process.env.RAILWAY_STATIC_URL;
+        // Добавляем протокол если отсутствует
+        if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+            baseUrl = 'https://' + baseUrl;
+        }
     }
     // Используем RAILWAY_PUBLIC_DOMAIN
-    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
     }
     // Для локальной разработки
-    return `http://localhost:${process.env.PORT || 3000}`;
+    else {
+        baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+    }
+    
+    console.log(`🔗 Base URL: ${baseUrl}`);
+    return baseUrl;
 }
-
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
     constructor() {
@@ -1021,12 +1031,12 @@ client.on('messageCreate', async message => {
             console.log(`🔗 Transcript URL: ${transcriptUrl}`);
             
             try {
-                new URL(transcriptUrl);
-                console.log(`✅ URL is valid`);
-            } catch (urlError) {
-                console.error('❌ Invalid URL:', transcriptUrl);
-                throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
-            }
+              new URL(transcriptUrl);
+               console.log(`✅ URL is valid`);
+             } catch (urlError) {
+              console.error('❌ Invalid URL:', transcriptUrl);
+             throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
+              } 
             
             const row = new ActionRowBuilder()
                 .addComponents(
