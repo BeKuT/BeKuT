@@ -1402,8 +1402,6 @@ client.on('messageCreate', async message => {
             const ticketReport = generateTicketReport(ticketInfo);
             ticketReport.messageCount = allMessages.length;
             
-            // Создаем HTML транскрипт
-            const htmlContent = createHTMLTranscript(ticketReport, allMessages);
             
             // Генерируем уникальный ID и сохраняем транскрипт
             const transcriptId = generateTranscriptId();
