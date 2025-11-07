@@ -675,136 +675,133 @@ function getBaseUrl() {
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
 
-// Главная функция - работает с ID игроков
-async function getPlayerStatsWorking(playerInput) {
-    console.log(`🎯 Getting stats for: ${playerInput}`);
-    
-    // Определяем, это ID или никнейм
-    const isID = /^\d+$/.test(playerInput);
-    const playerId = isID ? playerInput : await findPlayerId(playerInput);
-    
-    if (!playerId) {
-        throw new Error('Игрок не найден');
-    }
-
-    const methods = [
-        { name: 'CorsProxy', func: () => tryCorsProxy(playerId) },
-        { name: 'AllOrigins', func: () => tryAllOrigins(playerId) },
-        { name: 'CodeTabs', func: () => tryCodeTabs(playerId) },
-        { name: 'CorsAnywhere', func: () => tryCorsAnywhere(playerId) }
-    ];
-
-    for (let i = 0; i < methods.length; i++) {
-        try {
-            console.log(`🔄 Attempt ${i + 1}: ${methods[i].name}`);
-            const result = await methods[i].func();
-            if (result && result.battles > 0) {
-                console.log(`✅ SUCCESS with ${methods[i].name}`);
-                return result;
+// Функция для получения ID через парсинг HTML страницы поиска
+async function findPlayerIdBySearch(nickname) {
+    try {
+        console.log(`🔍 Parsing search page for: ${nickname}`);
+        
+        // Получаем HTML страницы поиска
+        const response = await axios.get(
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://statshark.net/search?q=${encodeURIComponent(nickname)}`)}`,
+            { 
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
             }
-        } catch (error) {
-            console.log(`❌ ${methods[i].name} failed: ${error.message}`);
-            if (i < methods.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1500));
+        );
+
+        const html = response.data;
+        
+        // Ищем ID игрока в HTML
+        // StatShark обычно имеет ссылки вида /player/12345 в результатах поиска
+        const playerIdMatch = html.match(/href="\/player\/(\d+)[^"]*"[^>]*>[^<]*SLAVA_OTECHESTVU/i);
+        
+        if (playerIdMatch && playerIdMatch[1]) {
+            const playerId = playerIdMatch[1];
+            console.log(`✅ Found ID: ${playerId} for ${nickname}`);
+            return playerId;
+        }
+        
+        // Альтернативный поиск по структуре HTML
+        const alternativeMatch = html.match(/\/player\/(\d+)[^"]*"[^>]*>([^<]*)<\/a>/g);
+        if (alternativeMatch) {
+            for (const match of alternativeMatch) {
+                if (match.toLowerCase().includes(nickname.toLowerCase())) {
+                    const idMatch = match.match(/\/player\/(\d+)/);
+                    if (idMatch && idMatch[1]) {
+                        console.log(`✅ Found ID via alternative: ${idMatch[1]}`);
+                        return idMatch[1];
+                    }
+                }
             }
         }
+        
+        console.log('❌ Player ID not found in search results');
+        return null;
+        
+    } catch (error) {
+        console.error('Search parsing error:', error.message);
+        return null;
     }
-    
-    throw new Error('Все методы не сработали');
 }
 
-// Поиск ID игрока по никнейму
-async function findPlayerId(nickname) {
-    console.log(`🔍 Searching ID for: ${nickname}`);
-    
-    try {
-        const response = await axios.get(
-            `https://corsproxy.io/?${encodeURIComponent(`https://api.statshark.net/api/search/${encodeURIComponent(nickname)}`)}`,
-            { timeout: 10000 }
-        );
-        
-        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        
-        if (data && data.players && data.players.length > 0) {
-            const player = data.players[0];
-            console.log(`✅ Found ID: ${player.id} for ${player.username}`);
-            return player.id;
+// Улучшенная функция поиска ID
+async function findPlayerIdAdvanced(nickname) {
+    // Пробуем разные методы поиска
+    const methods = [
+        { name: 'SearchPage', func: () => findPlayerIdBySearch(nickname) },
+        { name: 'DirectAPI', func: () => findPlayerIdDirect(nickname) }
+    ];
+
+    for (const method of methods) {
+        try {
+            console.log(`🔄 Trying ID search: ${method.name}`);
+            const playerId = await method.func();
+            if (playerId) {
+                return playerId;
+            }
+        } catch (error) {
+            console.log(`❌ ${method.name} failed: ${error.message}`);
+            continue;
         }
-    } catch (error) {
-        console.log('❌ Search failed:', error.message);
     }
     
     return null;
 }
 
-// 1. CorsProxy.io
-async function tryCorsProxy(playerId) {
-    const response = await axios.get(
-        `https://corsproxy.io/?${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
-        { timeout: 10000 }
-    );
-    return parseStatSharkData(response.data, playerId);
-}
-
-// 2. AllOrigins.win
-async function tryAllOrigins(playerId) {
-    const response = await axios.get(
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
-        { timeout: 10000 }
-    );
-    return parseStatSharkData(response.data, playerId);
-}
-
-// 3. CodeTabs
-async function tryCodeTabs(playerId) {
-    const response = await axios.get(
-        `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
-        { timeout: 10000 }
-    );
-    return parseStatSharkData(response.data, playerId);
-}
-
-// 4. CorsAnywhere
-async function tryCorsAnywhere(playerId) {
-    const response = await axios.get(
-        `https://cors-anywhere.herokuapp.com/https://api.statshark.net/api/player/${playerId}`,
-        { 
-            timeout: 10000,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+// Прямой поиск через API (если доступно)
+async function findPlayerIdDirect(nickname) {
+    try {
+        const response = await axios.get(
+            `https://corsproxy.io/?${encodeURIComponent(`https://statshark.net/api/search/${encodeURIComponent(nickname)}`)}`,
+            { timeout: 8000 }
+        );
+        
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        if (data?.players?.[0]?.id) {
+            return data.players[0].id;
         }
-    );
-    return parseStatSharkData(response.data, playerId);
+    } catch (error) {
+        throw error;
+    }
+    return null;
 }
 
-// Парсинг данных StatShark
-function parseStatSharkData(data, playerId) {
-    // Если данные пришли как строка (от прокси)
-    const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
+// Главная функция получения статистики
+async function getPlayerStatsSmart(playerInput) {
+    const isID = /^\d+$/.test(playerInput);
     
-    if (!jsonData || !jsonData.player) {
-        throw new Error('Invalid data format');
+    if (isID) {
+        // Если ввели ID - пробуем получить статистику
+        return await getStatsByPlayerId(playerInput);
+    } else {
+        // Если ввели никнейм - ищем ID и потом статистику
+        const playerId = await findPlayerIdAdvanced(playerInput);
+        if (playerId) {
+            return await getStatsByPlayerId(playerId);
+        } else {
+            throw new Error('ID_NOT_FOUND');
+        }
     }
+}
 
-    const player = jsonData.player;
-    const stats = jsonData.stats || {};
-    
-    return {
-        nickname: player.username || 'Unknown',
-        playerId: playerId,
-        level: player.level || 'N/A',
-        battles: stats.battles || 0,
-        winRate: stats.win_rate ? (stats.win_rate * 100).toFixed(1) + '%' : 'N/A',
-        kdr: stats.kill_death_ratio ? stats.kill_death_ratio.toFixed(2) : 'N/A',
-        efficiency: stats.efficiency_rating || 'N/A',
-        aircraftBattles: stats.air_battles || 0,
-        groundBattles: stats.ground_battles || 0,
-        fleetBattles: stats.naval_battles || 0,
-        lastUpdated: new Date().toISOString(),
-        source: 'StatShark',
-        profileUrl: `https://statshark.net/player/${playerId}`
-    };
+// Получение статистики по ID
+async function getStatsByPlayerId(playerId) {
+    const methods = [
+        { name: 'CorsProxy', func: () => tryCorsProxy(playerId) },
+        { name: 'AllOrigins', func: () => tryAllOrigins(playerId) }
+    ];
+
+    for (const method of methods) {
+        try {
+            const result = await method.func();
+            if (result) return result;
+        } catch (error) {
+            continue;
+        }
+    }
+    throw new Error('STATS_UNAVAILABLE');
 }
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
@@ -1137,16 +1134,14 @@ client.on('messageCreate', async message => {
         try {
             await message.channel.sendTyping();
             
-            // Показываем что идет поиск
-            const searchMsg = await message.reply(`🔍 **Поиск статистики...**`);
+            const searchMsg = await message.reply(`🔍 **Поиск игрока ${playerInput}...**`);
             
-            // Пробуем получить статистику
-            const stats = await getPlayerStatsWorking(playerInput);
+            // Пробуем умный поиск
+            const stats = await getPlayerStatsSmart(playerInput);
             
-            // Удаляем сообщение о поиске
             await searchMsg.delete().catch(() => {});
             
-            // Создаем красивый embed
+            // Успех - показываем статистику
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
                 .setTitle(`📊 ${stats.nickname}`)
@@ -1156,22 +1151,97 @@ client.on('messageCreate', async message => {
                     { name: '🎯 Уровень', value: `**${stats.level}**`, inline: true },
                     { name: '⚔️ Боёв', value: `**${stats.battles.toLocaleString()}**`, inline: true },
                     { name: '📈 Винрейт', value: `**${stats.winRate}**`, inline: true },
-                    { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true },
-                    { name: '⭐ Рейтинг', value: `**${stats.efficiency}**`, inline: true },
-                    { name: '🔧 Источник', value: `**${stats.source}**`, inline: true }
+                    { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true }
                 )
-                .setFooter({ text: 'StatShark • По ID игрока' })
+                .setFooter({ text: 'StatShark • Автоматический поиск' })
                 .setTimestamp();
 
             await message.reply({ embeds: [embed] });
 
         } catch (error) {
-            console.error('Final error:', error.message);
+            console.error('Smart search error:', error.message);
             
-            // FALLBACK С ПОИСКОМ ПО НИКНЕЙМУ
-            await sendIdBasedFallback(message, playerInput);
+            // УМНЫЙ FALLBACK В ЗАВИСИМОСТИ ОТ ОШИБКИ
+            if (error.message === 'ID_NOT_FOUND') {
+                await sendPlayerNotFound(message, playerInput);
+            } else {
+                await sendSmartFallback(message, playerInput);
+            }
         }
     }
+});
+
+// Игрок не найден
+async function sendPlayerNotFound(message, playerInput) {
+    const embed = new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle(`🔍 ${playerInput}`)
+        .setDescription('**Игрок не найден в StatShark**\n\n💡 **Возможные причины:**')
+        .addFields(
+            { name: '❌ Игрок не зарегистрирован', value: 'В StatShark есть не все игроки', inline: false },
+            { name: '🔍 Проверить вручную', value: `[Поиск в StatShark](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
+            { name: '⚡ Официальный сайт', value: `[Проверить на сайте War Thunder](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`, inline: false }
+        )
+        .setFooter({ text: 'Попробуйте использовать ID игрока вместо ника' })
+        .setTimestamp();
+
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setLabel('🔍 Поиск в StatShark')
+                .setURL(`https://statshark.net/search?q=${encodeURIComponent(playerInput)}`)
+                .setStyle(ButtonStyle.Link),
+            new ButtonBuilder()
+                .setLabel('⚡ Официальный сайт')
+                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
+                .setStyle(ButtonStyle.Link)
+        );
+
+    await message.reply({ 
+        embeds: [embed],
+        components: [row]
+    });
+}
+
+// Умный fallback
+async function sendSmartFallback(message, playerInput) {
+    const isID = /^\d+$/.test(playerInput);
+    
+    const embed = new EmbedBuilder()
+        .setColor(0x0099FF)
+        .setTitle(`📊 ${playerInput}`)
+        .setDescription('**Статистика War Thunder**\n\n🔗 **Быстрые ссылки:**')
+        .setFooter({ text: 'StatShark • Ручной поиск' })
+        .setTimestamp();
+
+    if (isID) {
+        embed.addFields(
+            { name: '🌐 StatShark', value: `[Открыть статистику](https://statshark.net/player/${playerInput})`, inline: false },
+            { name: '💡 Совет', value: 'Это ID игрока. StatShark должен показать статистику.', inline: false }
+        );
+    } else {
+        embed.addFields(
+            { name: '🌐 StatShark', value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
+            { name: '💡 Совет', value: 'Найдите игрока и скопируйте его ID для автоматического поиска', inline: false }
+        );
+    }
+
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setLabel(isID ? '📊 StatShark' : '🔍 Поиск в StatShark')
+                .setURL(isID ? 
+                    `https://statshark.net/player/${playerInput}` :
+                    `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
+                )
+                .setStyle(ButtonStyle.Link)
+        );
+
+    await message.reply({ 
+        embeds: [embed],
+        components: [row]
+    });
+}
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
         const regimentName = message.content.slice(6).trim();
@@ -1283,66 +1353,7 @@ client.on('messageCreate', async message => {
         }
     }
 });
-// FALLBACK С ССЫЛКАМИ НА ПОИСК
-async function sendIdBasedFallback(message, playerInput) {
-    const isID = /^\d+$/.test(playerInput);
-    
-    const embed = new EmbedBuilder()
-        .setColor(0x0099FF)
-        .setTitle(`📊 ${playerInput}`)
-        .setDescription('**Статистика War Thunder**\n\n🔗 **Ссылки для просмотра статистики:**')
-        .setFooter({ text: 'Используйте ID игрока для автоматического поиска' })
-        .setTimestamp();
 
-    if (isID) {
-        // Если ввели ID - прямая ссылка
-        embed.addFields(
-            { 
-                name: '🌐 StatShark', 
-                value: `[Открыть статистику](https://statshark.net/player/${playerInput})`,
-                inline: false 
-            }
-        );
-    } else {
-        // Если ввели никнейм - ссылка на поиск
-        embed.addFields(
-            { 
-                name: '🌐 StatShark', 
-                value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`,
-                inline: false 
-            },
-            { 
-                name: '⚡ Официальный сайт', 
-                value: `[Найти игрока](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`,
-                inline: false 
-            }
-        );
-    }
-
-    // Кнопки для быстрого доступа
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setLabel('🌐 StatShark')
-                .setURL(isID ? 
-                    `https://statshark.net/player/${playerInput}` :
-                    `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
-                )
-                .setStyle(ButtonStyle.Link),
-            new ButtonBuilder()
-                .setLabel('⚡ Официальный сайт')
-                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
-                .setStyle(ButtonStyle.Link)
-        );
-
-    await message.reply({ 
-        content: isID ? 
-            '❌ Не удалось получить статистику автоматически' :
-            '🔍 Используйте ID игрока для автоматического поиска',
-        embeds: [embed],
-        components: [row]
-    });
-}
 // Обработка ошибок
 process.on('unhandledRejection', error => {
     console.error('❌ Unhandled promise rejection:', error);
