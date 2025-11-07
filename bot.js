@@ -1241,6 +1241,8 @@ async function sendSmartFallback(message, playerInput) {
         embeds: [embed],
         components: [row]
     });
+   }
+
 }
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
