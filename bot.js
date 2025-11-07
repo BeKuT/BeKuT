@@ -674,182 +674,136 @@ function getBaseUrl() {
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
-// Функция с Railway-оптимизированными запросами
-async function getPlayerStatsForRailway(nickname) {
+
+// Главная функция - работает с ID игроков
+async function getPlayerStatsWorking(playerInput) {
+    console.log(`🎯 Getting stats for: ${playerInput}`);
+    
+    // Определяем, это ID или никнейм
+    const isID = /^\d+$/.test(playerInput);
+    const playerId = isID ? playerInput : await findPlayerId(playerInput);
+    
+    if (!playerId) {
+        throw new Error('Игрок не найден');
+    }
+
+    const methods = [
+        { name: 'CorsProxy', func: () => tryCorsProxy(playerId) },
+        { name: 'AllOrigins', func: () => tryAllOrigins(playerId) },
+        { name: 'CodeTabs', func: () => tryCodeTabs(playerId) },
+        { name: 'CorsAnywhere', func: () => tryCorsAnywhere(playerId) }
+    ];
+
+    for (let i = 0; i < methods.length; i++) {
+        try {
+            console.log(`🔄 Attempt ${i + 1}: ${methods[i].name}`);
+            const result = await methods[i].func();
+            if (result && result.battles > 0) {
+                console.log(`✅ SUCCESS with ${methods[i].name}`);
+                return result;
+            }
+        } catch (error) {
+            console.log(`❌ ${methods[i].name} failed: ${error.message}`);
+            if (i < methods.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+    }
+    
+    throw new Error('Все методы не сработали');
+}
+
+// Поиск ID игрока по никнейму
+async function findPlayerId(nickname) {
+    console.log(`🔍 Searching ID for: ${nickname}`);
+    
     try {
-        console.log(`🔍 Railway: Requesting stats for ${nickname}`);
+        const response = await axios.get(
+            `https://corsproxy.io/?${encodeURIComponent(`https://api.statshark.net/api/search/${encodeURIComponent(nickname)}`)}`,
+            { timeout: 10000 }
+        );
         
-        // Используем разные подходы для Railway
-        const methods = [
-            { name: 'Railway Direct', func: () => railwayDirectRequest(nickname) },
-            { name: 'Railway with Headers', func: () => railwayWithCustomHeaders(nickname) },
-            { name: 'Public Proxy', func: () => railwayWithPublicProxy(nickname) },
-            { name: 'Multi-Origin', func: () => railwayMultiOrigin(nickname) }
-        ];
-
-        for (const method of methods) {
-            try {
-                console.log(`🔄 Trying ${method.name} on Railway`);
-                const result = await method.func();
-                if (result && result.battles > 0) {
-                    console.log(`✅ Success with ${method.name}`);
-                    return result;
-                }
-            } catch (error) {
-                console.log(`❌ ${method.name} failed: ${error.message}`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                continue;
-            }
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        
+        if (data && data.players && data.players.length > 0) {
+            const player = data.players[0];
+            console.log(`✅ Found ID: ${player.id} for ${player.username}`);
+            return player.id;
         }
-        
-        throw new Error('All Railway methods failed');
-        
     } catch (error) {
-        console.error('Railway stats error:', error);
-        throw error;
+        console.log('❌ Search failed:', error.message);
     }
+    
+    return null;
 }
 
-// Прямой запрос с Railway IP
-async function railwayDirectRequest(nickname) {
-    const response = await axios.get(`https://api.statshark.net/api/player/${encodeURIComponent(nickname)}`, {
-        timeout: 15000,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        },
-        // Важные настройки для axios на Railway
-        decompress: true,
-        maxRedirects: 5,
-        validateStatus: function (status) {
-            return status >= 200 && status < 600; // Принимаем все статусы
-        }
-    });
-
-    return parseStatSharkResponse(response);
+// 1. CorsProxy.io
+async function tryCorsProxy(playerId) {
+    const response = await axios.get(
+        `https://corsproxy.io/?${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
+        { timeout: 10000 }
+    );
+    return parseStatSharkData(response.data, playerId);
 }
 
-// Запрос с кастомными заголовками для Railway
-async function railwayWithCustomHeaders(nickname) {
-    const railwayHeaders = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Origin': 'https://statshark.net',
-        'Referer': 'https://statshark.net/',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-site',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'TE': 'trailers'
-    };
-
-    const response = await axios.get(`https://api.statshark.net/api/player/${encodeURIComponent(nickname)}`, {
-        timeout: 20000,
-        headers: railwayHeaders,
-        // Дополнительные настройки
-        withCredentials: false,
-        decompress: true
-    });
-
-    return parseStatSharkResponse(response);
+// 2. AllOrigins.win
+async function tryAllOrigins(playerId) {
+    const response = await axios.get(
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
+        { timeout: 10000 }
+    );
+    return parseStatSharkData(response.data, playerId);
 }
 
-// Использование публичных прокси с Railway
-async function railwayWithPublicProxy(nickname) {
-    const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.statshark.net/api/player/${nickname}`)}`,
-        `https://corsproxy.io/?${encodeURIComponent(`https://api.statshark.net/api/player/${nickname}`)}`,
-        `https://cors-anywhere.herokuapp.com/https://api.statshark.net/api/player/${nickname}`
-    ];
+// 3. CodeTabs
+async function tryCodeTabs(playerId) {
+    const response = await axios.get(
+        `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(`https://api.statshark.net/api/player/${playerId}`)}`,
+        { timeout: 10000 }
+    );
+    return parseStatSharkData(response.data, playerId);
+}
 
-    for (const proxyUrl of proxies) {
-        try {
-            const response = await axios.get(proxyUrl, {
-                timeout: 10000,
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-            
-            const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-            if (data?.player) {
-                return parseStatSharkData(data, nickname);
+// 4. CorsAnywhere
+async function tryCorsAnywhere(playerId) {
+    const response = await axios.get(
+        `https://cors-anywhere.herokuapp.com/https://api.statshark.net/api/player/${playerId}`,
+        { 
+            timeout: 10000,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
             }
-        } catch (error) {
-            console.log(`Proxy ${proxyUrl.substring(0, 30)}... failed`);
-            continue;
         }
-    }
-    throw new Error('All proxies failed');
+    );
+    return parseStatSharkData(response.data, playerId);
 }
 
-// Мульти-ориджин подход
-async function railwayMultiOrigin(nickname) {
-    const origins = [
-        'https://statshark.net',
-        'https://www.statshark.net',
-        'https://warthunder.com',
-        'https://www.warthunder.com'
-    ];
-
-    for (const origin of origins) {
-        try {
-            const response = await axios.get(`https://api.statshark.net/api/player/${encodeURIComponent(nickname)}`, {
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'application/json',
-                    'Origin': origin,
-                    'Referer': `${origin}/`
-                }
-            });
-
-            const result = parseStatSharkResponse(response);
-            if (result) return result;
-        } catch (error) {
-            continue;
-        }
-    }
-    throw new Error('All origins failed');
-}
-
-// Парсинг ответа StatShark
-function parseStatSharkResponse(response) {
-    if (response.status !== 200) {
-        throw new Error(`HTTP ${response.status}`);
-    }
+// Парсинг данных StatShark
+function parseStatSharkData(data, playerId) {
+    // Если данные пришли как строка (от прокси)
+    const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
     
-    if (!response.data || !response.data.player) {
-        throw new Error('No player data in response');
+    if (!jsonData || !jsonData.player) {
+        throw new Error('Invalid data format');
     }
-    
-    return parseStatSharkData(response.data, nickname);
-}
 
-function parseStatSharkData(data, nickname) {
-    const player = data.player;
-    const stats = data.stats;
+    const player = jsonData.player;
+    const stats = jsonData.stats || {};
     
     return {
-        nickname: player.username || nickname,
+        nickname: player.username || 'Unknown',
+        playerId: playerId,
         level: player.level || 'N/A',
-        battles: stats?.battles || 0,
-        winRate: stats?.win_rate ? (stats.win_rate * 100).toFixed(1) + '%' : 'N/A',
-        kdr: stats?.kill_death_ratio ? stats.kill_death_ratio.toFixed(2) : 'N/A',
-        efficiency: stats?.efficiency_rating || 'N/A',
-        aircraftBattles: stats?.air_battles || 0,
-        groundBattles: stats?.ground_battles || 0,
-        fleetBattles: stats?.naval_battles || 0,
+        battles: stats.battles || 0,
+        winRate: stats.win_rate ? (stats.win_rate * 100).toFixed(1) + '%' : 'N/A',
+        kdr: stats.kill_death_ratio ? stats.kill_death_ratio.toFixed(2) : 'N/A',
+        efficiency: stats.efficiency_rating || 'N/A',
+        aircraftBattles: stats.air_battles || 0,
+        groundBattles: stats.ground_battles || 0,
+        fleetBattles: stats.naval_battles || 0,
         lastUpdated: new Date().toISOString(),
         source: 'StatShark',
-        profileUrl: `https://statshark.net/player/${encodeURIComponent(nickname)}`
+        profileUrl: `https://statshark.net/player/${playerId}`
     };
 }
 // Класс для работы с War Thunder полками
@@ -1169,58 +1123,53 @@ client.on('messageDelete', async (message) => {
     }
 });
 
-// ⬇️⬇️⬇️ ОБРАБОТКА СООБЩЕНИЙ ⬇️⬇️⬇️
+// ⬇️⬇️⬇️ ОБНОВЛЕННЫЙ ОБРАБОТЧИК !stat ⬇️⬇️⬇️
 client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
     if(message.content.startsWith('!stat ')) {
-        const nickname = message.content.slice(6).trim();
+        const playerInput = message.content.slice(6).trim();
         
-        if (!nickname) {
-            return message.reply('❌ Укажите никнейм: `!stat username`');
-        }
-
-        // Проверка ника
-        if (nickname.length < 2 || nickname.length > 20) {
-            return message.reply('❌ Никнейм должен быть от 2 до 20 символов');
+        if (!playerInput) {
+            return message.reply('❌ Укажите ID игрока или никнейм: `!stat 55452315` или `!stat PlayerName`');
         }
 
         try {
-            // Показываем что бот печатает
             await message.channel.sendTyping();
             
-            // Используем Railway-оптимизированную функцию
-            const stats = await getPlayerStatsForRailway(nickname);
+            // Показываем что идет поиск
+            const searchMsg = await message.reply(`🔍 **Поиск статистики...**`);
             
-            // Создаем embed
+            // Пробуем получить статистику
+            const stats = await getPlayerStatsWorking(playerInput);
+            
+            // Удаляем сообщение о поиске
+            await searchMsg.delete().catch(() => {});
+            
+            // Создаем красивый embed
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
-                .setTitle(`📊 Статистика War Thunder: ${stats.nickname}`)
+                .setTitle(`📊 ${stats.nickname}`)
                 .setURL(stats.profileUrl)
-                .setDescription(`*Источник: ${stats.source}*`)
+                .setDescription(`**Статистика War Thunder**\nID: ${stats.playerId}`)
                 .addFields(
-                    { name: '🎯 Уровень', value: `${stats.level}`, inline: true },
-                    { name: '⚔️ Всего боёв', value: `${stats.battles.toLocaleString()}`, inline: true },
-                    { name: '📈 Винрейт', value: `${stats.winRate}`, inline: true },
-                    { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true },
-                    { name: '⭐ Рейтинг', value: `${stats.efficiency}`, inline: true },
-                    { name: '🏁 Платформа', value: 'Railway', inline: true }
+                    { name: '🎯 Уровень', value: `**${stats.level}**`, inline: true },
+                    { name: '⚔️ Боёв', value: `**${stats.battles.toLocaleString()}**`, inline: true },
+                    { name: '📈 Винрейт', value: `**${stats.winRate}**`, inline: true },
+                    { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true },
+                    { name: '⭐ Рейтинг', value: `**${stats.efficiency}**`, inline: true },
+                    { name: '🔧 Источник', value: `**${stats.source}**`, inline: true }
                 )
-                .setFooter({ 
-                    text: 'StatShark • Hosted on Railway',
-                    iconURL: 'https://railway.app/favicon.ico'
-                })
+                .setFooter({ text: 'StatShark • По ID игрока' })
                 .setTimestamp();
 
             await message.reply({ embeds: [embed] });
-            
-            console.log(`✅ Railway: Successfully sent stats for ${nickname}`);
 
         } catch (error) {
-            console.error('❌ Railway stats failed:', error.message);
+            console.error('Final error:', error.message);
             
-            // Smart fallback для Railway
-            await sendRailwayFallback(message, nickname);
+            // FALLBACK С ПОИСКОМ ПО НИКНЕЙМУ
+            await sendIdBasedFallback(message, playerInput);
         }
     }
     // Существующие команды
@@ -1334,51 +1283,66 @@ client.on('messageCreate', async message => {
         }
     }
 });
-// Умный fallback для Railway
-async function sendRailwayFallback(message, nickname) {
-    const encodedNickname = encodeURIComponent(nickname);
+// FALLBACK С ССЫЛКАМИ НА ПОИСК
+async function sendIdBasedFallback(message, playerInput) {
+    const isID = /^\d+$/.test(playerInput);
     
     const embed = new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle(`📊 Статистика War Thunder: ${nickname}`)
-        .setDescription('⚠️ *Автоматическое получение данных временно недоступно*\n\n🔗 **Проверьте статистику вручную:**')
-        .addFields(
+        .setColor(0x0099FF)
+        .setTitle(`📊 ${playerInput}`)
+        .setDescription('**Статистика War Thunder**\n\n🔗 **Ссылки для просмотра статистики:**')
+        .setFooter({ text: 'Используйте ID игрока для автоматического поиска' })
+        .setTimestamp();
+
+    if (isID) {
+        // Если ввели ID - прямая ссылка
+        embed.addFields(
             { 
                 name: '🌐 StatShark', 
-                value: `[Открыть](${`https://statshark.net/player/${encodedNickname}`}) - Детальная статистика`,
-                inline: true 
+                value: `[Открыть статистику](https://statshark.net/player/${playerInput})`,
+                inline: false 
+            }
+        );
+    } else {
+        // Если ввели никнейм - ссылка на поиск
+        embed.addFields(
+            { 
+                name: '🌐 StatShark', 
+                value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`,
+                inline: false 
             },
             { 
                 name: '⚡ Официальный сайт', 
-                value: `[Открыть](${`https://warthunder.com/ru/community/userinfo/?nick=${encodedNickname}`}) - Базовая статистика`,
-                inline: true 
+                value: `[Найти игрока](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`,
+                inline: false 
             }
-        )
-        .setFooter({ 
-            text: 'Railway Bot • Рекомендуем StatShark для подробной статистики',
-            iconURL: 'https://railway.app/favicon.ico'
-        })
-        .setTimestamp();
+        );
+    }
 
+    // Кнопки для быстрого доступа
     const row = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
-                .setLabel('📊 StatShark')
-                .setURL(`https://statshark.net/player/${encodedNickname}`)
+                .setLabel('🌐 StatShark')
+                .setURL(isID ? 
+                    `https://statshark.net/player/${playerInput}` :
+                    `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
+                )
                 .setStyle(ButtonStyle.Link),
             new ButtonBuilder()
                 .setLabel('⚡ Официальный сайт')
-                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodedNickname}`)
+                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
                 .setStyle(ButtonStyle.Link)
         );
 
     await message.reply({ 
-        content: '❌ Не удалось получить статистику автоматически',
+        content: isID ? 
+            '❌ Не удалось получить статистику автоматически' :
+            '🔍 Используйте ID игрока для автоматического поиска',
         embeds: [embed],
         components: [row]
     });
 }
-
 // Обработка ошибок
 process.on('unhandledRejection', error => {
     console.error('❌ Unhandled promise rejection:', error);
