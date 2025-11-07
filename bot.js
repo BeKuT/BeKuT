@@ -650,26 +650,30 @@ function getBaseUrl() {
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
-// Функция для создания embed со ссылкой на Thunderskill
-function createThunderskillEmbed(nickname) {
+// Функция для создания embed со ссылкой на официальный сайт War Thunder
+function createWTStatsEmbed(nickname) {
     const encodedNickname = encodeURIComponent(nickname);
-    const thunderskillUrl = `https://thunderskill.com/ru/stat/${encodedNickname}`;
+    const wtOfficialUrl = `https://warthunder.com/ru/community/userinfo/?nick=${encodedNickname}`;
     
     const embed = new EmbedBuilder()
         .setColor(0x0099FF)
         .setTitle(`📊 Статистика War Thunder: ${nickname}`)
-        .setURL(thunderskillUrl)
-        .setDescription(`🔗 **Ссылка на Thunderskill:**\n[Открыть статистику](${thunderskillUrl})`)
+        .setURL(wtOfficialUrl)
+        .setDescription(`🔗 **Ссылка на официальную статистику:**\n[Открыть статистику игрока](${wtOfficialUrl})`)
         .addFields(
             { 
-                name: '📋 Как посмотреть статистику', 
-                value: '1. Перейдите по ссылке выше\n2. На сайте откроется страница с полной статистикой игрока\n3. Вы увидите уровень, количество боёв, винрейт, K/D и другую информацию' 
+                name: '📋 Официальная статистика', 
+                value: '• Уровень и прогресс\n• Количество боёв\n• Статистика по технике\n• Достижения и награды\n• Активность в игре' 
+            },
+            {
+                name: 'ℹ️ Что можно увидеть',
+                value: 'На официальном сайте War Thunder отображается полная статистика игрока, включая историю боёв, используемую технику и игровые достижения'
             }
         )
         .setThumbnail('https://warthunder.com/i/fb_icon.png')
         .setFooter({ 
-            text: 'Thunderskill • Статистика War Thunder',
-            iconURL: 'https://thunderskill.com/static/favicon.ico'
+            text: 'War Thunder Official • Гарантированно актуальные данные',
+            iconURL: 'https://warthunder.com/favicon.ico'
         })
         .setTimestamp();
 
@@ -997,7 +1001,7 @@ client.on('messageDelete', async (message) => {
 client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
-    // Команда !stat для получения ссылки на статистику
+    // Команда !stat для получения ссылки на официальную статистику
     if(message.content.startsWith('!stat ')) {
         const nickname = message.content.slice(6).trim();
         
@@ -1011,7 +1015,7 @@ client.on('messageCreate', async message => {
         }
 
         try {
-            const embed = createThunderskillEmbed(nickname);
+            const embed = createWTStatsEmbed(nickname);
             await message.reply({ embeds: [embed] });
 
         } catch (error) {
