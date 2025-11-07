@@ -1171,77 +1171,7 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Игрок не найден
-async function sendPlayerNotFound(message, playerInput) {
-    const embed = new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle(`🔍 ${playerInput}`)
-        .setDescription('**Игрок не найден в StatShark**\n\n💡 **Возможные причины:**')
-        .addFields(
-            { name: '❌ Игрок не зарегистрирован', value: 'В StatShark есть не все игроки', inline: false },
-            { name: '🔍 Проверить вручную', value: `[Поиск в StatShark](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
-            { name: '⚡ Официальный сайт', value: `[Проверить на сайте War Thunder](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`, inline: false }
-        )
-        .setFooter({ text: 'Попробуйте использовать ID игрока вместо ника' })
-        .setTimestamp();
 
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setLabel('🔍 Поиск в StatShark')
-                .setURL(`https://statshark.net/search?q=${encodeURIComponent(playerInput)}`)
-                .setStyle(ButtonStyle.Link),
-            new ButtonBuilder()
-                .setLabel('⚡ Официальный сайт')
-                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
-                .setStyle(ButtonStyle.Link)
-        );
-
-    await message.reply({ 
-        embeds: [embed],
-        components: [row]
-    });
-}
-
-// Умный fallback
-async function sendSmartFallback(message, playerInput) {
-    const isID = /^\d+$/.test(playerInput);
-    
-    const embed = new EmbedBuilder()
-        .setColor(0x0099FF)
-        .setTitle(`📊 ${playerInput}`)
-        .setDescription('**Статистика War Thunder**\n\n🔗 **Быстрые ссылки:**')
-        .setFooter({ text: 'StatShark • Ручной поиск' })
-        .setTimestamp();
-
-    if (isID) {
-        embed.addFields(
-            { name: '🌐 StatShark', value: `[Открыть статистику](https://statshark.net/player/${playerInput})`, inline: false },
-            { name: '💡 Совет', value: 'Это ID игрока. StatShark должен показать статистику.', inline: false }
-        );
-    } else {
-        embed.addFields(
-            { name: '🌐 StatShark', value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
-            { name: '💡 Совет', value: 'Найдите игрока и скопируйте его ID для автоматического поиска', inline: false }
-        );
-    }
-
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setLabel(isID ? '📊 StatShark' : '🔍 Поиск в StatShark')
-                .setURL(isID ? 
-                    `https://statshark.net/player/${playerInput}` :
-                    `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
-                )
-                .setStyle(ButtonStyle.Link)
-        );
-
-    await message.reply({ 
-        embeds: [embed],
-        components: [row]
-    });
-   }
 
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
@@ -1354,7 +1284,77 @@ async function sendSmartFallback(message, playerInput) {
         }
     }
 });
+// Игрок не найден
+async function sendPlayerNotFound(message, playerInput) {
+    const embed = new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle(`🔍 ${playerInput}`)
+        .setDescription('**Игрок не найден в StatShark**\n\n💡 **Возможные причины:**')
+        .addFields(
+            { name: '❌ Игрок не зарегистрирован', value: 'В StatShark есть не все игроки', inline: false },
+            { name: '🔍 Проверить вручную', value: `[Поиск в StatShark](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
+            { name: '⚡ Официальный сайт', value: `[Проверить на сайте War Thunder](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`, inline: false }
+        )
+        .setFooter({ text: 'Попробуйте использовать ID игрока вместо ника' })
+        .setTimestamp();
 
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setLabel('🔍 Поиск в StatShark')
+                .setURL(`https://statshark.net/search?q=${encodeURIComponent(playerInput)}`)
+                .setStyle(ButtonStyle.Link),
+            new ButtonBuilder()
+                .setLabel('⚡ Официальный сайт')
+                .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
+                .setStyle(ButtonStyle.Link)
+        );
+
+    await message.reply({ 
+        embeds: [embed],
+        components: [row]
+    });
+}
+
+// Умный fallback
+async function sendSmartFallback(message, playerInput) {
+    const isID = /^\d+$/.test(playerInput);
+    
+    const embed = new EmbedBuilder()
+        .setColor(0x0099FF)
+        .setTitle(`📊 ${playerInput}`)
+        .setDescription('**Статистика War Thunder**\n\n🔗 **Быстрые ссылки:**')
+        .setFooter({ text: 'StatShark • Ручной поиск' })
+        .setTimestamp();
+
+    if (isID) {
+        embed.addFields(
+            { name: '🌐 StatShark', value: `[Открыть статистику](https://statshark.net/player/${playerInput})`, inline: false },
+            { name: '💡 Совет', value: 'Это ID игрока. StatShark должен показать статистику.', inline: false }
+        );
+    } else {
+        embed.addFields(
+            { name: '🌐 StatShark', value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
+            { name: '💡 Совет', value: 'Найдите игрока и скопируйте его ID для автоматического поиска', inline: false }
+        );
+    }
+
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setLabel(isID ? '📊 StatShark' : '🔍 Поиск в StatShark')
+                .setURL(isID ? 
+                    `https://statshark.net/player/${playerInput}` :
+                    `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
+                )
+                .setStyle(ButtonStyle.Link)
+        );
+
+    await message.reply({ 
+        embeds: [embed],
+        components: [row]
+    });
+   }
 // Обработка ошибок
 process.on('unhandledRejection', error => {
     console.error('❌ Unhandled promise rejection:', error);
