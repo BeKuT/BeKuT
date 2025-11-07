@@ -9,6 +9,7 @@ const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
 const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
+const cheerio = require('cheerio');
 
 // Проверка наличия токена
 if (!token) {
@@ -650,87 +651,185 @@ function getBaseUrl() {
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
-// Функция для получения статистики игрока через Thunderskill
+// Функция для получения статистики игрока через парсинг Thunderskill
 async function getPlayerStatsThunderskill(nickname) {
     try {
         console.log(`🔍 Searching for player: ${nickname}`);
         
-        // Поиск игрока
-        const searchResponse = await axios.get(`https://thunderskill.com/api/v2/search?q=${encodeURIComponent(nickname)}`, {
-            timeout: 10000
-        });
-        
-        if (searchResponse.data && searchResponse.data.length > 0) {
-            const player = searchResponse.data[0];
-            console.log(`✅ Player found: ${player.nickname} (ID: ${player.id})`);
-            
-            // Получение детальной статистики
-            const statsResponse = await axios.get(`https://thunderskill.com/api/v2/stat/${player.id}`, {
-                timeout: 10000
-            });
-            
-            if (statsResponse.data) {
-                const stats = statsResponse.data;
-                return {
-                    nickname: player.nickname,
-                    level: stats.level || 'N/A',
-                    battles: stats.battles || 0,
-                    winRate: stats.winrate ? (stats.winrate * 100).toFixed(1) : 'N/A',
-                    kdr: stats.kdr ? stats.kdr.toFixed(2) : 'N/A',
-                    efficiency: stats.efficiency ? stats.efficiency.toFixed(1) : 'N/A',
-                    aircraftBattles: stats.aircraft_battles || 0,
-                    groundBattles: stats.ground_battles || 0,
-                    fleetBattles: stats.fleet_battles || 0,
-                    lastUpdated: stats.updated_at || 'N/A'
-                };
+        // Прямой запрос к странице игрока
+        const response = await axios.get(`https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`, {
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-        }
-        
-        return null;
-    } catch (error) {
-        console.error('❌ Thunderskill API error:', error.message);
-        
-        // Fallback данные для тестирования
-        return {
+        });
+
+        // Используем cheerio для парсинга HTML
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(response.data);
+
+        // Парсим основные данные
+        const playerData = {
             nickname: nickname,
-            level: Math.floor(Math.random() * 100) + 1,
-            battles: Math.floor(Math.random() * 10000) + 1000,
-            winRate: (Math.random() * 30 + 50).toFixed(1),
-            kdr: (Math.random() * 2 + 1).toFixed(2),
-            efficiency: (Math.random() * 1000 + 1000).toFixed(1),
-            aircraftBattles: Math.floor(Math.random() * 5000),
-            groundBattles: Math.floor(Math.random() * 5000),
-            fleetBattles: Math.floor(Math.random() * 1000),
+            level: 'N/A',
+            battles: 0,
+            winRate: 'N/A',
+            kdr: 'N/A',
+            efficiency: 'N/A',
+            aircraftBattles: 0,
+            groundBattles: 0,
+            fleetBattles: 0,
             lastUpdated: new Date().toISOString()
         };
+
+        // Парсим уровень
+        const levelText = $('.profile-lvl').text().trim();
+        if (levelText) {
+            const levelMatch = levelText.match(/\d+/);
+            if (levelMatch) playerData.level = levelMatch[0];
+        }
+
+        // Парсим общее количество боёв
+        const totalBattles = $('.stat-total-battles .number').text().trim();
+        if (totalBattles) {
+            playerData.battles = parseInt(totalBattles.replace(/\s/g, '')) || 0;
+        }
+
+        // Парсим винрейт
+        const winRateText = $('.stat-win-rate .number').text().trim();
+        if (winRateText) {
+            playerData.winRate = winRateText;
+        }
+
+        // Парсим K/D
+        const kdrText = $('.stat-kill-death .number').text().trim();
+        if (kdrText) {
+            playerData.kdr = kdrText;
+        }
+
+        // Парсим эффективность (рейтинг)
+        const efficiencyText = $('.stat-rating .number').text().trim();
+        if (efficiencyText) {
+            playerData.efficiency = efficiencyText.replace(/\s/g, '');
+        }
+
+        // Парсим статистику по типам техники
+        $('.vehicle-type-stats .stat-row').each((index, element) => {
+            const type = $(element).find('.stat-name').text().trim();
+            const battles = $(element).find('.stat-battles').text().trim();
+            const battlesCount = parseInt(battles.replace(/\s/g, '')) || 0;
+
+            if (type.includes('Авиация') || type.includes('Aviation')) {
+                playerData.aircraftBattles = battlesCount;
+            } else if (type.includes('Наземная') || type.includes('Ground')) {
+                playerData.groundBattles = battlesCount;
+            } else if (type.includes('Флот') || type.includes('Fleet')) {
+                playerData.fleetBattles = battlesCount;
+            }
+        });
+
+        console.log(`✅ Parsed stats for ${nickname}:`, {
+            level: playerData.level,
+            battles: playerData.battles,
+            winRate: playerData.winRate,
+            kdr: playerData.kdr
+        });
+
+        return playerData;
+
+    } catch (error) {
+        console.error('❌ Thunderskill parsing error:', error.message);
+        
+        // Альтернативный метод - попробовать через мобильное API
+        try {
+            return await getPlayerStatsAlternative(nickname);
+        } catch (altError) {
+            console.error('❌ Alternative method also failed:', altError.message);
+            return getFallbackStats(nickname);
+        }
     }
 }
 
-// Функция для создания embed со статистикой
+// Альтернативный метод получения статистики
+async function getPlayerStatsAlternative(nickname) {
+    try {
+        // Попробуем получить данные через мобильную версию или JSON endpoint
+        const response = await axios.get(`https://thunderskill.com/api/v4/stat/${encodeURIComponent(nickname)}`, {
+            timeout: 10000
+        });
+
+        if (response.data && response.data.player) {
+            const player = response.data.player;
+            return {
+                nickname: player.nickname || nickname,
+                level: player.level || 'N/A',
+                battles: player.battles || 0,
+                winRate: player.winrate ? (player.winrate * 100).toFixed(1) + '%' : 'N/A',
+                kdr: player.kdr ? player.kdr.toFixed(2) : 'N/A',
+                efficiency: player.rating ? player.rating.toFixed(0) : 'N/A',
+                aircraftBattles: player.air_battles || 0,
+                groundBattles: player.ground_battles || 0,
+                fleetBattles: player.fleet_battles || 0,
+                lastUpdated: new Date().toISOString()
+            };
+        }
+        throw new Error('No player data in response');
+    } catch (error) {
+        throw error;
+    }
+}
+
+// Fallback данные (только для тестирования)
+function getFallbackStats(nickname) {
+    console.log('⚠️ Using fallback data for testing');
+    return {
+        nickname: nickname,
+        level: 'N/A',
+        battles: 0,
+        winRate: 'N/A',
+        kdr: 'N/A',
+        efficiency: 'N/A',
+        aircraftBattles: 0,
+        groundBattles: 0,
+        fleetBattles: 0,
+        lastUpdated: new Date().toISOString(),
+        note: 'Данные временно недоступны. Проверьте никнейм или попробуйте позже.'
+    };
+}
+
+// Обновите также функцию создания embed чтобы показывать ошибки
 function createStatsEmbed(stats, nickname) {
     const embed = new EmbedBuilder()
-        .setColor(0x0099FF)
+        .setColor(stats.note ? 0xFF0000 : 0x0099FF)
         .setTitle(`📊 Статистика War Thunder: ${stats.nickname}`)
         .setURL(`https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`)
-        .setThumbnail('https://warthunder.com/i/fb_icon.png')
-        .addFields(
+        .setThumbnail('https://warthunder.com/i/fb_icon.png');
+
+    if (stats.note) {
+        embed.setDescription(`❌ **Внимание:** ${stats.note}\n\n📊 *Попробуйте проверить статистику вручную:*\nhttps://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
+    } else {
+        embed.addFields(
             { name: '🎯 Уровень', value: `${stats.level}`, inline: true },
             { name: '⚔️ Всего боёв', value: `${stats.battles.toLocaleString()}`, inline: true },
-            { name: '📈 Винрейт', value: `${stats.winRate}%`, inline: true },
+            { name: '📈 Винрейт', value: `${stats.winRate}`, inline: true },
             { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true },
             { name: '⭐ Эффективность', value: `${stats.efficiency}`, inline: true },
             { name: '🕒 Обновлено', value: `${new Date(stats.lastUpdated).toLocaleDateString('ru-RU')}`, inline: true }
-        )
-        .addFields(
-            { name: '✈️ Авиация', value: `${stats.aircraftBattles.toLocaleString()} боёв`, inline: true },
-            { name: '🎯 Наземка', value: `${stats.groundBattles.toLocaleString()} боёв`, inline: true },
-            { name: '⛴️ Флот', value: `${stats.fleetBattles.toLocaleString()} боёв`, inline: true }
-        )
-        .setFooter({ 
-            text: 'Данные предоставлены Thunderskill • Могут быть неточными',
-            iconURL: 'https://thunderskill.com/static/favicon.ico' 
-        })
-        .setTimestamp();
+        );
+
+        if (stats.aircraftBattles > 0 || stats.groundBattles > 0 || stats.fleetBattles > 0) {
+            embed.addFields(
+                { name: '✈️ Авиация', value: `${stats.aircraftBattles.toLocaleString()} боёв`, inline: true },
+                { name: '🎯 Наземка', value: `${stats.groundBattles.toLocaleString()} боёв`, inline: true },
+                { name: '⛴️ Флот', value: `${stats.fleetBattles.toLocaleString()} боёв`, inline: true }
+            );
+        }
+    }
+
+    embed.setFooter({ 
+        text: stats.note ? 'Сервис временно недоступен' : 'Данные предоставлены Thunderskill',
+        iconURL: 'https://thunderskill.com/static/favicon.ico' 
+    }).setTimestamp();
 
     return embed;
 }
