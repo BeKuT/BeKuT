@@ -1243,7 +1243,6 @@ async function sendSmartFallback(message, playerInput) {
     });
    }
 
-}
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
         const regimentName = message.content.slice(6).trim();
