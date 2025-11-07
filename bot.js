@@ -655,18 +655,29 @@ async function getPlayerStatsStatShark(nickname) {
     try {
         console.log(`🔍 Searching for player on StatShark: ${nickname}`);
         
-        // StatShark API endpoint
+        // Правильные заголовки для StatShark API
         const response = await axios.get(`https://api.statshark.net/api/player/${encodeURIComponent(nickname)}`, {
             timeout: 10000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Origin': 'https://statshark.net',
+                'Referer': 'https://statshark.net/',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site'
             }
         });
 
+        console.log('✅ StatShark API response received');
+        
         if (response.data && response.data.player) {
             const player = response.data.player;
             const stats = response.data.stats;
+            
+            console.log('📊 Player data found:', player.username);
             
             return {
                 nickname: player.username || nickname,
@@ -687,9 +698,9 @@ async function getPlayerStatsStatShark(nickname) {
         throw new Error('No player data in StatShark response');
         
     } catch (error) {
-        console.error('❌ StatShark API error:', error.message);
+        console.error('❌ StatShark API error:', error.response?.status, error.message);
         
-        // Пробуем альтернативный endpoint
+        // Пробуем альтернативный метод
         try {
             return await getPlayerStatsStatSharkAlternative(nickname);
         } catch (altError) {
@@ -699,73 +710,100 @@ async function getPlayerStatsStatShark(nickname) {
     }
 }
 
-// Альтернативный метод для StatShark
+// Альтернативный метод для StatShark (прямой парсинг)
 async function getPlayerStatsStatSharkAlternative(nickname) {
     try {
-        // Попробуем другой endpoint StatShark
-        const response = await axios.get(`https://statshark.net/api/search/${encodeURIComponent(nickname)}`, {
-            timeout: 8000
+        console.log(`🔄 Trying StatShark alternative method for: ${nickname}`);
+        
+        // Прямой запрос к HTML странице
+        const response = await axios.get(`https://statshark.net/player/${encodeURIComponent(nickname)}`, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            }
         });
 
-        if (response.data && response.data.players && response.data.players.length > 0) {
-            const player = response.data.players[0];
-            return {
-                nickname: player.username || nickname,
-                level: player.level || 'N/A',
-                battles: player.battles || 0,
-                winRate: player.win_rate ? (player.win_rate * 100).toFixed(1) + '%' : 'N/A',
-                kdr: player.kill_death_ratio ? player.kill_death_ratio.toFixed(2) : 'N/A',
-                efficiency: player.rating || 'N/A',
-                aircraftBattles: player.air_battles || 0,
-                groundBattles: player.ground_battles || 0,
-                fleetBattles: player.naval_battles || 0,
-                lastUpdated: new Date().toISOString(),
-                source: 'StatShark',
-                profileUrl: `https://statshark.net/player/${encodeURIComponent(nickname)}`
-            };
+        // Простой парсинг HTML без cheerio
+        const html = response.data;
+        
+        // Ищем основные данные в HTML
+        const playerData = {
+            nickname: nickname,
+            level: 'N/A',
+            battles: 0,
+            winRate: 'N/A',
+            kdr: 'N/A',
+            efficiency: 'N/A',
+            aircraftBattles: 0,
+            groundBattles: 0,
+            fleetBattles: 0,
+            lastUpdated: new Date().toISOString(),
+            source: 'StatShark (HTML)',
+            profileUrl: `https://statshark.net/player/${encodeURIComponent(nickname)}`
+        };
+
+        // Простой парсинг ключевых данных (адаптируйте под актуальную структуру StatShark)
+        const battlesMatch = html.match(/<div[^>]*class="[^"]*battles[^"]*"[^>]*>.*?(\d+)/i);
+        const winRateMatch = html.match(/<div[^>]*class="[^"]*win-rate[^"]*"[^>]*>.*?([\d.]+)%/i);
+        const kdrMatch = html.match(/<div[^>]*class="[^"]*kdr[^"]*"[^>]*>.*?([\d.]+)/i);
+        
+        if (battlesMatch) playerData.battles = parseInt(battlesMatch[1]);
+        if (winRateMatch) playerData.winRate = winRateMatch[1] + '%';
+        if (kdrMatch) playerData.kdr = kdrMatch[1];
+
+        // Если нашли хоть какие-то данные
+        if (playerData.battles > 0) {
+            return playerData;
         }
-        throw new Error('No players found');
+        
+        throw new Error('Could not parse StatShark HTML');
+        
     } catch (error) {
+        console.error('❌ StatShark HTML parsing error:', error.message);
         throw error;
     }
 }
 
-// Функция для создания embed со статистикой StatShark
+// Функция для создания embed с запасным вариантом
 function createStatSharkEmbed(stats, nickname) {
+    const isFallback = stats.source && stats.source.includes('HTML');
+    
     const embed = new EmbedBuilder()
-        .setColor(0x00FF00)
+        .setColor(isFallback ? 0xFFA500 : 0x00FF00)
         .setTitle(`📊 Статистика War Thunder: ${stats.nickname}`)
-        .setURL(stats.profileUrl || `https://statshark.net/player/${encodeURIComponent(nickname)}`)
-        .setDescription(`*Источник: ${stats.source}*`)
+        .setURL(stats.profileUrl)
         .setThumbnail('https://statshark.net/favicon.ico');
 
+    if (isFallback) {
+        embed.setDescription('⚠️ *Данные получены через запасной метод*');
+    } else {
+        embed.setDescription(`*Источник: ${stats.source}*`);
+    }
+
     // Основная статистика
-    embed.addFields(
+    const fields = [
         { name: '🎯 Уровень', value: `${stats.level}`, inline: true },
         { name: '⚔️ Всего боёв', value: `${stats.battles.toLocaleString()}`, inline: true },
         { name: '📈 Винрейт', value: `${stats.winRate}`, inline: true },
-        { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true },
-        { name: '⭐ Рейтинг', value: `${stats.efficiency}`, inline: true },
-        { name: '🕒 Обновлено', value: `${new Date(stats.lastUpdated).toLocaleDateString('ru-RU')}`, inline: true }
-    );
+        { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true }
+    ];
 
-    // Статистика по типам техники (если есть данные)
-    if (stats.aircraftBattles > 0 || stats.groundBattles > 0 || stats.fleetBattles > 0) {
-        embed.addFields(
-            { name: '✈️ Авиация', value: `${stats.aircraftBattles.toLocaleString()} боёв`, inline: true },
-            { name: '🎯 Наземка', value: `${stats.groundBattles.toLocaleString()} боёв`, inline: true },
-            { name: '⛴️ Флот', value: `${stats.fleetBattles.toLocaleString()} боёв`, inline: true }
-        );
+    if (stats.efficiency && stats.efficiency !== 'N/A') {
+        fields.push({ name: '⭐ Рейтинг', value: `${stats.efficiency}`, inline: true });
     }
 
+    fields.push({ name: '🕒 Обновлено', value: `${new Date(stats.lastUpdated).toLocaleDateString('ru-RU')}`, inline: true });
+
+    embed.addFields(fields);
+
     embed.setFooter({ 
-        text: 'StatShark • Актуальная статистика War Thunder',
+        text: isFallback ? 'StatShark • Запасной метод' : 'StatShark • Актуальная статистика',
         iconURL: 'https://statshark.net/favicon.ico'
     }).setTimestamp();
 
     return embed;
 }
-
 // Универсальная функция для получения статистики (пробует все источники)
 async function getPlayerStatsUniversal(nickname) {
     const sources = [
@@ -1112,7 +1150,6 @@ client.on('messageDelete', async (message) => {
 client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
-    // Команда !stat для получения статистики через StatShark
     if(message.content.startsWith('!stat ')) {
         const nickname = message.content.slice(6).trim();
         
@@ -1120,50 +1157,32 @@ client.on('messageCreate', async message => {
             return message.reply('❌ Укажите никнейм: `!stat username`');
         }
 
-        // Проверка на валидность ника
-        if (nickname.length < 2 || nickname.length > 20) {
-            return message.reply('❌ Никнейм должен быть от 2 до 20 символов');
-        }
-
         try {
             await message.channel.sendTyping();
             
-            // Пробуем получить статистику через StatShark
-            const stats = await getPlayerStatsUniversal(nickname);
+            // Пробуем StatShark
+            const stats = await getPlayerStatsStatShark(nickname);
             
             const embed = createStatSharkEmbed(stats, nickname);
             await message.reply({ embeds: [embed] });
 
-            // Добавляем кнопку для перехода на полный профиль
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setLabel('📊 Открыть полную статистику')
-                        .setURL(stats.profileUrl || `https://statshark.net/player/${encodeURIComponent(nickname)}`)
-                        .setStyle(ButtonStyle.Link)
-                );
-
-            await message.channel.send({ 
-                content: '🔗 **Дополнительные ссылки:**',
-                components: [row] 
-            });
-
         } catch (error) {
             console.error('Stat command error:', error);
             
-            // Если API недоступно, отправляем ссылки
-            const fallbackEmbed = new EmbedBuilder()
-                .setColor(0xFFA500)
+            // Простой fallback - только ссылки
+            const simpleEmbed = new EmbedBuilder()
+                .setColor(0x0099FF)
                 .setTitle(`📊 Статистика War Thunder: ${nickname}`)
-                .setDescription('❌ Сервисы статистики временно недоступны\n\n🔗 **Проверить статистику вручную:**')
+                .setDescription('🔗 **Ссылки для проверки статистики:**')
                 .addFields(
                     { name: 'StatShark', value: `https://statshark.net/player/${encodeURIComponent(nickname)}`, inline: true },
-                    { name: 'Официальный сайт', value: `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(nickname)}`, inline: true }
+                    { name: 'Официальный сайт', value: `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(nickname)}`, inline: true },
+                    { name: 'Thunderskill', value: `https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`, inline: true }
                 )
-                .setFooter({ text: 'Рекомендуем использовать StatShark для подробной статистики' })
+                .setFooter({ text: 'Выберите сервис для просмотра статистики' })
                 .setTimestamp();
 
-            await message.reply({ embeds: [fallbackEmbed] });
+            await message.reply({ embeds: [simpleEmbed] });
         }
     }
     // Существующие команды
