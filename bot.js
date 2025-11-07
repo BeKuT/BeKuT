@@ -9,7 +9,6 @@ const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
 const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
-const cheerio = require('cheerio');
 
 // Проверка наличия токена
 if (!token) {
@@ -651,7 +650,7 @@ function getBaseUrl() {
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
-// Функция для получения статистики игрока через парсинг Thunderskill
+// Функция для получения статистики игрока через упрощенный парсинг
 async function getPlayerStatsThunderskill(nickname) {
     try {
         console.log(`🔍 Searching for player: ${nickname}`);
@@ -660,15 +659,13 @@ async function getPlayerStatsThunderskill(nickname) {
         const response = await axios.get(`https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`, {
             timeout: 15000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
         });
 
-        // Используем cheerio для парсинга HTML
-        const cheerio = require('cheerio');
-        const $ = cheerio.load(response.data);
+        const html = response.data;
 
-        // Парсим основные данные
+        // Упрощенный парсинг без cheerio - используем регулярные выражения
         const playerData = {
             nickname: nickname,
             level: 'N/A',
@@ -682,51 +679,27 @@ async function getPlayerStatsThunderskill(nickname) {
             lastUpdated: new Date().toISOString()
         };
 
-        // Парсим уровень
-        const levelText = $('.profile-lvl').text().trim();
-        if (levelText) {
-            const levelMatch = levelText.match(/\d+/);
-            if (levelMatch) playerData.level = levelMatch[0];
-        }
+        // Парсим уровень (ищем в HTML)
+        const levelMatch = html.match(/<div[^>]*class="[^"]*profile-lvl[^"]*"[^>]*>.*?(\d+)/);
+        if (levelMatch) playerData.level = levelMatch[1];
 
         // Парсим общее количество боёв
-        const totalBattles = $('.stat-total-battles .number').text().trim();
-        if (totalBattles) {
-            playerData.battles = parseInt(totalBattles.replace(/\s/g, '')) || 0;
+        const battlesMatch = html.match(/<div[^>]*class="[^"]*stat-total-battles[^"]*"[^>]*>.*?<span[^>]*class="[^"]*number[^"]*"[^>]*>([^<]+)</);
+        if (battlesMatch) {
+            playerData.battles = parseInt(battlesMatch[1].replace(/\s/g, '')) || 0;
         }
 
         // Парсим винрейт
-        const winRateText = $('.stat-win-rate .number').text().trim();
-        if (winRateText) {
-            playerData.winRate = winRateText;
-        }
+        const winRateMatch = html.match(/<div[^>]*class="[^"]*stat-win-rate[^"]*"[^>]*>.*?<span[^>]*class="[^"]*number[^"]*"[^>]*>([^<]+)</);
+        if (winRateMatch) playerData.winRate = winRateMatch[1];
 
         // Парсим K/D
-        const kdrText = $('.stat-kill-death .number').text().trim();
-        if (kdrText) {
-            playerData.kdr = kdrText;
-        }
+        const kdrMatch = html.match(/<div[^>]*class="[^"]*stat-kill-death[^"]*"[^>]*>.*?<span[^>]*class="[^"]*number[^"]*"[^>]*>([^<]+)</);
+        if (kdrMatch) playerData.kdr = kdrMatch[1];
 
-        // Парсим эффективность (рейтинг)
-        const efficiencyText = $('.stat-rating .number').text().trim();
-        if (efficiencyText) {
-            playerData.efficiency = efficiencyText.replace(/\s/g, '');
-        }
-
-        // Парсим статистику по типам техники
-        $('.vehicle-type-stats .stat-row').each((index, element) => {
-            const type = $(element).find('.stat-name').text().trim();
-            const battles = $(element).find('.stat-battles').text().trim();
-            const battlesCount = parseInt(battles.replace(/\s/g, '')) || 0;
-
-            if (type.includes('Авиация') || type.includes('Aviation')) {
-                playerData.aircraftBattles = battlesCount;
-            } else if (type.includes('Наземная') || type.includes('Ground')) {
-                playerData.groundBattles = battlesCount;
-            } else if (type.includes('Флот') || type.includes('Fleet')) {
-                playerData.fleetBattles = battlesCount;
-            }
-        });
+        // Парсим эффективность
+        const efficiencyMatch = html.match(/<div[^>]*class="[^"]*stat-rating[^"]*"[^>]*>.*?<span[^>]*class="[^"]*number[^"]*"[^>]*>([^<]+)</);
+        if (efficiencyMatch) playerData.efficiency = efficiencyMatch[1].replace(/\s/g, '');
 
         console.log(`✅ Parsed stats for ${nickname}:`, {
             level: playerData.level,
@@ -735,12 +708,17 @@ async function getPlayerStatsThunderskill(nickname) {
             kdr: playerData.kdr
         });
 
+        // Если не нашли данные, используем fallback
+        if (playerData.battles === 0 && playerData.level === 'N/A') {
+            throw new Error('No data found on page');
+        }
+
         return playerData;
 
     } catch (error) {
         console.error('❌ Thunderskill parsing error:', error.message);
         
-        // Альтернативный метод - попробовать через мобильное API
+        // Пробуем альтернативный метод
         try {
             return await getPlayerStatsAlternative(nickname);
         } catch (altError) {
@@ -750,38 +728,36 @@ async function getPlayerStatsThunderskill(nickname) {
     }
 }
 
-// Альтернативный метод получения статистики
+// Альтернативный метод - простой запрос к API
 async function getPlayerStatsAlternative(nickname) {
     try {
-        // Попробуем получить данные через мобильную версию или JSON endpoint
-        const response = await axios.get(`https://thunderskill.com/api/v4/stat/${encodeURIComponent(nickname)}`, {
+        const response = await axios.get(`https://api.thunderskill.com/stat/${encodeURIComponent(nickname)}/simple`, {
             timeout: 10000
         });
 
-        if (response.data && response.data.player) {
-            const player = response.data.player;
+        if (response.data) {
             return {
-                nickname: player.nickname || nickname,
-                level: player.level || 'N/A',
-                battles: player.battles || 0,
-                winRate: player.winrate ? (player.winrate * 100).toFixed(1) + '%' : 'N/A',
-                kdr: player.kdr ? player.kdr.toFixed(2) : 'N/A',
-                efficiency: player.rating ? player.rating.toFixed(0) : 'N/A',
-                aircraftBattles: player.air_battles || 0,
-                groundBattles: player.ground_battles || 0,
-                fleetBattles: player.fleet_battles || 0,
+                nickname: nickname,
+                level: response.data.level || 'N/A',
+                battles: response.data.battles || 0,
+                winRate: response.data.winrate ? (response.data.winrate * 100).toFixed(1) + '%' : 'N/A',
+                kdr: response.data.kdr ? response.data.kdr.toFixed(2) : 'N/A',
+                efficiency: response.data.rating || 'N/A',
+                aircraftBattles: response.data.air_battles || 0,
+                groundBattles: response.data.ground_battles || 0,
+                fleetBattles: response.data.fleet_battles || 0,
                 lastUpdated: new Date().toISOString()
             };
         }
-        throw new Error('No player data in response');
+        throw new Error('No data in API response');
     } catch (error) {
         throw error;
     }
 }
 
-// Fallback данные (только для тестирования)
+// Fallback данные с предупреждением
 function getFallbackStats(nickname) {
-    console.log('⚠️ Using fallback data for testing');
+    console.log('⚠️ Using fallback data - service unavailable');
     return {
         nickname: nickname,
         level: 'N/A',
@@ -793,7 +769,7 @@ function getFallbackStats(nickname) {
         groundBattles: 0,
         fleetBattles: 0,
         lastUpdated: new Date().toISOString(),
-        note: 'Данные временно недоступны. Проверьте никнейм или попробуйте позже.'
+        note: 'Сервис Thunderskill временно недоступен. Пожалуйста, проверьте статистику вручную на сайте.'
     };
 }
 
@@ -1155,7 +1131,6 @@ client.on('messageDelete', async (message) => {
 client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
-    // Команда !stat для статистики игрока
     if(message.content.startsWith('!stat ')) {
         const nickname = message.content.slice(6).trim();
         
@@ -1168,19 +1143,19 @@ client.on('messageCreate', async message => {
             
             const stats = await getPlayerStatsThunderskill(nickname);
             
-            if (!stats) {
-                return message.reply('❌ Игрок не найден или сервис недоступен');
-            }
-
             const embed = createStatsEmbed(stats, nickname);
             await message.reply({ embeds: [embed] });
 
+            // Если данные недоступны, показываем ссылку
+            if (stats.note) {
+                await message.channel.send(`🔗 **Проверить вручную:** https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
+            }
+
         } catch (error) {
             console.error('Stat command error:', error);
-            await message.reply('❌ Ошибка при получении статистики');
+            await message.reply(`❌ Ошибка при получении статистики для **${nickname}**\n🔗 Проверьте вручную: https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
         }
     }
-
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
         const regimentName = message.content.slice(6).trim();
