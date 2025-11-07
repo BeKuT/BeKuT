@@ -1168,10 +1168,6 @@ client.on('messageCreate', async message => {
                 await sendSmartFallback(message, playerInput);
             }
         }
-    }
-});
-
-
 
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
