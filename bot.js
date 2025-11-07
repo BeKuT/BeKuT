@@ -650,187 +650,28 @@ function getBaseUrl() {
 
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
-// Функция для получения статистики игрока через WTRadar API
-async function getPlayerStatsThunderskill(nickname) {
-    try {
-        console.log(`🔍 Searching for player: ${nickname}`);
-        
-        // Попробуем WTRadar API (более стабильный)
-        const response = await axios.get(`https://www.wtradar.net/statistic/${encodeURIComponent(nickname)}/json`, {
-            timeout: 10000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            }
-        });
-
-        if (response.data && response.data.statistic) {
-            const stats = response.data.statistic;
-            
-            return {
-                nickname: stats.nickname || nickname,
-                level: stats.level || 'N/A',
-                battles: stats.battles || 0,
-                winRate: stats.win_rate ? stats.win_rate + '%' : 'N/A',
-                kdr: stats.kill_ratio ? stats.kill_ratio.toFixed(2) : 'N/A',
-                efficiency: stats.efficiency || 'N/A',
-                aircraftBattles: stats.aviation_battles || 0,
-                groundBattles: stats.ground_battles || 0,
-                fleetBattles: stats.fleet_battles || 0,
-                lastUpdated: new Date().toISOString(),
-                source: 'WTRadar'
-            };
-        }
-        
-        throw new Error('No data in WTRadar response');
-        
-    } catch (error) {
-        console.error('❌ WTRadar API error:', error.message);
-        
-        // Пробуем альтернативный метод - прямой парсинг с обходными путями
-        try {
-            return await getPlayerStatsAlternative(nickname);
-        } catch (altError) {
-            console.error('❌ Alternative method also failed:', altError.message);
-            return getFallbackStats(nickname);
-        }
-    }
-}
-
-// Альтернативный метод - пробуем разные API
-async function getPlayerStatsAlternative(nickname) {
-    try {
-        // Попробуем Thunderskill с другим endpoint
-        const response = await axios.get(`https://thunderskill.com/api/v1/stat/${encodeURIComponent(nickname)}`, {
-            timeout: 8000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            }
-        });
-
-        if (response.data) {
-            const data = response.data;
-            return {
-                nickname: nickname,
-                level: data.level || 'N/A',
-                battles: data.battles || 0,
-                winRate: data.win_rate ? data.win_rate + '%' : 'N/A',
-                kdr: data.kill_ratio ? data.kill_ratio.toFixed(2) : 'N/A',
-                efficiency: data.efficiency || 'N/A',
-                aircraftBattles: data.aviation_battles || 0,
-                groundBattles: data.ground_battles || 0,
-                fleetBattles: data.fleet_battles || 0,
-                lastUpdated: new Date().toISOString(),
-                source: 'Thunderskill API'
-            };
-        }
-        throw new Error('No data in Thunderskill API');
-        
-    } catch (error) {
-        // Последняя попытка - симуляция реальных данных на основе известных игроков
-        return await getSimulatedStats(nickname);
-    }
-}
-
-// Симуляция данных для тестирования (основано на реальных статистиках)
-async function getSimulatedStats(nickname) {
-    // Генерируем правдоподобные данные на основе ника
-    const seed = nickname.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-    const random = (min, max) => Math.floor((seed % (max - min + 1)) + min);
-    
-    return {
-        nickname: nickname,
-        level: random(15, 100),
-        battles: random(1000, 15000),
-        winRate: (random(45, 75)) + '%',
-        kdr: (random(10, 30) / 10).toFixed(2),
-        efficiency: random(1000, 2500).toString(),
-        aircraftBattles: random(500, 8000),
-        groundBattles: random(500, 8000),
-        fleetBattles: random(0, 2000),
-        lastUpdated: new Date().toISOString(),
-        note: '⚠️ Данные симулированы (сервис недоступен). Реальную статистику смотрите по ссылке ниже.'
-    };
-}
-
-// Fallback данные
-function getFallbackStats(nickname) {
-    console.log('⚠️ All methods failed, using fallback');
-    return {
-        nickname: nickname,
-        level: 'N/A',
-        battles: 0,
-        winRate: 'N/A',
-        kdr: 'N/A',
-        efficiency: 'N/A',
-        aircraftBattles: 0,
-        groundBattles: 0,
-        fleetBattles: 0,
-        lastUpdated: new Date().toISOString(),
-        note: 'Сервисы статистики временно недоступны. Пожалуйста, проверьте статистику вручную на сайте Thunderskill.'
-    };
-}
-
-// Обновленная функция создания embed
-function createStatsEmbed(stats, nickname) {
-    const isSimulated = stats.note && stats.note.includes('симулированы');
-    const isFallback = stats.note && !isSimulated;
+// Функция для создания embed со ссылкой на Thunderskill
+function createThunderskillEmbed(nickname) {
+    const encodedNickname = encodeURIComponent(nickname);
+    const thunderskillUrl = `https://thunderskill.com/ru/stat/${encodedNickname}`;
     
     const embed = new EmbedBuilder()
-        .setColor(isFallback ? 0xFF0000 : (isSimulated ? 0xFFA500 : 0x0099FF))
-        .setTitle(`📊 Статистика War Thunder: ${stats.nickname}`)
-        .setURL(`https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
-
-    if (stats.source) {
-        embed.setDescription(`*Источник: ${stats.source}*`);
-    }
-
-    if (isFallback) {
-        embed.setDescription(`❌ **Внимание:** ${stats.note}\n\n📊 *Проверьте статистику вручную:*`);
-    } else if (isSimulated) {
-        embed.setDescription(`⚠️ **Примечание:** ${stats.note}\n*Данные приведены для примера*`);
-        
-        embed.addFields(
-            { name: '🎯 Уровень', value: `${stats.level}`, inline: true },
-            { name: '⚔️ Всего боёв', value: `${stats.battles.toLocaleString()}`, inline: true },
-            { name: '📈 Винрейт', value: `${stats.winRate}`, inline: true },
-            { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true },
-            { name: '⭐ Эффективность', value: `${stats.efficiency}`, inline: true },
-            { name: '🕒 Обновлено', value: `${new Date(stats.lastUpdated).toLocaleDateString('ru-RU')}`, inline: true }
-        );
-
-        if (stats.aircraftBattles > 0 || stats.groundBattles > 0 || stats.fleetBattles > 0) {
-            embed.addFields(
-                { name: '✈️ Авиация', value: `${stats.aircraftBattles.toLocaleString()} боёв`, inline: true },
-                { name: '🎯 Наземка', value: `${stats.groundBattles.toLocaleString()} боёв`, inline: true },
-                { name: '⛴️ Флот', value: `${stats.fleetBattles.toLocaleString()} боёв`, inline: true }
-            );
-        }
-    } else {
-        // Реальные данные
-        embed.addFields(
-            { name: '🎯 Уровень', value: `${stats.level}`, inline: true },
-            { name: '⚔️ Всего боёв', value: `${stats.battles.toLocaleString()}`, inline: true },
-            { name: '📈 Винрейт', value: `${stats.winRate}`, inline: true },
-            { name: '🎖️ K/D Ratio', value: `${stats.kdr}`, inline: true },
-            { name: '⭐ Эффективность', value: `${stats.efficiency}`, inline: true },
-            { name: '🕒 Обновлено', value: `${new Date(stats.lastUpdated).toLocaleDateString('ru-RU')}`, inline: true }
-        );
-
-        if (stats.aircraftBattles > 0 || stats.groundBattles > 0 || stats.fleetBattles > 0) {
-            embed.addFields(
-                { name: '✈️ Авиация', value: `${stats.aircraftBattles.toLocaleString()} боёв`, inline: true },
-                { name: '🎯 Наземка', value: `${stats.groundBattles.toLocaleString()} боёв`, inline: true },
-                { name: '⛴️ Флот', value: `${stats.fleetBattles.toLocaleString()} боёв`, inline: true }
-            );
-        }
-    }
-
-    embed.setFooter({ 
-        text: isFallback ? 'Сервис недоступен' : (isSimulated ? 'Данные симулированы' : 'Данные предоставлены WTRadar'),
-        iconURL: 'https://warthunder.com/i/fb_icon.png'
-    }).setTimestamp();
+        .setColor(0x0099FF)
+        .setTitle(`📊 Статистика War Thunder: ${nickname}`)
+        .setURL(thunderskillUrl)
+        .setDescription(`🔗 **Ссылка на Thunderskill:**\n[Открыть статистику](${thunderskillUrl})`)
+        .addFields(
+            { 
+                name: '📋 Как посмотреть статистику', 
+                value: '1. Перейдите по ссылке выше\n2. На сайте откроется страница с полной статистикой игрока\n3. Вы увидите уровень, количество боёв, винрейт, K/D и другую информацию' 
+            }
+        )
+        .setThumbnail('https://warthunder.com/i/fb_icon.png')
+        .setFooter({ 
+            text: 'Thunderskill • Статистика War Thunder',
+            iconURL: 'https://thunderskill.com/static/favicon.ico'
+        })
+        .setTimestamp();
 
     return embed;
 }
@@ -1156,6 +997,7 @@ client.on('messageDelete', async (message) => {
 client.on('messageCreate', async message => {
     if(message.author.bot) return;
 
+    // Команда !stat для получения ссылки на статистику
     if(message.content.startsWith('!stat ')) {
         const nickname = message.content.slice(6).trim();
         
@@ -1169,23 +1011,15 @@ client.on('messageCreate', async message => {
         }
 
         try {
-            await message.channel.sendTyping();
-            
-            const stats = await getPlayerStatsThunderskill(nickname);
-            
-            const embed = createStatsEmbed(stats, nickname);
+            const embed = createThunderskillEmbed(nickname);
             await message.reply({ embeds: [embed] });
-
-            // Всегда показываем ссылку для проверки
-            if (stats.note) {
-                await message.channel.send(`🔗 **Проверить на Thunderskill:** https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
-            }
 
         } catch (error) {
             console.error('Stat command error:', error);
-            await message.reply(`❌ Ошибка при получении статистики для **${nickname}**\n🔗 Проверьте вручную: https://thunderskill.com/ru/stat/${encodeURIComponent(nickname)}`);
+            await message.reply(`❌ Ошибка при создании ссылки для **${nickname}**`);
         }
     }
+
     // Существующие команды
     else if(message.content.toLowerCase().startsWith('!полк ')) {
         const regimentName = message.content.slice(6).trim();
