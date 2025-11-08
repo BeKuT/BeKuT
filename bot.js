@@ -675,94 +675,7 @@ function getBaseUrl() {
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
 
-// Улучшенная функция поиска ID через работающие методы
-async function findPlayerIdAdvanced(nickname) {
-    console.log(`🔍 Advanced ID search for: ${nickname}`);
-    
-    const methods = [
-        { 
-            name: 'WTCommunitySearch', 
-            func: () => findPlayerIdWTCommunity(nickname)
-        },
-        { 
-            name: 'StatSharkManual', 
-            func: () => findPlayerIdStatSharkManual(nickname)
-        }
-    ];
-
-    for (const method of methods) {
-        try {
-            console.log(`🔄 Trying ID search: ${method.name}`);
-            const playerId = await method.func();
-            
-            if (playerId) {
-                console.log(`✅ ${method.name} found ID: ${playerId}`);
-                return playerId;
-            }
-        } catch (error) {
-            console.log(`❌ ${method.name} failed: ${error.message}`);
-            continue;
-        }
-    }
-    
-    console.log('❌ All ID search methods failed');
-    return null;
-}
-
-// Поиск через официальный сайт War Thunder (работающий метод)
-async function findPlayerIdWTCommunity(nickname) {
-    try {
-        // Пробуем получить данные через официальный API
-        const response = await axios.get(
-            `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(nickname)}`,
-            {
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-                    'Referer': 'https://warthunder.com/'
-                }
-            }
-        );
-
-        // Ищем ID в HTML ответе
-        const html = response.data;
-        
-        // Ищем в meta тегах
-        const metaMatch = html.match(/<meta[^>]*content="https:\/\/warthunder\.com\/ru\/community\/userinfo\/\?nick=[^"]*"\/>/);
-        if (metaMatch) {
-            const idMatch = metaMatch[0].match(/userinfo\/\?nick=([^"&]+)/);
-            if (idMatch) return idMatch[1];
-        }
-
-        // Ищем в script тегах
-        const scriptMatch = html.match(/window\.userData\s*=\s*({[^}]+})/);
-        if (scriptMatch) {
-            try {
-                const userData = JSON.parse(scriptMatch[1]);
-                if (userData && userData.id) return userData.id.toString();
-            } catch (e) {
-                // Продолжаем поиск другими методами
-            }
-        }
-
-        // Ищем в ссылках
-        const linkMatch = html.match(/href="\/ru\/community\/userinfo\/\?nick=([^"&]+)/);
-        if (linkMatch) return linkMatch[1];
-
-        return null;
-        
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            // Игрок не найден - это нормально
-            return null;
-        }
-        throw error;
-    }
-}
-
-// Ручной поиск через StatShark (более надежный)
+// Улучшенный ручной поиск через StatShark
 async function findPlayerIdStatSharkManual(nickname) {
     try {
         const response = await axios.get(
@@ -777,29 +690,94 @@ async function findPlayerIdStatSharkManual(nickname) {
         );
 
         const html = response.data;
+        console.log('🔍 StatShark search page loaded successfully');
         
-        // Ищем ID в ссылках на игроков
-        const playerLinkRegex = /href="\/player\/(\d+)[^"]*"[^>]*>([^<]*)<\/a>/g;
-        let match;
-        
-        while ((match = playerLinkRegex.exec(html)) !== null) {
-            const foundId = match[1];
-            const foundName = match[2];
+        // Несколько методов поиска ID
+        const searchMethods = [
+            // Метод 1: Ищем в data-player-id атрибутах
+            () => {
+                const dataIdMatch = html.match(/data-player-id="(\d+)"/g);
+                if (dataIdMatch) {
+                    for (const match of dataIdMatch) {
+                        const id = match.match(/"(\d+)"/)[1];
+                        console.log(`📋 Found data-player-id: ${id}`);
+                        return id;
+                    }
+                }
+                return null;
+            },
             
-            // Сравниваем ники (игнорируя регистр и пробелы)
-            if (foundName.toLowerCase().includes(nickname.toLowerCase()) || 
-                nickname.toLowerCase().includes(foundName.toLowerCase())) {
-                return foundId;
+            // Метод 2: Ищем в ссылках на игроков
+            () => {
+                const playerLinkRegex = /href="\/player\/(\d+)[^"]*"[^>]*>([^<]+)<\/a>/g;
+                let match;
+                const foundPlayers = [];
+                
+                while ((match = playerLinkRegex.exec(html)) !== null) {
+                    const foundId = match[1];
+                    const foundName = match[2].trim();
+                    foundPlayers.push({ id: foundId, name: foundName });
+                    
+                    // Прямое совпадение
+                    if (foundName.toLowerCase() === nickname.toLowerCase()) {
+                        console.log(`✅ Exact match found: ${foundName} -> ${foundId}`);
+                        return foundId;
+                    }
+                }
+                
+                // Частичное совпадение
+                for (const player of foundPlayers) {
+                    if (player.name.toLowerCase().includes(nickname.toLowerCase()) || 
+                        nickname.toLowerCase().includes(player.name.toLowerCase())) {
+                        console.log(`✅ Partial match found: ${player.name} -> ${player.id}`);
+                        return player.id;
+                    }
+                }
+                
+                if (foundPlayers.length > 0) {
+                    console.log(`🔍 Found players: ${foundPlayers.map(p => `${p.name}(${p.id})`).join(', ')}`);
+                    return foundPlayers[0].id; // Первый результат
+                }
+                
+                return null;
+            },
+            
+            // Метод 3: Ищем в JSON данных
+            () => {
+                const jsonMatch = html.match(/window\.initialData\s*=\s*({[^;]+});/);
+                if (jsonMatch) {
+                    try {
+                        const data = JSON.parse(jsonMatch[1]);
+                        if (data.players && data.players.length > 0) {
+                            const player = data.players[0];
+                            console.log(`✅ JSON data found: ${player.name} -> ${player.id}`);
+                            return player.id.toString();
+                        }
+                    } catch (e) {
+                        console.log('❌ JSON parse error');
+                    }
+                }
+                return null;
+            }
+        ];
+
+        // Пробуем все методы поиска
+        for (const method of searchMethods) {
+            const result = method();
+            if (result) {
+                console.log(`🎯 StatShark ID found: ${result}`);
+                return result;
             }
         }
         
+        console.log('❌ No ID found in StatShark search results');
         return null;
         
     } catch (error) {
+        console.error('StatShark search error:', error.message);
         throw error;
     }
 }
-
 // Умный поиск статистики
 async function getPlayerStatsSmart(playerInput) {
     const isID = /^\d+$/.test(playerInput);
@@ -863,52 +841,17 @@ async function getStatsByPlayerId(playerId) {
 }
 
 // Прямой запрос к StatShark
-async function tryStatSharkDirect(playerId) {
-    try {
-        const response = await axios.get(`https://statshark.net/player/${playerId}`, {
-            timeout: 15000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-            }
-        });
-
-        return parseStatSharkHTML(response.data, playerId);
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            return null; // Игрок не найден
-        }
-        throw error;
-    }
-}
-
-// Официальный API War Thunder
-async function tryWTOfficial(playerId) {
-    try {
-        const response = await axios.get(
-            `https://warthunder.com/ru/community/userinfo/?nick=${playerId}`,
-            {
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-            }
-        );
-
-        return parseWTOfficialHTML(response.data, playerId);
-    } catch (error) {
-        throw error;
-    }
-}
-
-// Парсинг HTML StatShark
 function parseStatSharkHTML(html, playerId) {
     try {
-        // Извлекаем никнейм
+        console.log('🔍 Parsing StatShark HTML...');
+        
+        // Извлекаем никнейм из title
         const nicknameMatch = html.match(/<title>([^<]+) - StatShark<\/title>/);
         const nickname = nicknameMatch ? 
             nicknameMatch[1].trim().replace(' - StatShark', '') : 
             `Player${playerId}`;
+
+        console.log(`📛 Nickname: ${nickname}`);
 
         // Базовые данные
         let stats = {
@@ -922,24 +865,54 @@ function parseStatSharkHTML(html, playerId) {
             isFallback: false
         };
 
-        // Простой парсинг ключевых показателей
-        const battlesMatch = html.match(/<div[^>]*>[\s\n]*Battles?[\s\n]*<\/div>[\s\n]*<div[^>]*>[\s\n]*([\d,]+)/i);
-        const winRateMatch = html.match(/Win Rate[\s:]*([\d.]+)%/i);
-        const kdrMatch = html.match(/K\/D[\s:]*([\d.]+)/i);
-        const levelMatch = html.match(/Level[\s:]*(\d+)/i);
-
-        if (battlesMatch) stats.battles = parseInt(battlesMatch[1].replace(/,/g, '')) || stats.battles;
-        if (winRateMatch) stats.winRate = `${winRateMatch[1]}%`;
-        if (kdrMatch) stats.kdr = kdrMatch[1];
-        if (levelMatch) stats.level = levelMatch[1];
-
-        // Если не нашли основные данные, считаем что статистика недоступна
-        if (stats.battles === 0 && stats.level === 'N/A') {
-            return null;
+        // Метод 1: Ищем в карточках статистики
+        const statCards = html.match(/<div[^>]*class="[^"]*stat-card[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
+        if (statCards) {
+            statCards.forEach(card => {
+                if (card.includes('Battles') || card.includes('Total Battles')) {
+                    const battles = card.match(/(\d[\d,]*)\s*<\/div>/);
+                    if (battles) {
+                        stats.battles = parseInt(battles[1].replace(/,/g, '')) || stats.battles;
+                        console.log(`⚔️ Battles: ${stats.battles}`);
+                    }
+                }
+                if (card.includes('Win Rate')) {
+                    const winRate = card.match(/(\d+\.?\d*)%\s*<\/div>/);
+                    if (winRate) {
+                        stats.winRate = `${winRate[1]}%`;
+                        console.log(`📈 Win Rate: ${stats.winRate}`);
+                    }
+                }
+                if (card.includes('K/D') || card.includes('KDR')) {
+                    const kdr = card.match(/(\d+\.?\d*)\s*<\/div>/);
+                    if (kdr) {
+                        stats.kdr = kdr[1];
+                        console.log(`🎖️ K/D: ${stats.kdr}`);
+                    }
+                }
+            });
         }
 
-        return stats;
+        // Метод 2: Ищем в таблицах
+        const winRateMatch = html.match(/Win Rate[\s\S]{0,100}?([\d.]+)%/i);
+        const kdrMatch = html.match(/K\/D[\s\S]{0,100}?([\d.]+)/i);
+        const levelMatch = html.match(/Level[\s\S]{0,100}?(\d+)/i);
+
+        if (winRateMatch && !stats.winRate) stats.winRate = `${winRateMatch[1]}%`;
+        if (kdrMatch && !stats.kdr) stats.kdr = kdrMatch[1];
+        if (levelMatch) stats.level = levelMatch[1];
+
+        // Если нашли хоть какие-то данные
+        if (stats.battles > 0 || stats.winRate !== 'N/A') {
+            console.log(`✅ Real stats found for ${nickname}`);
+            return stats;
+        }
+
+        console.log('❌ No real stats found, using fallback');
+        return null;
+        
     } catch (error) {
+        console.error('HTML parse error:', error);
         return null;
     }
 }
