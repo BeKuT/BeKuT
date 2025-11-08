@@ -1348,78 +1348,95 @@ client.on('messageCreate', async message => {
         });
     }
 
-    // Обработка команды !stat
-if (message.content.startsWith('!stat ')) {
-    const playerInput = message.content.slice(6).trim();
-    
-    if (!playerInput) {
-        return message.reply('❌ Укажите ID игрока или никнейм: `!stat 55452315` или `!stat PlayerName`');
+    // Генерация fallback статистики
+    function generateFallbackStats(playerInput, isID) {
+        const randomBattles = Math.floor(Math.random() * 5000) + 1000;
+        const randomWinRate = (Math.random() * 30 + 45).toFixed(1);
+        const randomKDR = (Math.random() * 2 + 0.8).toFixed(2);
+        const randomLevel = Math.floor(Math.random() * 50) + 30;
+        
+        return {
+            nickname: isID ? `Player${playerInput}` : playerInput,
+            playerId: isID ? playerInput : 'N/A',
+            level: randomLevel,
+            battles: randomBattles,
+            winRate: `${randomWinRate}%`,
+            kdr: randomKDR,
+            profileUrl: isID ? 
+                `https://statshark.net/player/${playerInput}` :
+                `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`,
+            isFallback: true
+        };
     }
 
-    try {
-        await message.channel.sendTyping();
+    // Обработка команды !stat
+    if (message.content.startsWith('!stat ')) {
+        const playerInput = message.content.slice(6).trim();
         
-        const searchMsg = await message.reply(`🔍 **Поиск игрока ${playerInput}...**`);
-        
-        // Пробуем умный поиск
-        const stats = await getPlayerStatsSmart(playerInput);
-        
-        await searchMsg.delete().catch(() => {});
-        
-        // Проверяем, это fallback статистика или реальная
-        const isFallback = stats.isFallback;
-        
-        // Успех - показываем статистику
-        const embed = new EmbedBuilder()
-            .setColor(isFallback ? 0xFFFF00 : 0x00FF00)
-            .setTitle(`📊 ${stats.nickname}`)
-            .setURL(stats.profileUrl)
-            .setDescription(`**Статистика War Thunder**\n${isFallback ? '⚠️ Пример статистики (сервис недоступен)' : `ID: ${stats.playerId}`}`)
-            .addFields(
-                { name: '🎯 Уровень', value: `**${stats.level}**`, inline: true },
-                { name: '⚔️ Боёв', value: `**${stats.battles.toLocaleString()}**`, inline: true },
-                { name: '📈 Винрейт', value: `**${stats.winRate}**`, inline: true },
-                { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true }
-            )
-            .setFooter({ 
-                text: isFallback ? 
-                    'StatShark • Сервис временно недоступен' : 
-                    'StatShark • Автоматический поиск' 
-            })
-            .setTimestamp();
+        if (!playerInput) {
+            return message.reply('❌ Укажите ID игрока или никнейм: `!stat 55452315` или `!stat PlayerName`');
+        }
 
-        await message.reply({ embeds: [embed] });
+        try {
+            await message.channel.sendTyping();
+            
+            const searchMsg = await message.reply(`🔍 **Поиск игрока ${playerInput}...**`);
+            
+            // Пробуем умный поиск
+            const stats = await getPlayerStatsSmart(playerInput);
+            
+            await searchMsg.delete().catch(() => {});
+            
+            // Проверяем, это fallback статистика или реальная
+            const isFallback = stats.isFallback;
+            
+            // Успех - показываем статистику
+            const embed = new EmbedBuilder()
+                .setColor(isFallback ? 0xFFFF00 : 0x00FF00)
+                .setTitle(`📊 ${stats.nickname}`)
+                .setURL(stats.profileUrl)
+                .setDescription(`**Статистика War Thunder**\n${isFallback ? '⚠️ Пример статистики (сервис недоступен)' : `ID: ${stats.playerId}`}`)
+                .addFields(
+                    { name: '🎯 Уровень', value: `**${stats.level}**`, inline: true },
+                    { name: '⚔️ Боёв', value: `**${stats.battles.toLocaleString()}**`, inline: true },
+                    { name: '📈 Винрейт', value: `**${stats.winRate}**`, inline: true },
+                    { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true }
+                )
+                .setFooter({ 
+                    text: isFallback ? 
+                        'StatShark • Сервис временно недоступен' : 
+                        'StatShark • Автоматический поиск' 
+                })
+                .setTimestamp();
 
-    } catch (error) {
-        console.error('Smart search error:', error.message);
-        
-        // УМНЫЙ FALLBACK В ЗАВИСИМОСТИ ОТ ОШИБКИ
-        if (error.message === 'ID_NOT_FOUND') {
-            await sendPlayerNotFound(message, playerInput);
-        } else if (error.message === 'STATS_UNAVAILABLE') {
-            // Fallback: генерируем пример статистики
-            function generateFallbackStats(playerInput, isID) {
-    const randomBattles = Math.floor(Math.random() * 5000) + 1000;
-    const randomWinRate = (Math.random() * 30 + 45).toFixed(1);
-    const randomKDR = (Math.random() * 2 + 0.8).toFixed(2);
-    const randomLevel = Math.floor(Math.random() * 50) + 30;
-    
-    return {
-        nickname: isID ? `Player${playerInput}` : playerInput,
-        playerId: isID ? playerInput : 'N/A',
-        level: randomLevel,
-        battles: randomBattles,
-        winRate: `${randomWinRate}%`,
-        kdr: randomKDR,
-        profileUrl: isID ? 
-            `https://statshark.net/player/${playerInput}` :
-            `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`,
-        isFallback: true
-    };
-}
+            await message.reply({ embeds: [embed] });
+
+        } catch (error) {
+            console.error('Smart search error:', error.message);
+            
             // УМНЫЙ FALLBACK В ЗАВИСИМОСТИ ОТ ОШИБКИ
             if (error.message === 'ID_NOT_FOUND') {
                 await sendPlayerNotFound(message, playerInput);
+            } else if (error.message === 'STATS_UNAVAILABLE') {
+                // Fallback: генерируем пример статистики
+                const isID = /^\d+$/.test(playerInput);
+                const fallbackStats = generateFallbackStats(playerInput, isID);
+                
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFF00)
+                    .setTitle(`📊 ${fallbackStats.nickname}`)
+                    .setURL(fallbackStats.profileUrl)
+                    .setDescription(`**Статистика War Thunder**\n${isID ? `ID: ${fallbackStats.playerId}` : '⚠️ Пример статистики (сервис недоступен)'}`)
+                    .addFields(
+                        { name: '🎯 Уровень', value: `**${fallbackStats.level}**`, inline: true },
+                        { name: '⚔️ Боёв', value: `**${fallbackStats.battles.toLocaleString()}**`, inline: true },
+                        { name: '📈 Винрейт', value: `**${fallbackStats.winRate}**`, inline: true },
+                        { name: '🎖️ K/D', value: `**${fallbackStats.kdr}**`, inline: true }
+                    )
+                    .setFooter({ text: 'StatShark • Сервис временно недоступен' })
+                    .setTimestamp();
+
+                await message.reply({ embeds: [embed] });
             } else {
                 await sendSmartFallback(message, playerInput);
             }
