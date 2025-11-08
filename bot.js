@@ -675,32 +675,25 @@ function getBaseUrl() {
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
 
-// Улучшенная функция поиска ID через разные методы
+// Улучшенная функция поиска ID через работающие методы
 async function findPlayerIdAdvanced(nickname) {
     console.log(`🔍 Advanced ID search for: ${nickname}`);
     
     const methods = [
         { 
-            name: 'DirectSearch', 
-            func: () => findPlayerIdDirectSearch(nickname),
-            timeout: 8000
+            name: 'WTCommunitySearch', 
+            func: () => findPlayerIdWTCommunity(nickname)
         },
         { 
-            name: 'AlternativeAPI', 
-            func: () => findPlayerIdAlternative(nickname),
-            timeout: 8000
+            name: 'StatSharkManual', 
+            func: () => findPlayerIdStatSharkManual(nickname)
         }
     ];
 
     for (const method of methods) {
         try {
             console.log(`🔄 Trying ID search: ${method.name}`);
-            const playerId = await Promise.race([
-                method.func(),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('timeout')), method.timeout)
-                )
-            ]);
+            const playerId = await method.func();
             
             if (playerId) {
                 console.log(`✅ ${method.name} found ID: ${playerId}`);
@@ -716,74 +709,109 @@ async function findPlayerIdAdvanced(nickname) {
     return null;
 }
 
-// Прямой поиск через альтернативные методы
-async function findPlayerIdDirectSearch(nickname) {
+// Поиск через официальный сайт War Thunder (работающий метод)
+async function findPlayerIdWTCommunity(nickname) {
     try {
-        // Пробуем разные варианты API endpoints
-        const endpoints = [
-            `https://api.warthunder.com/crew/search/?nickname=${encodeURIComponent(nickname)}`,
-            `https://wt-api.warthunder.com/api/players?name=${encodeURIComponent(nickname)}`
-        ];
-
-        for (const endpoint of endpoints) {
-            try {
-                const response = await axios.get(endpoint, {
-                    timeout: 5000,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'application/json'
-                    }
-                });
-
-                if (response.data && response.data.players && response.data.players.length > 0) {
-                    const player = response.data.players[0];
-                    return player.id || player.player_id || null;
-                }
-            } catch (e) {
-                continue;
-            }
-        }
-        
-        return null;
-    } catch (error) {
-        throw error;
-    }
-}
-
-// Альтернативный поиск через community API
-async function findPlayerIdAlternative(nickname) {
-    try {
-        // Пробуем community API War Thunder
+        // Пробуем получить данные через официальный API
         const response = await axios.get(
-            `https://community.gaijin.net/api/users/search?q=${encodeURIComponent(nickname)}`,
+            `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(nickname)}`,
             {
-                timeout: 6000,
+                timeout: 10000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
                     'Referer': 'https://warthunder.com/'
                 }
             }
         );
 
-        if (response.data && response.data.users && response.data.users.length > 0) {
-            return response.data.users[0].id || null;
+        // Ищем ID в HTML ответе
+        const html = response.data;
+        
+        // Ищем в meta тегах
+        const metaMatch = html.match(/<meta[^>]*content="https:\/\/warthunder\.com\/ru\/community\/userinfo\/\?nick=[^"]*"\/>/);
+        if (metaMatch) {
+            const idMatch = metaMatch[0].match(/userinfo\/\?nick=([^"&]+)/);
+            if (idMatch) return idMatch[1];
+        }
+
+        // Ищем в script тегах
+        const scriptMatch = html.match(/window\.userData\s*=\s*({[^}]+})/);
+        if (scriptMatch) {
+            try {
+                const userData = JSON.parse(scriptMatch[1]);
+                if (userData && userData.id) return userData.id.toString();
+            } catch (e) {
+                // Продолжаем поиск другими методами
+            }
+        }
+
+        // Ищем в ссылках
+        const linkMatch = html.match(/href="\/ru\/community\/userinfo\/\?nick=([^"&]+)/);
+        if (linkMatch) return linkMatch[1];
+
+        return null;
+        
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            // Игрок не найден - это нормально
+            return null;
+        }
+        throw error;
+    }
+}
+
+// Ручной поиск через StatShark (более надежный)
+async function findPlayerIdStatSharkManual(nickname) {
+    try {
+        const response = await axios.get(
+            `https://statshark.net/search?q=${encodeURIComponent(nickname)}`,
+            {
+                timeout: 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                }
+            }
+        );
+
+        const html = response.data;
+        
+        // Ищем ID в ссылках на игроков
+        const playerLinkRegex = /href="\/player\/(\d+)[^"]*"[^>]*>([^<]*)<\/a>/g;
+        let match;
+        
+        while ((match = playerLinkRegex.exec(html)) !== null) {
+            const foundId = match[1];
+            const foundName = match[2];
+            
+            // Сравниваем ники (игнорируя регистр и пробелы)
+            if (foundName.toLowerCase().includes(nickname.toLowerCase()) || 
+                nickname.toLowerCase().includes(foundName.toLowerCase())) {
+                return foundId;
+            }
         }
         
         return null;
+        
     } catch (error) {
         throw error;
     }
 }
 
-// Улучшенная функция получения статистики с fallback
+// Умный поиск статистики
 async function getPlayerStatsSmart(playerInput) {
     const isID = /^\d+$/.test(playerInput);
     
     if (isID) {
         // Если ввели ID - пробуем получить статистику напрямую
         console.log(`🎯 Direct ID lookup: ${playerInput}`);
-        return await getStatsByPlayerId(playerInput);
+        const stats = await getStatsByPlayerId(playerInput);
+        if (stats) return stats;
+        
+        // Если не нашли по ID, пробуем найти ник и показать fallback
+        throw new Error('STATS_UNAVAILABLE');
     } else {
         // Если ввели никнейм - ищем ID
         console.log(`🔍 Looking up ID for nickname: ${playerInput}`);
@@ -791,40 +819,35 @@ async function getPlayerStatsSmart(playerInput) {
         
         if (playerId) {
             console.log(`✅ Found ID ${playerId} for ${playerInput}`);
-            return await getStatsByPlayerId(playerId);
-        } else {
-            console.log(`❌ No ID found for ${playerInput}`);
-            throw new Error('ID_NOT_FOUND');
+            const stats = await getStatsByPlayerId(playerId);
+            if (stats) return stats;
         }
+        
+        // Если не нашли ID или статистику, показываем fallback с оригинальным ником
+        console.log(`❌ No stats found for ${playerInput}`);
+        throw new Error('ID_NOT_FOUND');
     }
 }
 
-// Улучшенное получение статистики по ID
+// Получение статистики по ID
 async function getStatsByPlayerId(playerId) {
     console.log(`📊 Fetching stats for ID: ${playerId}`);
     
     const methods = [
         { 
             name: 'StatSharkDirect', 
-            func: () => tryStatSharkDirect(playerId),
-            timeout: 10000
+            func: () => tryStatSharkDirect(playerId)
         },
         { 
-            name: 'WTAPI', 
-            func: () => tryWTOfficialAPI(playerId),
-            timeout: 8000
+            name: 'WTOfficial', 
+            func: () => tryWTOfficial(playerId)
         }
     ];
 
     for (const method of methods) {
         try {
             console.log(`🔄 Trying stats method: ${method.name}`);
-            const result = await Promise.race([
-                method.func(),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('timeout')), method.timeout)
-                )
-            ]);
+            const result = await method.func();
             
             if (result) {
                 console.log(`✅ ${method.name} success`);
@@ -836,22 +859,43 @@ async function getStatsByPlayerId(playerId) {
         }
     }
     
-    throw new Error('STATS_UNAVAILABLE');
+    return null;
 }
 
 // Прямой запрос к StatShark
 async function tryStatSharkDirect(playerId) {
     try {
         const response = await axios.get(`https://statshark.net/player/${playerId}`, {
-            timeout: 8000,
+            timeout: 15000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
             }
         });
 
-        // Парсим HTML для извлечения данных
         return parseStatSharkHTML(response.data, playerId);
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            return null; // Игрок не найден
+        }
+        throw error;
+    }
+}
+
+// Официальный API War Thunder
+async function tryWTOfficial(playerId) {
+    try {
+        const response = await axios.get(
+            `https://warthunder.com/ru/community/userinfo/?nick=${playerId}`,
+            {
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            }
+        );
+
+        return parseWTOfficialHTML(response.data, playerId);
     } catch (error) {
         throw error;
     }
@@ -860,12 +904,13 @@ async function tryStatSharkDirect(playerId) {
 // Парсинг HTML StatShark
 function parseStatSharkHTML(html, playerId) {
     try {
-        // Базовые данные
+        // Извлекаем никнейм
         const nicknameMatch = html.match(/<title>([^<]+) - StatShark<\/title>/);
-        const nickname = nicknameMatch ? nicknameMatch[1].trim() : `Player${playerId}`;
-        
-        // Ищем данные в JSON-LD или script тегах
-        const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+        const nickname = nicknameMatch ? 
+            nicknameMatch[1].trim().replace(' - StatShark', '') : 
+            `Player${playerId}`;
+
+        // Базовые данные
         let stats = {
             nickname: nickname,
             playerId: playerId,
@@ -873,25 +918,12 @@ function parseStatSharkHTML(html, playerId) {
             battles: 0,
             winRate: 'N/A',
             kdr: 'N/A',
-            profileUrl: `https://statshark.net/player/${playerId}`
+            profileUrl: `https://statshark.net/player/${playerId}`,
+            isFallback: false
         };
 
-        if (jsonLdMatch) {
-            try {
-                const jsonData = JSON.parse(jsonLdMatch[1]);
-                if (jsonData) {
-                    stats.level = jsonData.level || stats.level;
-                    stats.battles = jsonData.battles || stats.battles;
-                    stats.winRate = jsonData.winRate || stats.winRate;
-                    stats.kdr = jsonData.kdr || stats.kdr;
-                }
-            } catch (e) {
-                console.log('JSON-LD parse error, using fallback');
-            }
-        }
-
-        // Fallback: извлекаем данные из текста
-        const battlesMatch = html.match(/Battles?[\s:]*([\d,]+)/i);
+        // Простой парсинг ключевых показателей
+        const battlesMatch = html.match(/<div[^>]*>[\s\n]*Battles?[\s\n]*<\/div>[\s\n]*<div[^>]*>[\s\n]*([\d,]+)/i);
         const winRateMatch = html.match(/Win Rate[\s:]*([\d.]+)%/i);
         const kdrMatch = html.match(/K\/D[\s:]*([\d.]+)/i);
         const levelMatch = html.match(/Level[\s:]*(\d+)/i);
@@ -901,38 +933,56 @@ function parseStatSharkHTML(html, playerId) {
         if (kdrMatch) stats.kdr = kdrMatch[1];
         if (levelMatch) stats.level = levelMatch[1];
 
+        // Если не нашли основные данные, считаем что статистика недоступна
+        if (stats.battles === 0 && stats.level === 'N/A') {
+            return null;
+        }
+
         return stats;
     } catch (error) {
-        throw new Error('HTML_PARSE_ERROR');
+        return null;
     }
 }
 
-// Официальный API War Thunder
-async function tryWTOfficialAPI(playerId) {
+// Парсинг официального сайта War Thunder
+function parseWTOfficialHTML(html, playerId) {
     try {
-        const response = await axios.get(`https://wt-api.warthunder.com/api/players/${playerId}`, {
-            timeout: 6000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            }
-        });
+        // Ищем никнейм
+        const nicknameMatch = html.match(/<title>([^<]+) - War Thunder<\/title>/);
+        const nickname = nicknameMatch ? 
+            nicknameMatch[1].replace(' - War Thunder', '').trim() : 
+            `Player${playerId}`;
 
-        if (response.data) {
-            return {
-                nickname: response.data.nickname || `Player${playerId}`,
-                playerId: playerId,
-                level: response.data.level || 'N/A',
-                battles: response.data.battles || 0,
-                winRate: response.data.winrate ? `${(response.data.winrate * 100).toFixed(1)}%` : 'N/A',
-                kdr: response.data.kdr ? response.data.kdr.toFixed(2) : 'N/A',
-                profileUrl: `https://warthunder.com/ru/community/userinfo/?nick=${response.data.nickname || playerId}`
-            };
+        // Базовые данные
+        const stats = {
+            nickname: nickname,
+            playerId: playerId,
+            level: 'N/A',
+            battles: 0,
+            winRate: 'N/A', 
+            kdr: 'N/A',
+            profileUrl: `https://warthunder.com/ru/community/userinfo/?nick=${playerId}`,
+            isFallback: false
+        };
+
+        // Простой парсинг (можно улучшить при необходимости)
+        const statsMatch = html.match(/<div[^>]*class="[^"]*stat[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
+        if (statsMatch) {
+            statsMatch.forEach(statBlock => {
+                if (statBlock.includes('Battles') || statBlock.includes('Боёв')) {
+                    const battles = statBlock.match(/(\d[\d\s]*)<\/div>/);
+                    if (battles) stats.battles = parseInt(battles[1].replace(/\s/g, '')) || stats.battles;
+                }
+                if (statBlock.includes('Win rate') || statBlock.includes('Побед')) {
+                    const winRate = statBlock.match(/(\d+\.?\d*)%<\/div>/);
+                    if (winRate) stats.winRate = `${winRate[1]}%`;
+                }
+            });
         }
-        
-        return null;
+
+        return stats.battles > 0 ? stats : null;
     } catch (error) {
-        throw error;
+        return null;
     }
 }
 
