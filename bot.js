@@ -51,7 +51,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Хранилище для транскриптов в памяти
+// Хранилище для транскриптов в памяти (теперь транскрипты не удаляются автоматически)
 const transcriptsStorage = new Map();
 
 // Основной маршрут для проверки работы
@@ -102,6 +102,7 @@ app.get('/', (req, res) => {
                 <li><a href="/api/health">/api/health</a> - Health check</li>
                 <li><a href="/api/transcripts">/api/transcripts</a> - List all transcripts</li>
                 <li><a href="/create-test-transcript">/create-test-transcript</a> - Create test transcript</li>
+                <li><a href="/api/cleanup">/api/cleanup</a> - Manual cleanup (optional)</li>
             </ul>
         </div>
     </body>
@@ -123,8 +124,8 @@ app.get('/transcript/:id', (req, res) => {
             <html>
                 <body style="background: #36393f; color: white; font-family: Arial; text-align: center; padding: 50px;">
                     <h1>📄 Transcript Not Found</h1>
-                    <p>This transcript may have expired or doesn't exist.</p>
-                    <p><small>Transcripts are automatically deleted after 24 hours.</small></p>
+                    <p>This transcript doesn't exist or was manually deleted.</p>
+                    <p><small>Transcripts are now stored permanently until manually removed.</small></p>
                 </body>
             </html>
         `);
@@ -141,10 +142,49 @@ app.get('/api/transcripts', (req, res) => {
         channelName: data.ticketInfo?.channelName,
         server: data.ticketInfo?.server,
         messageCount: data.ticketInfo?.messageCount,
-        createdAt: new Date(data.createdAt).toISOString()
+        createdAt: new Date(data.createdAt).toISOString(),
+        ageInDays: Math.floor((Date.now() - data.createdAt) / (1000 * 60 * 60 * 24))
     }));
     
-    res.json({ transcripts });
+    res.json({ 
+        transcripts,
+        storageInfo: {
+            total: transcriptsStorage.size,
+            permanentStorage: true
+        }
+    });
+});
+
+// Ручная очистка старых транскриптов (опционально)
+app.delete('/api/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    
+    if (transcriptsStorage.has(transcriptId)) {
+        transcriptsStorage.delete(transcriptId);
+        console.log(`🗑️ Manually deleted transcript: ${transcriptId}`);
+        res.json({ 
+            success: true, 
+            message: `Transcript ${transcriptId} deleted successfully`,
+            remaining: transcriptsStorage.size
+        });
+    } else {
+        res.status(404).json({ 
+            success: false, 
+            message: `Transcript ${transcriptId} not found` 
+        });
+    }
+});
+
+// Очистка всех транскриптов (опционально)
+app.delete('/api/transcripts', (req, res) => {
+    const count = transcriptsStorage.size;
+    transcriptsStorage.clear();
+    console.log(`🗑️ Cleared all transcripts: ${count} deleted`);
+    res.json({ 
+        success: true, 
+        message: `All transcripts cleared (${count} deleted)`,
+        deleted: count
+    });
 });
 
 // Debug endpoint
@@ -160,6 +200,7 @@ app.get('/api/debug', (req, res) => {
     
     const transcriptsInfo = {
         total: transcriptsStorage.size,
+        permanentStorage: true,
         ids: Array.from(transcriptsStorage.keys())
     };
     
@@ -179,6 +220,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         transcripts: transcriptsStorage.size,
+        permanentStorage: true,
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
     });
@@ -202,6 +244,7 @@ app.get('/create-test-transcript', (req, res) => {
             <h1>✅ Test Transcript Works!</h1>
             <p>This is a test transcript created at ${new Date().toISOString()}</p>
             <p>Transcript ID: <strong>${transcriptId}</strong></p>
+            <p><strong>This transcript will NOT be automatically deleted</strong></p>
             <p>If you can see this, the server is working correctly!</p>
         </div>
     </body>
@@ -227,7 +270,8 @@ app.get('/create-test-transcript', (req, res) => {
         transcriptId: transcriptId,
         url: transcriptUrl,
         directLink: `<a href="${transcriptUrl}">Open Test Transcript</a>`,
-        storageSize: transcriptsStorage.size
+        storageSize: transcriptsStorage.size,
+        permanent: true
     });
 });
 
@@ -235,11 +279,13 @@ app.get('/create-test-transcript', (req, res) => {
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Transcript server running on port ${PORT}`);
     console.log(`🔗 Access at: ${getBaseUrl()}`);
+    console.log(`💾 Transcripts are now stored PERMANENTLY (no auto-deletion)`);
 });
 
 // Обработка graceful shutdown
 process.on('SIGTERM', () => {
     console.log('🔄 Received SIGTERM, shutting down gracefully...');
+    console.log(`💾 Preserving ${transcriptsStorage.size} transcripts in storage`);
     server.close(() => {
         console.log('✅ Server closed');
         process.exit(0);
@@ -248,6 +294,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     console.log('🔄 Received SIGINT, shutting down gracefully...');
+    console.log(`💾 Preserving ${transcriptsStorage.size} transcripts in storage`);
     server.close(() => {
         console.log('✅ Server closed');
         process.exit(0);
@@ -502,7 +549,7 @@ function createHTMLTranscript(ticketReport, messages) {
 
         <div class="footer">
             Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}<br>
-            <small>Этот транскрипт будет автоматически удален через 24 часа</small>
+            <small>Этот транскрипт хранится постоянно и не будет автоматически удален</small>
         </div>
     </div>
 
@@ -632,7 +679,7 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
             { name: '👥 Participants', value: `${uniqueParticipants.length}`, inline: true },
             { name: `🎯 Participants (${uniqueParticipants.length})`, value: participantsList + moreParticipants || 'No participants', inline: false }
         )
-        .setFooter({ text: 'Click the button below to view full transcript' })
+        .setFooter({ text: 'Click the button below to view full transcript • PERMANENT STORAGE' })
         .setTimestamp();
 
     return embed;
