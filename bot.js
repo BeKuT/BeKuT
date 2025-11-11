@@ -1345,7 +1345,7 @@ client.on('messageDelete', async (message) => {
 
 // ⬇️⬇️⬇️ ОБНОВЛЕННЫЙ ОБРАБОТЧИК !stat ⬇️⬇️⬇️
 client.on('messageCreate', async message => {
-    if(message.author.bot) return;
+    if (message.system) return;
 
     // Функции помощники
     async function sendPlayerNotFound(message, playerInput) {
