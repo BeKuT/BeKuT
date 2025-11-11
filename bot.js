@@ -1867,10 +1867,7 @@ client.on('messageCreate', async message => {
         }
     }
     // Обработка команды -transcript
-client.on('messageCreate', async message => {
-    if (message.system) return;
-
-    if (message.content.toLowerCase() === '-transcript') {
+else if (message.content.toLowerCase() === '-transcript') {
         await message.delete().catch(() => {});
         
         try {
@@ -1879,6 +1876,16 @@ client.on('messageCreate', async message => {
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
             messageCollection = messageCollection.concat(channelMessages);
+
+            let lastMessage = channelMessages.last();
+            while(channelMessages.size === 100 && lastMessage) {
+                let lastMessageId = lastMessage.id;
+                channelMessages = await message.channel.messages.fetch({ limit: 100, before: lastMessageId });
+                if(channelMessages && channelMessages.size > 0) {
+                    messageCollection = messageCollection.concat(channelMessages);
+                    lastMessage = channelMessages.last();
+                } else break;
+            }
 
             const allMessages = Array.from(messageCollection.values()).reverse();
             console.log(`📨 Collected ${allMessages.length} messages from channel`);
@@ -1891,6 +1898,10 @@ client.on('messageCreate', async message => {
             console.log(`🆔 Generated transcript ID: ${transcriptId}`);
             
             const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+            if (!htmlContent || htmlContent.length < 100) {
+                throw new Error('HTML transcript creation failed');
+            }
+            console.log(`✅ HTML transcript created (${htmlContent.length} characters)`);
             
             const transcriptData = {
                 html: htmlContent,
@@ -1906,8 +1917,16 @@ client.on('messageCreate', async message => {
             console.log(`💾 Transcript saved to storage: ${transcriptId}`);
             
             const baseUrl = getBaseUrl();
-            const transcriptUrl = baseUrl + '/transcript/' + transcriptId;
+            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
             console.log(`🔗 Transcript URL: ${transcriptUrl}`);
+            
+            try {
+                new URL(transcriptUrl);
+                console.log(`✅ URL is valid`);
+            } catch (urlError) {
+                console.error('❌ Invalid URL:', transcriptUrl);
+                throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
+            }
             
             const row = new ActionRowBuilder()
                 .addComponents(
@@ -1932,10 +1951,7 @@ client.on('messageCreate', async message => {
                 console.log(`🎉 Transcript creation completed successfully!`);
                 
             } else {
-                await message.channel.send({
-                    content: `✅ Transcript created! View it here: ${transcriptUrl}`,
-                    components: [row]
-                });
+                throw new Error('Transcript channel not found or not accessible');
             }
             
         } catch (error) {
