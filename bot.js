@@ -20,6 +20,22 @@ if (!token) {
 console.log('✅ Token loaded successfully');
 console.log(`📝 Channel ID: ${TRANSCRIPT_CHANNEL_ID}`);
 
+// ==================== ДИСКОРД БОТ ====================
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions
+    ]
+});
+
+// Хранилище для связи реакций с сообщениями переводов
+const translationMessages = new Map();
+const translationCooldown = new Set();
+const TRANSLATION_COOLDOWN_TIME = 5000;
+
 // Создаем Express сервер для хостинга транскриптов
 const app = express();
 
@@ -769,66 +785,6 @@ app.get('/create-test-transcript', (req, res) => {
     });
 });
 
-// Запускаем сервер
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('🌐 Transcript server running on port ' + PORT);
-    console.log('🔗 Access at: ' + getBaseUrl());
-    console.log('💾 Transcripts are now stored PERMANENTLY (no auto-deletion)');
-});
-
-// Обработка graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('🔄 Received SIGTERM, shutting down gracefully...');
-    server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-    });
-});
-
-process.on('SIGINT', () => {
-    console.log('🔄 Received SIGINT, shutting down gracefully...');
-    server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-    });
-});
-
-// Функция для получения базового URL
-function getBaseUrl() {
-    let baseUrl = '';
-    
-    if (process.env.RAILWAY_STATIC_URL) {
-        baseUrl = process.env.RAILWAY_STATIC_URL;
-        if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-            baseUrl = 'https://' + baseUrl;
-        }
-    }
-    else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        baseUrl = 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN;
-    }
-    else {
-        baseUrl = 'http://localhost:' + (process.env.PORT || 3000);
-    }
-    
-    return baseUrl;
-}
-
-// ==================== ДИСКОРД БОТ ====================
-
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions
-    ]
-});
-
-// Хранилище для связи реакций с сообщениями переводов
-const translationMessages = new Map();
-const translationCooldown = new Set();
-const TRANSLATION_COOLDOWN_TIME = 5000;
-
 // ==================== ФУНКЦИИ ДЛЯ ТРАНСКРИПТОВ ====================
 
 // Функция для сбора информации о тикете
@@ -1048,16 +1004,8 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions
-    ]
-});
-// ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
+// ==================== WAR THUNDER ФУНКЦИИ ====================
 
 // Улучшенный ручной поиск через StatShark
 async function findPlayerIdStatSharkManual(nickname) {
@@ -1162,6 +1110,7 @@ async function findPlayerIdStatSharkManual(nickname) {
         throw error;
     }
 }
+
 // Умный поиск статистики
 async function getPlayerStatsSmart(playerInput) {
     const isID = /^\d+$/.test(playerInput);
@@ -1177,7 +1126,7 @@ async function getPlayerStatsSmart(playerInput) {
     } else {
         // Если ввели никнейм - ищем ID
         console.log(`🔍 Looking up ID for nickname: ${playerInput}`);
-        const playerId = await findPlayerIdAdvanced(playerInput);
+        const playerId = await findPlayerIdStatSharkManual(playerInput);
         
         if (playerId) {
             console.log(`✅ Found ID ${playerId} for ${playerInput}`);
@@ -1225,6 +1174,34 @@ async function getStatsByPlayerId(playerId) {
 }
 
 // Прямой запрос к StatShark
+async function tryStatSharkDirect(playerId) {
+    try {
+        const response = await axios.get(`https://statshark.net/player/${playerId}`, {
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        return parseStatSharkHTML(response.data, playerId);
+    } catch (error) {
+        console.log('StatShark direct request failed:', error.message);
+        return null;
+    }
+}
+
+// Прямой запрос к официальному сайту War Thunder
+async function tryWTOfficial(playerId) {
+    try {
+        const response = await axios.get(`https://warthunder.com/ru/community/userinfo/?nick=${playerId}`, {
+            timeout: 15000
+        });
+        return parseWTOfficialHTML(response.data, playerId);
+    } catch (error) {
+        console.log('WTOfficial request failed:', error.message);
+        return null;
+    }
+}
+
 function parseStatSharkHTML(html, playerId) {
     try {
         console.log('🔍 Parsing StatShark HTML...');
@@ -1301,7 +1278,6 @@ function parseStatSharkHTML(html, playerId) {
     }
 }
 
-// Парсинг официального сайта War Thunder
 function parseWTOfficialHTML(html, playerId) {
     try {
         // Ищем никнейм
@@ -1363,6 +1339,7 @@ function generateFallbackStats(playerInput, isID) {
         isFallback: true
     };
 }
+
 // Класс для работы с War Thunder полками
 class WTRegimentTracker {
     constructor() {
@@ -1488,10 +1465,6 @@ Updated: ${new Date().toLocaleDateString()}
 // Создаем экземпляр трекера
 const wtTracker = new WTRegimentTracker();
 
-// Система кд для переводов
-const translationCooldown = new Set();
-const TRANSLATION_COOLDOWN_TIME = 5000;
-
 // Словарь для перевода
 const translationDict = {
     'hello': 'привет', 'world': 'мир', 'good': 'хороший', 'bad': 'плохой',
@@ -1538,10 +1511,7 @@ async function translateWithAPI(text, targetLang) {
     }
 }
 
-client.login(token).catch(error => {
-    console.error('❌ Login failed:', error);
-    process.exit(1);
-});
+// ==================== ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
 
 client.on('ready', () => {
     console.log(`✅ Bot has logged in as ${client.user.tag}`);
@@ -1755,27 +1725,6 @@ client.on('messageCreate', async message => {
         });
     }
 
-    // Генерация fallback статистики
-    function generateFallbackStats(playerInput, isID) {
-        const randomBattles = Math.floor(Math.random() * 5000) + 1000;
-        const randomWinRate = (Math.random() * 30 + 45).toFixed(1);
-        const randomKDR = (Math.random() * 2 + 0.8).toFixed(2);
-        const randomLevel = Math.floor(Math.random() * 50) + 30;
-        
-        return {
-            nickname: isID ? `Player${playerInput}` : playerInput,
-            playerId: isID ? playerInput : 'N/A',
-            level: randomLevel,
-            battles: randomBattles,
-            winRate: `${randomWinRate}%`,
-            kdr: randomKDR,
-            profileUrl: isID ? 
-                `https://statshark.net/player/${playerInput}` :
-                `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`,
-            isFallback: true
-        };
-    }
-
     // Обработка команды !stat
     if (message.content.startsWith('!stat ')) {
         const playerInput = message.content.slice(6).trim();
@@ -1867,7 +1816,7 @@ client.on('messageCreate', async message => {
         }
     }
     // Обработка команды -transcript
-else if (message.content.toLowerCase() === '-transcript') {
+    else if (message.content.toLowerCase() === '-transcript') {
         await message.delete().catch(() => {});
         
         try {
@@ -1961,6 +1910,50 @@ else if (message.content.toLowerCase() === '-transcript') {
     }
 });
 
+// Функция для получения базового URL
+function getBaseUrl() {
+    let baseUrl = '';
+    
+    if (process.env.RAILWAY_STATIC_URL) {
+        baseUrl = process.env.RAILWAY_STATIC_URL;
+        if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+            baseUrl = 'https://' + baseUrl;
+        }
+    }
+    else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        baseUrl = 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN;
+    }
+    else {
+        baseUrl = 'http://localhost:' + (process.env.PORT || 3000);
+    }
+    
+    return baseUrl;
+}
+
+// Запускаем сервер
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('🌐 Transcript server running on port ' + PORT);
+    console.log('🔗 Access at: ' + getBaseUrl());
+    console.log('💾 Transcripts are now stored PERMANENTLY (no auto-deletion)');
+});
+
+// Обработка graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🔄 Received SIGTERM, shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('🔄 Received SIGINT, shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
+});
+
 // Обработка ошибок
 process.on('unhandledRejection', error => {
     console.error('❌ Unhandled promise rejection:', error);
@@ -1970,4 +1963,10 @@ process.on('uncaughtException', error => {
     console.error('❌ Uncaught exception:', error);
 });
 
-console.log('🚀 Bot starting...');
+// Запуск бота
+client.login(token).catch(error => {
+    console.error('❌ Login failed:', error);
+    process.exit(1);
+});
+
+console.log('🚀 Bot starting with enhanced web dashboard...');
