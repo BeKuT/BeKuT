@@ -1997,14 +1997,22 @@ client.on('messageCreate', async message => {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    // Приоритет 1: Кастомный домен из переменных окружения
-    if (process.env.CUSTOM_DOMAIN) {
-        const domain = process.env.CUSTOM_DOMAIN;
-        return domain.startsWith('http') ? domain : 'https://' + domain;
+    // Для Render.com
+    if (process.env.RENDER) {
+        return `https://haki.onrender.com`;
     }
     
-    // Приоритет 2: Haki.xyz по умолчанию
-    return 'https://Haki.xyz';
+    // Для Railway (как fallback)
+    if (process.env.RAILWAY_STATIC_URL) {
+        let railwayUrl = process.env.RAILWAY_STATIC_URL;
+        if (!railwayUrl.startsWith('http')) {
+            railwayUrl = 'https://' + railwayUrl;
+        }
+        return railwayUrl;
+    }
+    
+    // Локальная разработка
+    return `http://localhost:${process.env.PORT || 3000}`;
 }
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
