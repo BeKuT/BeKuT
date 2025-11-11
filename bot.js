@@ -9,6 +9,7 @@ const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
 const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
+
 // Railway-specific optimizations
 const https = require('https');
 
@@ -50,88 +51,659 @@ const app = express();
 // Важные middleware для Railway
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-// Хранилище для транскриптов в памяти (теперь транскрипты не удаляются автоматически)
+// Хранилище для транскриптов в памяти
 const transcriptsStorage = new Map();
 
-// Основной маршрут для проверки работы
+// ==================== ВЕБ-ИНТЕРФЕЙС ====================
+
+// Главная страница с красивым интерфейсом
 app.get('/', (req, res) => {
     const baseUrl = getBaseUrl();
     res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="ru">
     <head>
-        <title>Transcript Server</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BeKuT Bot Dashboard</title>
         <style>
-            body { 
-                background: #36393f; 
-                color: white; 
-                font-family: Arial; 
-                padding: 20px;
-                max-width: 800px;
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            :root {
+                --primary: #5865F2;
+                --primary-dark: #4752C4;
+                --background: #36393f;
+                --surface: #2f3136;
+                --surface-light: #40444b;
+                --text: #ffffff;
+                --text-muted: #b9bbbe;
+                --success: #57F287;
+                --warning: #FEE75C;
+                --danger: #ED4245;
+                --border: #40444b;
+            }
+
+            body {
+                font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                background: var(--background);
+                color: var(--text);
+                line-height: 1.6;
+            }
+
+            .container {
+                max-width: 1200px;
                 margin: 0 auto;
-            }
-            .card {
-                background: #2f3136;
                 padding: 20px;
-                margin: 10px 0;
-                border-radius: 8px;
-                border-left: 4px solid #7289da;
             }
-            .success { border-left-color: #43b581; }
-            .warning { border-left-color: #faa61a; }
-            a { color: #00aff4; text-decoration: none; }
-            a:hover { text-decoration: underline; }
-            code { background: #40444b; padding: 2px 6px; border-radius: 3px; }
+
+            .header {
+                background: var(--surface);
+                padding: 30px;
+                border-radius: 12px;
+                margin-bottom: 30px;
+                border-left: 4px solid var(--primary);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            }
+
+            .header h1 {
+                font-size: 2.5rem;
+                margin-bottom: 10px;
+                background: linear-gradient(135deg, var(--primary), var(--success));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+
+            .header p {
+                color: var(--text-muted);
+                font-size: 1.1rem;
+            }
+
+            .nav-tabs {
+                display: flex;
+                background: var(--surface);
+                border-radius: 12px;
+                padding: 10px;
+                margin-bottom: 30px;
+                gap: 10px;
+            }
+
+            .nav-tab {
+                padding: 15px 25px;
+                background: transparent;
+                border: none;
+                color: var(--text-muted);
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 1rem;
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }
+
+            .nav-tab:hover {
+                background: var(--surface-light);
+                color: var(--text);
+            }
+
+            .nav-tab.active {
+                background: var(--primary);
+                color: white;
+            }
+
+            .tab-content {
+                display: none;
+            }
+
+            .tab-content.active {
+                display: block;
+            }
+
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+                margin-bottom: 30px;
+            }
+
+            .stat-card {
+                background: var(--surface);
+                padding: 25px;
+                border-radius: 12px;
+                border-left: 4px solid var(--primary);
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
+            }
+
+            .stat-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            }
+
+            .stat-card.success {
+                border-left-color: var(--success);
+            }
+
+            .stat-card.warning {
+                border-left-color: var(--warning);
+            }
+
+            .stat-card.danger {
+                border-left-color: var(--danger);
+            }
+
+            .stat-icon {
+                font-size: 2rem;
+                margin-bottom: 15px;
+            }
+
+            .stat-value {
+                font-size: 2rem;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }
+
+            .stat-label {
+                color: var(--text-muted);
+                font-size: 0.9rem;
+            }
+
+            .transcripts-list {
+                background: var(--surface);
+                border-radius: 12px;
+                overflow: hidden;
+            }
+
+            .transcript-item {
+                padding: 20px;
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                justify-content: between;
+                align-items: center;
+                transition: background 0.3s ease;
+            }
+
+            .transcript-item:hover {
+                background: var(--surface-light);
+            }
+
+            .transcript-item:last-child {
+                border-bottom: none;
+            }
+
+            .transcript-info {
+                flex: 1;
+            }
+
+            .transcript-title {
+                font-weight: 600;
+                margin-bottom: 5px;
+            }
+
+            .transcript-meta {
+                color: var(--text-muted);
+                font-size: 0.9rem;
+            }
+
+            .transcript-actions {
+                display: flex;
+                gap: 10px;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.3s ease;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .btn-primary {
+                background: var(--primary);
+                color: white;
+            }
+
+            .btn-primary:hover {
+                background: var(--primary-dark);
+            }
+
+            .btn-success {
+                background: var(--success);
+                color: black;
+            }
+
+            .btn-danger {
+                background: var(--danger);
+                color: white;
+            }
+
+            .btn-outline {
+                background: transparent;
+                border: 1px solid var(--border);
+                color: var(--text);
+            }
+
+            .btn-outline:hover {
+                background: var(--surface-light);
+            }
+
+            .empty-state {
+                text-align: center;
+                padding: 60px 20px;
+                color: var(--text-muted);
+            }
+
+            .empty-state i {
+                font-size: 3rem;
+                margin-bottom: 20px;
+                opacity: 0.5;
+            }
+
+            .search-box {
+                background: var(--surface);
+                padding: 20px;
+                border-radius: 12px;
+                margin-bottom: 20px;
+            }
+
+            .search-input {
+                width: 100%;
+                padding: 12px 16px;
+                background: var(--surface-light);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                color: var(--text);
+                font-size: 1rem;
+            }
+
+            .search-input:focus {
+                outline: none;
+                border-color: var(--primary);
+            }
+
+            .status-indicator {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 4px 12px;
+                background: var(--success);
+                color: black;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 500;
+            }
+
+            .status-indicator::before {
+                content: '';
+                width: 8px;
+                height: 8px;
+                background: currentColor;
+                border-radius: 50%;
+            }
+
+            .status-indicator.offline {
+                background: var(--danger);
+                color: white;
+            }
+
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            .fade-in {
+                animation: fadeIn 0.5s ease;
+            }
+
+            @media (max-width: 768px) {
+                .container {
+                    padding: 10px;
+                }
+                
+                .nav-tabs {
+                    flex-direction: column;
+                }
+                
+                .stats-grid {
+                    grid-template-columns: 1fr;
+                }
+                
+                .transcript-item {
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 15px;
+                }
+                
+                .transcript-actions {
+                    width: 100%;
+                    justify-content: flex-end;
+                }
+            }
         </style>
     </head>
     <body>
-        <h1>📄 Transcript Server</h1>
-        
-        <div class="card success">
-            <h2>✅ Server is Running</h2>
-            <p>Base URL: <code>${baseUrl}</code></p>
-            <p>Transcripts in storage: <strong>${transcriptsStorage.size}</strong></p>
-            <p>Server time: ${new Date().toISOString()}</p>
+        <div class="container">
+            <div class="header fade-in">
+                <h1>🤖 BeKuT Bot Dashboard</h1>
+                <p>Управление ботом и просмотр транскриптов</p>
+                <div style="margin-top: 15px;">
+                    <span class="status-indicator" id="botStatus">Загрузка...</span>
+                </div>
+            </div>
+
+            <div class="nav-tabs">
+                <button class="nav-tab active" onclick="switchTab('overview')">📊 Обзор</button>
+                <button class="nav-tab" onclick="switchTab('transcripts')">📄 Транскрипты</button>
+                <button class="nav-tab" onclick="switchTab('settings')">⚙️ Настройки</button>
+            </div>
+
+            <!-- Вкладка Обзор -->
+            <div id="overview" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">🤖</div>
+                        <div class="stat-value" id="botUptime">--</div>
+                        <div class="stat-label">Аптайм бота</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-value" id="transcriptsCount">--</div>
+                        <div class="stat-label">Транскриптов</div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="stat-icon">💾</div>
+                        <div class="stat-value" id="storageUsage">--</div>
+                        <div class="stat-label">Использование памяти</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🚀</div>
+                        <div class="stat-value" id="serverStatus">--</div>
+                        <div class="stat-label">Статус сервера</div>
+                    </div>
+                </div>
+
+                <div class="search-box">
+                    <h3 style="margin-bottom: 15px;">🔍 Быстрый поиск</h3>
+                    <input type="text" class="search-input" placeholder="Поиск транскриптов по ID, серверу или каналу..." id="searchInput">
+                </div>
+
+                <div style="background: var(--surface); padding: 25px; border-radius: 12px;">
+                    <h3 style="margin-bottom: 15px;">📈 Последняя активность</h3>
+                    <div id="recentActivity">
+                        <div class="empty-state">
+                            <i>📊</i>
+                            <p>Загрузка данных...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Вкладка Транскрипты -->
+            <div id="transcripts" class="tab-content">
+                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 20px;">
+                    <h3>📄 Все транскрипты</h3>
+                    <div class="transcript-actions">
+                        <button class="btn btn-primary" onclick="refreshTranscripts()">
+                            🔄 Обновить
+                        </button>
+                    </div>
+                </div>
+
+                <div class="search-box">
+                    <input type="text" class="search-input" placeholder="Поиск транскриптов..." id="transcriptSearch">
+                </div>
+
+                <div class="transcripts-list" id="transcriptsContainer">
+                    <div class="empty-state">
+                        <i>📝</i>
+                        <p>Загрузка транскриптов...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Вкладка Настройки -->
+            <div id="settings" class="tab-content">
+                <div style="background: var(--surface); padding: 25px; border-radius: 12px;">
+                    <h3 style="margin-bottom: 20px;">⚙️ Настройки системы</h3>
+                    
+                    <div style="display: grid; gap: 20px;">
+                        <div>
+                            <h4 style="margin-bottom: 10px;">🌐 Информация о сервере</h4>
+                            <div style="background: var(--surface-light); padding: 15px; border-radius: 8px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                    <div>
+                                        <strong>Base URL:</strong><br>
+                                        <code>${baseUrl}</code>
+                                    </div>
+                                    <div>
+                                        <strong>Порт:</strong><br>
+                                        <code>${PORT}</code>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 style="margin-bottom: 10px;">🛠️ Действия</h4>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                <a href="/api/health" class="btn btn-outline" target="_blank">
+                                    ❤️ Health Check
+                                </a>
+                                <a href="/api/debug" class="btn btn-outline" target="_blank">
+                                    🐛 Debug Info
+                                </a>
+                                <a href="/create-test-transcript" class="btn btn-outline" target="_blank">
+                                    🧪 Test Transcript
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        
-        <div class="card">
-            <h2>🔧 Debug Endpoints</h2>
-            <ul>
-                <li><a href="/api/debug">/api/debug</a> - Environment information</li>
-                <li><a href="/api/health">/api/health</a> - Health check</li>
-                <li><a href="/api/transcripts">/api/transcripts</a> - List all transcripts</li>
-                <li><a href="/create-test-transcript">/create-test-transcript</a> - Create test transcript</li>
-                <li><a href="/api/cleanup">/api/cleanup</a> - Manual cleanup (optional)</li>
-            </ul>
-        </div>
+
+        <script>
+            let allTranscripts = [];
+
+            function switchTab(tabName) {
+                // Скрыть все вкладки
+                document.querySelectorAll('.tab-content').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                // Убрать активный класс со всех кнопок
+                document.querySelectorAll('.nav-tab').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                
+                // Показать выбранную вкладку
+                document.getElementById(tabName).classList.add('active');
+                
+                // Активировать кнопку
+                event.target.classList.add('active');
+                
+                // Загрузить данные для вкладки транскриптов
+                if (tabName === 'transcripts') {
+                    loadTranscripts();
+                }
+            }
+
+            async function loadBotStatus() {
+                try {
+                    const response = await fetch('/api/health');
+                    const data = await response.json();
+                    
+                    document.getElementById('botUptime').textContent = formatUptime(data.uptime);
+                    document.getElementById('transcriptsCount').textContent = data.transcripts;
+                    document.getElementById('storageUsage').textContent = 'Permanent';
+                    document.getElementById('serverStatus').textContent = data.status === 'ok' ? 'Online' : 'Offline';
+                    
+                    const statusIndicator = document.getElementById('botStatus');
+                    statusIndicator.textContent = data.status === 'ok' ? 'Bot Online' : 'Bot Offline';
+                    if (data.status !== 'ok') {
+                        statusIndicator.classList.add('offline');
+                    }
+                } catch (error) {
+                    console.error('Error loading bot status:', error);
+                    document.getElementById('botStatus').classList.add('offline');
+                    document.getElementById('botStatus').textContent = 'Connection Error';
+                }
+            }
+
+            function formatUptime(seconds) {
+                const days = Math.floor(seconds / (24 * 60 * 60));
+                const hours = Math.floor((seconds % (24 * 60 * 60)) / (60 * 60));
+                const minutes = Math.floor((seconds % (60 * 60)) / 60);
+                
+                if (days > 0) return `${days}d ${hours}h`;
+                if (hours > 0) return `${hours}h ${minutes}m`;
+                return `${minutes}m`;
+            }
+
+            async function loadTranscripts() {
+                try {
+                    const response = await fetch('/api/transcripts');
+                    const data = await response.json();
+                    allTranscripts = data.transcripts;
+                    displayTranscripts(allTranscripts);
+                } catch (error) {
+                    console.error('Error loading transcripts:', error);
+                    document.getElementById('transcriptsContainer').innerHTML = '
+                        <div class="empty-state">
+                            <i>❌</i>
+                            <p>Ошибка загрузки транскриптов</p>
+                        </div>
+                    ';
+                }
+            }
+
+            function displayTranscripts(transcripts) {
+                const container = document.getElementById('transcriptsContainer');
+                
+                if (transcripts.length === 0) {
+                    container.innerHTML = '
+                        <div class="empty-state">
+                            <i>📝</i>
+                            <p>Транскрипты не найдены</p>
+                        </div>
+                    ';
+                    return;
+                }
+
+                container.innerHTML = transcripts.map(transcript => '
+                    <div class="transcript-item fade-in">
+                        <div class="transcript-info">
+                            <div class="transcript-title">
+                                #${transcript.channelName || 'unknown'}
+                            </div>
+                            <div class="transcript-meta">
+                                🏠 ${transcript.server || 'Unknown Server'} • 
+                                💬 ${transcript.messageCount || 0} сообщений • 
+                                📅 ${new Date(transcript.createdAt).toLocaleDateString('ru-RU')}
+                            </div>
+                        </div>
+                        <div class="transcript-actions">
+                            <a href="/transcript/${transcript.id}" class="btn btn-primary" target="_blank">
+                                👁️ Просмотр
+                            </a>
+                            <button class="btn btn-outline" onclick="copyTranscriptUrl('${transcript.id}')">
+                                📋 Ссылка
+                            </button>
+                        </div>
+                    </div>
+                ').join('');
+            }
+
+            function refreshTranscripts() {
+                loadTranscripts();
+                showNotification('Транскрипты обновлены', 'success');
+            }
+
+            function copyTranscriptUrl(id) {
+                const url = window.location.origin + '/transcript/' + id;
+                navigator.clipboard.writeText(url).then(() => {
+                    showNotification('Ссылка скопирована в буфер обмена', 'success');
+                });
+            }
+
+            function showNotification(message, type = 'info') {
+                // Создание уведомления
+                const notification = document.createElement('div');
+                notification.style.cssText = \`
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: \${type === 'success' ? '#57F287' : '#5865F2'};
+                    color: \${type === 'success' ? 'black' : 'white'};
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 1000;
+                    animation: slideIn 0.3s ease;
+                \`;
+                notification.textContent = message;
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            }
+
+            // Поиск транскриптов
+            document.getElementById('transcriptSearch')?.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const filtered = allTranscripts.filter(transcript => 
+                    transcript.id.toLowerCase().includes(searchTerm) ||
+                    (transcript.channelName && transcript.channelName.toLowerCase().includes(searchTerm)) ||
+                    (transcript.server && transcript.server.toLowerCase().includes(searchTerm))
+                );
+                displayTranscripts(filtered);
+            });
+
+            // Загрузка данных при старте
+            loadBotStatus();
+            setInterval(loadBotStatus, 30000); // Обновлять каждые 30 секунд
+
+            // Добавляем стили для анимации уведомлений
+            const style = document.createElement('style');
+            style.textContent = \`
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            \`;
+            document.head.appendChild(style);
+        </script>
     </body>
     </html>
     `);
 });
 
-// Маршрут для просмотра транскрипта
+// Остальные маршруты остаются без изменений
 app.get('/transcript/:id', (req, res) => {
     const transcriptId = req.params.id;
     const transcript = transcriptsStorage.get(transcriptId);
     
-    console.log(`🔍 Looking for transcript: ${transcriptId}`);
-    console.log(`📊 Total transcripts in storage: ${transcriptsStorage.size}`);
-    
     if (!transcript) {
-        console.log(`❌ Transcript ${transcriptId} not found in storage`);
         return res.status(404).send(`
             <html>
                 <body style="background: #36393f; color: white; font-family: Arial; text-align: center; padding: 50px;">
                     <h1>📄 Transcript Not Found</h1>
                     <p>This transcript doesn't exist or was manually deleted.</p>
-                    <p><small>Transcripts are now stored permanently until manually removed.</small></p>
                 </body>
             </html>
         `);
     }
     
-    console.log(`✅ Found transcript: ${transcriptId}`);
     res.send(transcript.html);
 });
 
@@ -155,35 +727,14 @@ app.get('/api/transcripts', (req, res) => {
     });
 });
 
-// Ручная очистка старых транскриптов (опционально)
-app.delete('/api/transcript/:id', (req, res) => {
-    const transcriptId = req.params.id;
-    
-    if (transcriptsStorage.has(transcriptId)) {
-        transcriptsStorage.delete(transcriptId);
-        console.log(`🗑️ Manually deleted transcript: ${transcriptId}`);
-        res.json({ 
-            success: true, 
-            message: `Transcript ${transcriptId} deleted successfully`,
-            remaining: transcriptsStorage.size
-        });
-    } else {
-        res.status(404).json({ 
-            success: false, 
-            message: `Transcript ${transcriptId} not found` 
-        });
-    }
-});
-
-// Очистка всех транскриптов (опционально)
-app.delete('/api/transcripts', (req, res) => {
-    const count = transcriptsStorage.size;
-    transcriptsStorage.clear();
-    console.log(`🗑️ Cleared all transcripts: ${count} deleted`);
-    res.json({ 
-        success: true, 
-        message: `All transcripts cleared (${count} deleted)`,
-        deleted: count
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        transcripts: transcriptsStorage.size,
+        permanentStorage: true,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -194,35 +745,19 @@ app.get('/api/debug', (req, res) => {
         PORT: process.env.PORT,
         RAILWAY_STATIC_URL: process.env.RAILWAY_STATIC_URL,
         RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
-        RAILWAY_SERVICE_NAME: process.env.RAILWAY_SERVICE_NAME,
-        RAILWAY_SERVICE_ID: process.env.RAILWAY_SERVICE_ID,
-    };
-    
-    const transcriptsInfo = {
-        total: transcriptsStorage.size,
-        permanentStorage: true,
-        ids: Array.from(transcriptsStorage.keys())
     };
     
     res.json({
         environment: environmentInfo,
-        transcripts: transcriptsInfo,
+        transcripts: {
+            total: transcriptsStorage.size,
+            permanentStorage: true
+        },
         server: {
             uptime: process.uptime(),
             timestamp: new Date().toISOString(),
             baseUrl: getBaseUrl()
         }
-    });
-});
-
-// Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        transcripts: transcriptsStorage.size,
-        permanentStorage: true,
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
     });
 });
 
@@ -244,8 +779,6 @@ app.get('/create-test-transcript', (req, res) => {
             <h1>✅ Test Transcript Works!</h1>
             <p>This is a test transcript created at ${new Date().toISOString()}</p>
             <p>Transcript ID: <strong>${transcriptId}</strong></p>
-            <p><strong>This transcript will NOT be automatically deleted</strong></p>
-            <p>If you can see this, the server is working correctly!</p>
         </div>
     </body>
     </html>
@@ -262,16 +795,11 @@ app.get('/create-test-transcript', (req, res) => {
         }
     });
     
-    const transcriptUrl = `${getBaseUrl()}/transcript/${transcriptId}`;
-    
     res.json({
         success: true,
         message: 'Test transcript created successfully',
         transcriptId: transcriptId,
-        url: transcriptUrl,
-        directLink: `<a href="${transcriptUrl}">Open Test Transcript</a>`,
-        storageSize: transcriptsStorage.size,
-        permanent: true
+        url: `${getBaseUrl()}/transcript/${transcriptId}`
     });
 });
 
@@ -285,7 +813,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 // Обработка graceful shutdown
 process.on('SIGTERM', () => {
     console.log('🔄 Received SIGTERM, shutting down gracefully...');
-    console.log(`💾 Preserving ${transcriptsStorage.size} transcripts in storage`);
     server.close(() => {
         console.log('✅ Server closed');
         process.exit(0);
@@ -294,431 +821,31 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     console.log('🔄 Received SIGINT, shutting down gracefully...');
-    console.log(`💾 Preserving ${transcriptsStorage.size} transcripts in storage`);
     server.close(() => {
         console.log('✅ Server closed');
         process.exit(0);
     });
 });
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions
-    ]
-});
-
-// Хранилище для связи реакций с сообщениями переводов
-const translationMessages = new Map();
-
-// ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ ТРАНСКРИПТА ⬇️⬇️⬇️
-
-// Функция для сбора информации о тикете
-async function collectTicketInfo(channel, messages) {
-    const participants = new Map(); // Используем Map вместо Set для уникальности по ID
-    let ticketCreator = null;
-    let firstMessage = null;
-
-    messages.forEach(msg => {
-        // Добавляем участника в Map по ID (автоматически убирает дубликаты)
-        participants.set(msg.author.id, {
-            id: msg.author.id,
-            username: msg.author.tag,
-            displayName: msg.author.displayName || msg.author.username,
-            bot: msg.author.bot,
-            avatar: msg.author.displayAvatarURL({ format: 'png', size: 64 })
-        });
-
-        if (!firstMessage || msg.createdTimestamp < firstMessage.createdTimestamp) {
-            firstMessage = msg;
-        }
-    });
-
-    if (firstMessage) {
-        ticketCreator = {
-            id: firstMessage.author.id,
-            username: firstMessage.author.tag,
-            displayName: firstMessage.author.displayName || firstMessage.author.username
-        };
-    }
-
-    return {
-        ticketId: channel.name.split('-').pop() || 'unknown',
-        server: channel.guild.name,
-        serverId: channel.guild.id,
-        serverIcon: channel.guild.iconURL({ format: 'png', size: 64 }),
-        createdAt: channel.createdAt,
-        createdBy: ticketCreator ? {
-            username: ticketCreator.username,
-            displayName: ticketCreator.displayName,
-            id: ticketCreator.id
-        } : null,
-        channelName: channel.name,
-        channelId: channel.id,
-        participants: Array.from(participants.values()).map(p => ({
-            username: p.username,
-            displayName: p.displayName,
-            userId: p.id,
-            avatar: p.avatar,
-            role: p.bot ? 'system' : (p.id === ticketCreator?.id ? 'Ticket Owner' : 'participant')
-        }))
-    };
-}
-
-// Функция для генерации отчета о тикете
-function generateTicketReport(ticketData) {
-    const report = {
-        ticketInfo: {
-            id: ticketData.ticketId,
-            server: ticketData.server,
-            serverId: ticketData.serverId,
-            serverIcon: ticketData.serverIcon,
-            createdAt: ticketData.createdAt,
-            createdBy: ticketData.createdBy,
-            channelName: ticketData.channelName,
-            channelId: ticketData.channelId
-        },
-        participants: ticketData.participants,
-        messageCount: 0
-    };
-
-    return report;
-}
-
-// Функция для создания HTML транскрипта в стиле Discord
-function createHTMLTranscript(ticketReport, messages) {
-    const participantsHTML = ticketReport.participants.map(participant => `
-        <div class="participant">
-            <img src="${participant.avatar}" alt="${participant.displayName}" class="avatar">
-            <div class="participant-info">
-                <div class="username">${participant.displayName}</div>
-                <div class="discriminator">${participant.username}</div>
-            </div>
-            <div class="role">${participant.role}</div>
-        </div>
-    `).join('');
-
-    const messagesHTML = messages.map(msg => {
-        const timestamp = msg.createdAt.toLocaleString('ru-RU');
-        const author = msg.author;
-        const content = msg.content || '';
-        const attachments = msg.attachments.size > 0 ? Array.from(msg.attachments.values()) : [];
-        const embeds = msg.embeds || [];
-
-        return `
-        <div class="message" id="message-${msg.id}">
-            <img src="${author.displayAvatarURL({ format: 'png', size: 64 })}" alt="${author.tag}" class="message-avatar">
-            <div class="message-content">
-                <div class="message-header">
-                    <span class="author-name">${author.displayName || author.username}</span>
-                    <span class="message-time">${timestamp}</span>
-                </div>
-                <div class="message-text">${formatMessageContent(content)}</div>
-                ${attachments.length > 0 ? `
-                <div class="attachments">
-                    ${attachments.map(attachment => `
-                        <div class="attachment">
-                            ${attachment.contentType && attachment.contentType.startsWith('image/') ? 
-                                `<img src="${attachment.url}" alt="Attachment" class="attachment-image">` :
-                                `<a href="${attachment.url}" class="attachment-link" target="_blank">📎 ${attachment.name}</a>`
-                            }
-                        </div>
-                    `).join('')}
-                </div>
-                ` : ''}
-                ${embeds.length > 0 ? `
-                <div class="embeds">
-                    ${embeds.map(embed => createEmbedHTML(embed)).join('')}
-                </div>
-                ` : ''}
-            </div>
-        </div>
-        `;
-    }).join('');
-
-    return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Транскрипт #${ticketReport.ticketInfo.channelName}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #36393f; color: #dcddde; line-height: 1.4; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #7289da; }
-        .server-info { display: flex; align-items: center; margin-bottom: 15px; }
-        .server-icon { width: 48px; height: 48px; border-radius: 50%; margin-right: 15px; }
-        .server-details h1 { color: #fff; font-size: 24px; margin-bottom: 5px; }
-        .server-details .channel-name { color: #8e9297; font-size: 16px; }
-        .ticket-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
-        .stat { background: #40444b; padding: 12px; border-radius: 4px; }
-        .stat-label { color: #8e9297; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
-        .stat-value { color: #fff; font-size: 18px; font-weight: bold; }
-        .participants-section { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .section-title { color: #fff; font-size: 18px; margin-bottom: 15px; font-weight: 600; }
-        .participants-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-        .participant { display: flex; align-items: center; padding: 10px; background: #40444b; border-radius: 4px; }
-        .participant .avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 10px; }
-        .participant-info { flex: 1; }
-        .participant .username { color: #fff; font-weight: 500; }
-        .participant .discriminator { color: #8e9297; font-size: 12px; }
-        .participant .role { background: #7289da; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-        .messages-section { background: #2f3136; border-radius: 8px; overflow: hidden; }
-        .messages-header { background: #36393f; padding: 15px 20px; border-bottom: 1px solid #40444b; }
-        .messages-container { padding: 20px; max-height: 600px; overflow-y: auto; }
-        .message { display: flex; margin-bottom: 20px; padding: 5px; border-radius: 4px; transition: background-color 0.2s; }
-        .message:hover { background: #32353b; }
-        .message-avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; flex-shrink: 0; }
-        .message-content { flex: 1; min-width: 0; }
-        .message-header { display: flex; align-items: center; margin-bottom: 5px; }
-        .author-name { color: #fff; font-weight: 500; margin-right: 8px; }
-        .message-time { color: #72767d; font-size: 12px; }
-        .message-text { color: #dcddde; word-wrap: break-word; white-space: pre-wrap; }
-        .attachments { margin-top: 10px; }
-        .attachment { margin-top: 5px; }
-        .attachment-image { max-width: 400px; max-height: 300px; border-radius: 4px; cursor: pointer; }
-        .attachment-link { color: #00aff4; text-decoration: none; display: inline-flex; align-items: center; padding: 5px 10px; background: #2f3136; border-radius: 4px; border: 1px solid #40444b; }
-        .attachment-link:hover { text-decoration: underline; }
-        .embeds { margin-top: 10px; }
-        .embed { background: #2f3136; border-left: 4px solid #40444b; border-radius: 4px; padding: 12px; margin-top: 8px; max-width: 400px; }
-        .embed-title { color: #00aff4; font-weight: 600; margin-bottom: 8px; text-decoration: none; }
-        .embed-title:hover { text-decoration: underline; }
-        .embed-description { color: #dcddde; font-size: 14px; line-height: 1.4; }
-        .embed-footer { margin-top: 8px; color: #72767d; font-size: 12px; }
-        .mention { background: #3a3c42; color: #dee0fc; padding: 1px 4px; border-radius: 3px; font-weight: 500; }
-        .code-block { background: #2f3136; border: 1px solid #40444b; border-radius: 4px; padding: 10px; margin: 5px 0; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; overflow-x: auto; }
-        .inline-code { background: #2f3136; border: 1px solid #40444b; border-radius: 3px; padding: 2px 4px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; }
-        .footer { text-align: center; margin-top: 30px; color: #72767d; font-size: 12px; padding: 20px; border-top: 1px solid #40444b; }
-        .messages-container::-webkit-scrollbar { width: 8px; }
-        .messages-container::-webkit-scrollbar-track { background: #2f3136; }
-        .messages-container::-webkit-scrollbar-thumb { background: #202225; border-radius: 4px; }
-        .messages-container::-webkit-scrollbar-thumb:hover { background: #1a1c20; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="server-info">
-                ${ticketReport.ticketInfo.serverIcon ? `<img src="${ticketReport.ticketInfo.serverIcon}" alt="${ticketReport.ticketInfo.server}" class="server-icon">` : ''}
-                <div class="server-details">
-                    <h1>${ticketReport.ticketInfo.server}</h1>
-                    <div class="channel-name">#${ticketReport.ticketInfo.channelName}</div>
-                </div>
-            </div>
-            <div class="ticket-stats">
-                <div class="stat">
-                    <div class="stat-label">Создан</div>
-                    <div class="stat-value">${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Сообщений</div>
-                    <div class="stat-value">${ticketReport.messageCount}</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Участников</div>
-                    <div class="stat-value">${ticketReport.participants.length}</div>
-                </div>
-                ${ticketReport.ticketInfo.createdBy ? `
-                <div class="stat">
-                    <div class="stat-label">Создатель</div>
-                    <div class="stat-value">${ticketReport.ticketInfo.createdBy.displayName}</div>
-                </div>
-                ` : ''}
-            </div>
-        </div>
-
-        <div class="participants-section">
-            <div class="section-title">Участники тикета</div>
-            <div class="participants-grid">
-                ${participantsHTML}
-            </div>
-        </div>
-
-        <div class="messages-section">
-            <div class="messages-header">
-                <div class="section-title">История сообщений</div>
-            </div>
-            <div class="messages-container">
-                ${messagesHTML}
-            </div>
-        </div>
-
-        <div class="footer">
-            Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}<br>
-            <small>Этот транскрипт хранится постоянно и не будет автоматически удален</small>
-        </div>
-    </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const images = document.querySelectorAll('.attachment-image');
-            images.forEach(img => {
-                img.addEventListener('click', function() {
-                    const overlay = document.createElement('div');
-                    overlay.style.cssText = \`
-                        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                        background: rgba(0,0,0,0.8); display: flex; align-items: center;
-                        justify-content: center; z-index: 1000; cursor: pointer;
-                    \`;
-                    const fullImage = document.createElement('img');
-                    fullImage.src = this.src;
-                    fullImage.style.cssText = \`max-width: 90%; max-height: 90%; border-radius: 8px;\`;
-                    overlay.appendChild(fullImage);
-                    overlay.addEventListener('click', function() { document.body.removeChild(overlay); });
-                    document.body.appendChild(overlay);
-                });
-            });
-
-            const messageLinks = document.querySelectorAll('a[href^="#message-"]');
-            messageLinks.forEach(link => {
-                link.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    const targetId = this.getAttribute('href').substring(1);
-                    const targetElement = document.getElementById(targetId);
-                    if (targetElement) {
-                        targetElement.scrollIntoView({ behavior: 'smooth' });
-                        targetElement.style.backgroundColor = '#3a3c42';
-                        setTimeout(() => { targetElement.style.backgroundColor = ''; }, 2000);
-                    }
-                });
-            });
-        });
-    </script>
-</body>
-</html>
-    `;
-}
-
-// Вспомогательные функции для форматирования
-function formatMessageContent(content) {
-    if (!content) return '';
-    
-    content = content
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-    
-    content = content.replace(/<@!?(\d+)>/g, '<span class="mention">@user</span>');
-    content = content.replace(/<#(\d+)>/g, '<span class="mention">#channel</span>');
-    content = content.replace(/<@&(\d+)>/g, '<span class="mention">@role</span>');
-    content = content.replace(/<a?:\w+:(\d+)>/g, '<span class="emoji">:emoji:</span>');
-    content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<div class="code-block">$2</div>');
-    content = content.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-    content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    content = content.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    content = content.replace(/_(.*?)_/g, '<em>$1</em>');
-    content = content.replace(/__(.*?)__/g, '<u>$1</u>');
-    content = content.replace(/~~(.*?)~~/g, '<s>$1</s>');
-    content = content.replace(/(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color: #00aff4; text-decoration: none;">$1</a>');
-    content = content.replace(/\n/g, '<br>');
-    
-    return content;
-}
-
-function createEmbedHTML(embed) {
-    if (!embed || !embed.title && !embed.description) return '';
-    
-    let embedHTML = '<div class="embed">';
-    if (embed.title) {
-        const titleUrl = embed.url ? `href="${embed.url}" target="_blank" rel="noopener noreferrer"` : '';
-        embedHTML += `<a ${titleUrl} class="embed-title">${embed.title}</a>`;
-    }
-    if (embed.description) {
-        embedHTML += `<div class="embed-description">${formatMessageContent(embed.description)}</div>`;
-    }
-    if (embed.fields && embed.fields.length > 0) {
-        embedHTML += '<div class="embed-fields">';
-        embed.fields.forEach(field => {
-            embedHTML += `
-                <div class="embed-field">
-                    <div class="embed-field-name">${field.name}</div>
-                    <div class="embed-field-value">${formatMessageContent(field.value)}</div>
-                </div>
-            `;
-        });
-        embedHTML += '</div>';
-    }
-    if (embed.footer) {
-        embedHTML += `<div class="embed-footer">${embed.footer.text}</div>`;
-    }
-    embedHTML += '</div>';
-    return embedHTML;
-}
-
-// Функция для создания embed с информацией о тикете
-function createTicketInfoEmbedWithParticipants(ticketReport) {
-    const createdBy = ticketReport.ticketInfo.createdBy;
-    
-    // Уже нет дубликатов, так как исправлено в collectTicketInfo
-    const uniqueParticipants = ticketReport.participants;
-    
-    const participantsList = uniqueParticipants
-        .slice(0, 10)
-        .map(p => {
-            const roleIcon = p.role === 'Ticket Owner' ? '👑' : p.role === 'system' ? '🤖' : '👤';
-            return `${roleIcon} ${p.displayName} (${p.userId})`;
-        })
-        .join('\n');
-    
-    const moreParticipants = uniqueParticipants.length > 10 ? 
-        `\n... и еще ${uniqueParticipants.length - 10} участников` : '';
-
-    const embed = new EmbedBuilder()
-        .setColor(0x00FF00)
-        .setTitle('📋 TICKET INFORMATION')
-        .addFields(
-            { name: '🆔 ID', value: `#${ticketReport.ticketInfo.id}`, inline: true },
-            { name: '🏠 Server', value: ticketReport.ticketInfo.server, inline: true },
-            { name: '📅 Created', value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'), inline: true },
-            { name: '👤 Created by', value: createdBy ? `${createdBy.displayName} (${createdBy.id})` : 'Unknown', inline: false },
-            { name: '💬 Channel', value: `#${ticketReport.ticketInfo.channelName}`, inline: true },
-            { name: '💭 Messages', value: `${ticketReport.messageCount}`, inline: true },
-            { name: '👥 Participants', value: `${uniqueParticipants.length}`, inline: true },
-            { name: `🎯 Participants (${uniqueParticipants.length})`, value: participantsList + moreParticipants || 'No participants', inline: false }
-        )
-        .setFooter({ text: 'Click the button below to view full transcript • PERMANENT STORAGE' })
-        .setTimestamp();
-
-    return embed;
-}
-
-function createTicketInfoEmbed(ticketReport) {
-    return createTicketInfoEmbedWithParticipants(ticketReport);
-}
-
-// Генерируем уникальный ID для транскрипта
-function generateTranscriptId() {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36);
-}
-
 // Функция для получения базового URL
 function getBaseUrl() {
     let baseUrl = '';
     
-    // Используем RAILWAY_STATIC_URL если он есть
     if (process.env.RAILWAY_STATIC_URL) {
         baseUrl = process.env.RAILWAY_STATIC_URL;
-        // Добавляем протокол если отсутствует
         if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
             baseUrl = 'https://' + baseUrl;
         }
     }
-    // Используем RAILWAY_PUBLIC_DOMAIN
     else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
         baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
     }
-    // Для локальной разработки
     else {
         baseUrl = `http://localhost:${process.env.PORT || 3000}`;
     }
     
-    console.log(`🔗 Base URL: ${baseUrl}`);
     return baseUrl;
 }
-
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
 
