@@ -1997,29 +1997,14 @@ client.on('messageCreate', async message => {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    let baseUrl = '';
-    
-    // Приоритет 1: Кастомный домен
+    // Приоритет 1: Кастомный домен из переменных окружения
     if (process.env.CUSTOM_DOMAIN) {
-        baseUrl = 'https://' + process.env.CUSTOM_DOMAIN;
-    }
-    // Приоритет 2: Railway Static URL
-    else if (process.env.RAILWAY_STATIC_URL) {
-        baseUrl = process.env.RAILWAY_STATIC_URL;
-        if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-            baseUrl = 'https://' + baseUrl;
-        }
-    }
-    // Приоритет 3: Railway Public Domain
-    else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        baseUrl = 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN;
-    }
-    // Приоритет 4: Локальная разработка
-    else {
-        baseUrl = 'http://localhost:' + (process.env.PORT || 3000);
+        const domain = process.env.CUSTOM_DOMAIN;
+        return domain.startsWith('http') ? domain : 'https://' + domain;
     }
     
-    return baseUrl;
+    // Приоритет 2: Haki.xyz по умолчанию
+    return 'https://Haki.xyz';
 }
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
