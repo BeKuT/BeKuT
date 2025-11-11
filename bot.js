@@ -1247,7 +1247,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
         try {
             if (reaction.partial) await reaction.fetch();
             const message = reaction.message;
-            if (message.author.bot || !message.content || message.content.trim() === '') return;
+            if (message.system) return;
             
             const originalText = message.content;
             const detectedLang = detectLanguage(originalText);
