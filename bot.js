@@ -1999,22 +1999,28 @@ client.on('messageCreate', async message => {
 function getBaseUrl() {
     let baseUrl = '';
     
-    if (process.env.RAILWAY_STATIC_URL) {
+    // Приоритет 1: Кастомный домен
+    if (process.env.CUSTOM_DOMAIN) {
+        baseUrl = 'https://' + process.env.CUSTOM_DOMAIN;
+    }
+    // Приоритет 2: Railway Static URL
+    else if (process.env.RAILWAY_STATIC_URL) {
         baseUrl = process.env.RAILWAY_STATIC_URL;
         if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
             baseUrl = 'https://' + baseUrl;
         }
     }
+    // Приоритет 3: Railway Public Domain
     else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
         baseUrl = 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN;
     }
+    // Приоритет 4: Локальная разработка
     else {
         baseUrl = 'http://localhost:' + (process.env.PORT || 3000);
     }
     
     return baseUrl;
 }
-
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('🌐 Transcript server running on port ' + PORT);
