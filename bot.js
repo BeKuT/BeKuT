@@ -1238,7 +1238,7 @@ function setCustomStatus() {
 
 // ⬇️⬇️⬇️ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
 client.on('messageReactionAdd', async (reaction, user) => {
-    if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
+    if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') 
         const cooldownKey = `${user.id}-${reaction.message.id}`;
         if (translationCooldown.has(cooldownKey)) return;
         translationCooldown.add(cooldownKey);
