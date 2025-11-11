@@ -10,31 +10,6 @@ const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '143389395475
 const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 
-// Railway-specific optimizations
-const https = require('https');
-
-// Создаем кастомный axios instance для Railway
-const railwayAxios = axios.create({
-    timeout: 15000,
-    httpsAgent: new https.Agent({ 
-        keepAlive: true,
-        maxSockets: 50,
-        maxFreeSockets: 10,
-        timeout: 15000
-    }),
-    maxRedirects: 5,
-    validateStatus: (status) => status < 500
-});
-
-// Глобальная обработка ошибок для Railway
-process.on('unhandledRejection', (reason, promise) => {
-    console.log('🚨 Railway - Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-    console.log('🚨 Railway - Uncaught Exception:', error);
-});
-
 // Проверка наличия токена
 if (!token) {
     console.error('❌ CRITICAL ERROR: DISCORD_TOKEN not found!');
@@ -836,6 +811,242 @@ function getBaseUrl() {
     }
     
     return baseUrl;
+}
+
+// ==================== ДИСКОРД БОТ ====================
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions
+    ]
+});
+
+// Хранилище для связи реакций с сообщениями переводов
+const translationMessages = new Map();
+const translationCooldown = new Set();
+const TRANSLATION_COOLDOWN_TIME = 5000;
+
+// ==================== ФУНКЦИИ ДЛЯ ТРАНСКРИПТОВ ====================
+
+// Функция для сбора информации о тикете
+async function collectTicketInfo(channel, messages) {
+    const participants = new Map();
+    let ticketCreator = null;
+    let firstMessage = null;
+
+    messages.forEach(msg => {
+        participants.set(msg.author.id, {
+            id: msg.author.id,
+            username: msg.author.tag,
+            displayName: msg.author.displayName || msg.author.username,
+            bot: msg.author.bot,
+            avatar: msg.author.displayAvatarURL({ format: 'png', size: 64 })
+        });
+
+        if (!firstMessage || msg.createdTimestamp < firstMessage.createdTimestamp) {
+            firstMessage = msg;
+        }
+    });
+
+    if (firstMessage) {
+        ticketCreator = {
+            id: firstMessage.author.id,
+            username: firstMessage.author.tag,
+            displayName: firstMessage.author.displayName || firstMessage.author.username
+        };
+    }
+
+    return {
+        ticketId: channel.name.split('-').pop() || 'unknown',
+        server: channel.guild.name,
+        serverId: channel.guild.id,
+        serverIcon: channel.guild.iconURL({ format: 'png', size: 64 }),
+        createdAt: channel.createdAt,
+        createdBy: ticketCreator ? {
+            username: ticketCreator.username,
+            displayName: ticketCreator.displayName,
+            id: ticketCreator.id
+        } : null,
+        channelName: channel.name,
+        channelId: channel.id,
+        participants: Array.from(participants.values()).map(p => ({
+            username: p.username,
+            displayName: p.displayName,
+            userId: p.id,
+            avatar: p.avatar,
+            role: p.bot ? 'system' : (p.id === ticketCreator?.id ? 'Ticket Owner' : 'participant')
+        }))
+    };
+}
+
+// Функция для генерации отчета о тикете
+function generateTicketReport(ticketData) {
+    const report = {
+        ticketInfo: {
+            id: ticketData.ticketId,
+            server: ticketData.server,
+            serverId: ticketData.serverId,
+            serverIcon: ticketData.serverIcon,
+            createdAt: ticketData.createdAt,
+            createdBy: ticketData.createdBy,
+            channelName: ticketData.channelName,
+            channelId: ticketData.channelId
+        },
+        participants: ticketData.participants,
+        messageCount: 0
+    };
+
+    return report;
+}
+
+// Функция для создания HTML транскрипта
+function createHTMLTranscript(ticketReport, messages) {
+    const participantsHTML = ticketReport.participants.map(participant => `
+        <div class="participant">
+            <img src="${participant.avatar}" alt="${participant.displayName}" class="avatar">
+            <div class="participant-info">
+                <div class="username">${participant.displayName}</div>
+                <div class="discriminator">${participant.username}</div>
+            </div>
+            <div class="role">${participant.role}</div>
+        </div>
+    `).join('');
+
+    const messagesHTML = messages.map(msg => {
+        const timestamp = msg.createdAt.toLocaleString('ru-RU');
+        const author = msg.author;
+        const content = msg.content || '';
+
+        return `
+        <div class="message" id="message-${msg.id}">
+            <img src="${author.displayAvatarURL({ format: 'png', size: 64 })}" alt="${author.tag}" class="message-avatar">
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name">${author.displayName || author.username}</span>
+                    <span class="message-time">${timestamp}</span>
+                </div>
+                <div class="message-text">${content}</div>
+            </div>
+        </div>
+        `;
+    }).join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Транскрипт #${ticketReport.ticketInfo.channelName}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #36393f; color: #dcddde; line-height: 1.4; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #7289da; }
+        .server-info { display: flex; align-items: center; margin-bottom: 15px; }
+        .server-details h1 { color: #fff; font-size: 24px; margin-bottom: 5px; }
+        .ticket-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
+        .stat { background: #40444b; padding: 12px; border-radius: 4px; }
+        .stat-label { color: #8e9297; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
+        .stat-value { color: #fff; font-size: 18px; font-weight: bold; }
+        .participants-section { background: #2f3136; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .section-title { color: #fff; font-size: 18px; margin-bottom: 15px; font-weight: 600; }
+        .participants-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+        .participant { display: flex; align-items: center; padding: 10px; background: #40444b; border-radius: 4px; }
+        .participant .avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 10px; }
+        .participant-info { flex: 1; }
+        .participant .username { color: #fff; font-weight: 500; }
+        .participant .discriminator { color: #8e9297; font-size: 12px; }
+        .participant .role { background: #7289da; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .messages-section { background: #2f3136; border-radius: 8px; overflow: hidden; }
+        .messages-header { background: #36393f; padding: 15px 20px; border-bottom: 1px solid #40444b; }
+        .messages-container { padding: 20px; max-height: 600px; overflow-y: auto; }
+        .message { display: flex; margin-bottom: 20px; padding: 5px; border-radius: 4px; transition: background-color 0.2s; }
+        .message:hover { background: #32353b; }
+        .message-avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; flex-shrink: 0; }
+        .message-content { flex: 1; min-width: 0; }
+        .message-header { display: flex; align-items: center; margin-bottom: 5px; }
+        .author-name { color: #fff; font-weight: 500; margin-right: 8px; }
+        .message-time { color: #72767d; font-size: 12px; }
+        .message-text { color: #dcddde; word-wrap: break-word; white-space: pre-wrap; }
+        .footer { text-align: center; margin-top: 30px; color: #72767d; font-size: 12px; padding: 20px; border-top: 1px solid #40444b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="server-info">
+                <div class="server-details">
+                    <h1>${ticketReport.ticketInfo.server}</h1>
+                    <div class="channel-name">#${ticketReport.ticketInfo.channelName}</div>
+                </div>
+            </div>
+            <div class="ticket-stats">
+                <div class="stat">
+                    <div class="stat-label">Создан</div>
+                    <div class="stat-value">${ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU')}</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Сообщений</div>
+                    <div class="stat-value">${ticketReport.messageCount}</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Участников</div>
+                    <div class="stat-value">${ticketReport.participants.length}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="participants-section">
+            <div class="section-title">Участники тикета</div>
+            <div class="participants-grid">
+                ${participantsHTML}
+            </div>
+        </div>
+
+        <div class="messages-section">
+            <div class="messages-header">
+                <div class="section-title">История сообщений</div>
+            </div>
+            <div class="messages-container">
+                ${messagesHTML}
+            </div>
+        </div>
+
+        <div class="footer">
+            Транскрипт создан автоматически • ${new Date().toLocaleString('ru-RU')}
+        </div>
+    </div>
+</body>
+</html>
+    `;
+}
+
+// Функция для создания embed с информацией о тикете
+function createTicketInfoEmbedWithParticipants(ticketReport) {
+    const embed = new EmbedBuilder()
+        .setColor(0x00FF00)
+        .setTitle('📋 TICKET INFORMATION')
+        .addFields(
+            { name: '🆔 ID', value: `#${ticketReport.ticketInfo.id}`, inline: true },
+            { name: '🏠 Server', value: ticketReport.ticketInfo.server, inline: true },
+            { name: '📅 Created', value: ticketReport.ticketInfo.createdAt.toLocaleString('ru-RU'), inline: true },
+            { name: '💬 Channel', value: `#${ticketReport.ticketInfo.channelName}`, inline: true },
+            { name: '💭 Messages', value: `${ticketReport.messageCount}`, inline: true },
+            { name: '👥 Participants', value: `${ticketReport.participants.length}`, inline: true }
+        )
+        .setFooter({ text: 'Click the button below to view full transcript • PERMANENT STORAGE' })
+        .setTimestamp();
+
+    return embed;
+}
+
+// Генерируем уникальный ID для транскрипта
+function generateTranscriptId() {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 const client = new Client({
     intents: [
@@ -1656,7 +1867,10 @@ client.on('messageCreate', async message => {
         }
     }
     // Обработка команды -transcript
-    else if (message.content.toLowerCase() === '-transcript') {
+client.on('messageCreate', async message => {
+    if (message.system) return;
+
+    if (message.content.toLowerCase() === '-transcript') {
         await message.delete().catch(() => {});
         
         try {
@@ -1665,16 +1879,6 @@ client.on('messageCreate', async message => {
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
             messageCollection = messageCollection.concat(channelMessages);
-
-            let lastMessage = channelMessages.last();
-            while(channelMessages.size === 100 && lastMessage) {
-                let lastMessageId = lastMessage.id;
-                channelMessages = await message.channel.messages.fetch({ limit: 100, before: lastMessageId });
-                if(channelMessages && channelMessages.size > 0) {
-                    messageCollection = messageCollection.concat(channelMessages);
-                    lastMessage = channelMessages.last();
-                } else break;
-            }
 
             const allMessages = Array.from(messageCollection.values()).reverse();
             console.log(`📨 Collected ${allMessages.length} messages from channel`);
@@ -1687,10 +1891,6 @@ client.on('messageCreate', async message => {
             console.log(`🆔 Generated transcript ID: ${transcriptId}`);
             
             const htmlContent = createHTMLTranscript(ticketReport, allMessages);
-            if (!htmlContent || htmlContent.length < 100) {
-                throw new Error('HTML transcript creation failed');
-            }
-            console.log(`✅ HTML transcript created (${htmlContent.length} characters)`);
             
             const transcriptData = {
                 html: htmlContent,
@@ -1706,16 +1906,8 @@ client.on('messageCreate', async message => {
             console.log(`💾 Transcript saved to storage: ${transcriptId}`);
             
             const baseUrl = getBaseUrl();
-            const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+            const transcriptUrl = baseUrl + '/transcript/' + transcriptId;
             console.log(`🔗 Transcript URL: ${transcriptUrl}`);
-            
-            try {
-                new URL(transcriptUrl);
-                console.log(`✅ URL is valid`);
-            } catch (urlError) {
-                console.error('❌ Invalid URL:', transcriptUrl);
-                throw new Error(`Invalid transcript URL: ${transcriptUrl}`);
-            }
             
             const row = new ActionRowBuilder()
                 .addComponents(
@@ -1740,7 +1932,10 @@ client.on('messageCreate', async message => {
                 console.log(`🎉 Transcript creation completed successfully!`);
                 
             } else {
-                throw new Error('Transcript channel not found or not accessible');
+                await message.channel.send({
+                    content: `✅ Transcript created! View it here: ${transcriptUrl}`,
+                    components: [row]
+                });
             }
             
         } catch (error) {
