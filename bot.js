@@ -523,9 +523,11 @@ app.get('/', (req, res) => {
                 // Активировать кнопку
                 event.target.classList.add('active');
                 
-                // Загрузить данные для вкладки транскриптов
+                // Загрузить данные для соответствующих вкладок
                 if (tabName === 'transcripts') {
                     loadTranscripts();
+                } else if (tabName === 'overview') {
+                    loadRecentActivity();
                 }
             }
 
@@ -559,6 +561,86 @@ app.get('/', (req, res) => {
                 if (days > 0) return days + 'd ' + hours + 'h';
                 if (hours > 0) return hours + 'h ' + minutes + 'm';
                 return minutes + 'm';
+            }
+
+            async function loadRecentActivity() {
+                try {
+                    const response = await fetch('/api/transcripts');
+                    const data = await response.json();
+                    
+                    const recentTranscripts = data.transcripts
+                        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                        .slice(0, 5);
+                    
+                    displayRecentActivity(recentTranscripts);
+                } catch (error) {
+                    console.error('Error loading recent activity:', error);
+                    document.getElementById('recentActivity').innerHTML = 
+                        '<div class="empty-state"><i>❌</i><p>Ошибка загрузки активности</p></div>';
+                }
+            }
+
+            function displayRecentActivity(transcripts) {
+                const container = document.getElementById('recentActivity');
+                
+                if (transcripts.length === 0) {
+                    container.innerHTML = \`
+                        <div class="empty-state">
+                            <i>📝</i>
+                            <p>Активность не найдена</p>
+                            <small>Создайте первый транскрипт командой -transcript в Discord</small>
+                        </div>
+                    \`;
+                    return;
+                }
+
+                container.innerHTML = \`
+                    <div style="display: grid; gap: 10px;">
+                        \${transcripts.map(transcript => {
+                            const timeAgo = getTimeAgo(new Date(transcript.createdAt));
+                            const channelName = transcript.channelName || 'unknown';
+                            const server = transcript.server || 'Unknown Server';
+                            const messageCount = transcript.messageCount || 0;
+                            
+                            return \`
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface-light); border-radius: 8px;">
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 600; margin-bottom: 4px;">
+                                        📄 Транскрипт #\${channelName}
+                                    </div>
+                                    <div style="font-size: 0.9rem; color: var(--text-muted);">
+                                        🏠 \${server} • 💬 \${messageCount} сообщений
+                                    </div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-size: 0.8rem; color: var(--text-muted);">
+                                        \${timeAgo}
+                                    </div>
+                                    <a href="/transcript/\${transcript.id}" class="btn btn-outline" style="padding: 4px 8px; font-size: 0.8rem; margin-top: 5px;">
+                                        👁️ Просмотр
+                                    </a>
+                                </div>
+                            </div>
+                            \`;
+                        }).join('')}
+                    </div>
+                \`;
+            }
+
+            function getTimeAgo(date) {
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) return 'только что';
+                if (diffMins < 60) return \`\${diffMins} мин. назад\`;
+                if (diffHours < 24) return \`\${diffHours} ч. назад\`;
+                if (diffDays === 1) return 'вчера';
+                if (diffDays < 7) return \`\${diffDays} дн. назад\`;
+                if (diffDays < 30) return \`\${Math.floor(diffDays / 7)} нед. назад\`;
+                return \`\${Math.floor(diffDays / 30)} мес. назад\`;
             }
 
             async function loadTranscripts() {
@@ -652,7 +734,10 @@ app.get('/', (req, res) => {
 
             // Загрузка данных при старте
             loadBotStatus();
+            loadRecentActivity();
+            loadTranscripts();
             setInterval(loadBotStatus, 30000); // Обновлять каждые 30 секунд
+            setInterval(loadRecentActivity, 60000); // Обновлять активность каждую минуту
 
             // Добавляем стили для анимации уведомлений
             const style = document.createElement('style');
