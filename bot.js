@@ -61,7 +61,9 @@ const transcriptsStorage = new Map();
 // Главная страница с красивым интерфейсом
 app.get('/', (req, res) => {
     const baseUrl = getBaseUrl();
-    res.send(`
+    const port = PORT;
+    
+    const html = `
     <!DOCTYPE html>
     <html lang="ru">
     <head>
@@ -221,7 +223,7 @@ app.get('/', (req, res) => {
                 padding: 20px;
                 border-bottom: 1px solid var(--border);
                 display: flex;
-                justify-content: between;
+                justify-content: space-between;
                 align-items: center;
                 transition: background 0.3s ease;
             }
@@ -448,7 +450,7 @@ app.get('/', (req, res) => {
 
             <!-- Вкладка Транскрипты -->
             <div id="transcripts" class="tab-content">
-                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>📄 Все транскрипты</h3>
                     <div class="transcript-actions">
                         <button class="btn btn-primary" onclick="refreshTranscripts()">
@@ -485,7 +487,7 @@ app.get('/', (req, res) => {
                                     </div>
                                     <div>
                                         <strong>Порт:</strong><br>
-                                        <code>${PORT}</code>
+                                        <code>${port}</code>
                                     </div>
                                 </div>
                             </div>
@@ -563,9 +565,9 @@ app.get('/', (req, res) => {
                 const hours = Math.floor((seconds % (24 * 60 * 60)) / (60 * 60));
                 const minutes = Math.floor((seconds % (60 * 60)) / 60);
                 
-                if (days > 0) return `${days}d ${hours}h`;
-                if (hours > 0) return `${hours}h ${minutes}m`;
-                return `${minutes}m`;
+                if (days > 0) return days + 'd ' + hours + 'h';
+                if (hours > 0) return hours + 'h ' + minutes + 'm';
+                return minutes + 'm';
             }
 
             async function loadTranscripts() {
@@ -576,12 +578,7 @@ app.get('/', (req, res) => {
                     displayTranscripts(allTranscripts);
                 } catch (error) {
                     console.error('Error loading transcripts:', error);
-                    document.getElementById('transcriptsContainer').innerHTML = '
-                        <div class="empty-state">
-                            <i>❌</i>
-                            <p>Ошибка загрузки транскриптов</p>
-                        </div>
-                    ';
+                    document.getElementById('transcriptsContainer').innerHTML = '<div class="empty-state"><i>❌</i><p>Ошибка загрузки транскриптов</p></div>';
                 }
             }
 
@@ -589,37 +586,27 @@ app.get('/', (req, res) => {
                 const container = document.getElementById('transcriptsContainer');
                 
                 if (transcripts.length === 0) {
-                    container.innerHTML = '
-                        <div class="empty-state">
-                            <i>📝</i>
-                            <p>Транскрипты не найдены</p>
-                        </div>
-                    ';
+                    container.innerHTML = '<div class="empty-state"><i>📝</i><p>Транскрипты не найдены</p></div>';
                     return;
                 }
 
-                container.innerHTML = transcripts.map(transcript => '
-                    <div class="transcript-item fade-in">
-                        <div class="transcript-info">
-                            <div class="transcript-title">
-                                #${transcript.channelName || 'unknown'}
-                            </div>
-                            <div class="transcript-meta">
-                                🏠 ${transcript.server || 'Unknown Server'} • 
-                                💬 ${transcript.messageCount || 0} сообщений • 
-                                📅 ${new Date(transcript.createdAt).toLocaleDateString('ru-RU')}
-                            </div>
-                        </div>
-                        <div class="transcript-actions">
-                            <a href="/transcript/${transcript.id}" class="btn btn-primary" target="_blank">
-                                👁️ Просмотр
-                            </a>
-                            <button class="btn btn-outline" onclick="copyTranscriptUrl('${transcript.id}')">
-                                📋 Ссылка
-                            </button>
-                        </div>
-                    </div>
-                ').join('');
+                container.innerHTML = transcripts.map(transcript => {
+                    const channelName = transcript.channelName || 'unknown';
+                    const server = transcript.server || 'Unknown Server';
+                    const messageCount = transcript.messageCount || 0;
+                    const date = new Date(transcript.createdAt).toLocaleDateString('ru-RU');
+                    
+                    return '<div class="transcript-item fade-in">' +
+                        '<div class="transcript-info">' +
+                            '<div class="transcript-title">#' + channelName + '</div>' +
+                            '<div class="transcript-meta">🏠 ' + server + ' • 💬 ' + messageCount + ' сообщений • 📅 ' + date + '</div>' +
+                        '</div>' +
+                        '<div class="transcript-actions">' +
+                            '<a href="/transcript/' + transcript.id + '" class="btn btn-primary" target="_blank">👁️ Просмотр</a>' +
+                            '<button class="btn btn-outline" onclick="copyTranscriptUrl(\\'' + transcript.id + '\\')">📋 Ссылка</button>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
             }
 
             function refreshTranscripts() {
@@ -637,18 +624,21 @@ app.get('/', (req, res) => {
             function showNotification(message, type = 'info') {
                 // Создание уведомления
                 const notification = document.createElement('div');
-                notification.style.cssText = \`
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    background: \${type === 'success' ? '#57F287' : '#5865F2'};
-                    color: \${type === 'success' ? 'black' : 'white'};
-                    padding: 15px 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                    z-index: 1000;
-                    animation: slideIn 0.3s ease;
-                \`;
+                const backgroundColor = type === 'success' ? '#57F287' : '#5865F2';
+                const textColor = type === 'success' ? 'black' : 'white';
+                
+                notification.style.cssText = 
+                    'position: fixed;' +
+                    'top: 20px;' +
+                    'right: 20px;' +
+                    'background: ' + backgroundColor + ';' +
+                    'color: ' + textColor + ';' +
+                    'padding: 15px 20px;' +
+                    'border-radius: 8px;' +
+                    'box-shadow: 0 4px 12px rgba(0,0,0,0.15);' +
+                    'z-index: 1000;' +
+                    'animation: slideIn 0.3s ease;';
+                
                 notification.textContent = message;
                 
                 document.body.appendChild(notification);
@@ -675,17 +665,18 @@ app.get('/', (req, res) => {
 
             // Добавляем стили для анимации уведомлений
             const style = document.createElement('style');
-            style.textContent = \`
-                @keyframes slideIn {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-            \`;
+            style.textContent = 
+                '@keyframes slideIn {' +
+                'from { transform: translateX(100%); opacity: 0; }' +
+                'to { transform: translateX(0); opacity: 1; }' +
+                '}';
             document.head.appendChild(style);
         </script>
     </body>
     </html>
-    `);
+    `;
+    
+    res.send(html);
 });
 
 // Остальные маршруты остаются без изменений
@@ -799,15 +790,15 @@ app.get('/create-test-transcript', (req, res) => {
         success: true,
         message: 'Test transcript created successfully',
         transcriptId: transcriptId,
-        url: `${getBaseUrl()}/transcript/${transcriptId}`
+        url: getBaseUrl() + '/transcript/' + transcriptId
     });
 });
 
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Transcript server running on port ${PORT}`);
-    console.log(`🔗 Access at: ${getBaseUrl()}`);
-    console.log(`💾 Transcripts are now stored PERMANENTLY (no auto-deletion)`);
+    console.log('🌐 Transcript server running on port ' + PORT);
+    console.log('🔗 Access at: ' + getBaseUrl());
+    console.log('💾 Transcripts are now stored PERMANENTLY (no auto-deletion)');
 });
 
 // Обработка graceful shutdown
@@ -838,14 +829,22 @@ function getBaseUrl() {
         }
     }
     else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        baseUrl = 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN;
     }
     else {
-        baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+        baseUrl = 'http://localhost:' + (process.env.PORT || 3000);
     }
     
     return baseUrl;
 }
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions
+    ]
+});
 // ⬇️⬇️⬇️ ФУНКЦИИ ДЛЯ СТАТИСТИКИ WAR THUNDER ⬇️⬇️⬇️
 
 
