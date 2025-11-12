@@ -1288,9 +1288,6 @@ function createTranscriptsPage(user, baseUrl) {
 </body>
 </html>`;
 }
-    
-    res.send(html);
-
 // Остальные маршруты остаются без изменений
 app.get('/transcript/:id', (req, res) => {
     const transcriptId = req.params.id;
