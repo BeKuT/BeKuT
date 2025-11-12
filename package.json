@@ -1,18 +1,19 @@
 {
-  "name": "discord-bot",
+  "name": "haki-bot",
   "version": "1.0.0",
+  "description": "Discord bot with web dashboard",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "dev": "node bot.js"
+    "dev": "nodemon bot.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "axios": "^1.6.2",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "axios": "^1.6.2"
   },
   "engines": {
     "node": ">=18.0.0"
   }
 }
-
