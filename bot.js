@@ -232,7 +232,76 @@ app.get('/about', requireAuth, (req, res) => {
 app.get('/transcripts', requireAuth, (req, res) => {
     const baseUrl = getBaseUrl();
     const user = req.session.user;
-    res.send(createTranscriptsPage(user, baseUrl));
+    
+    // Проверяем, есть ли у пользователя права администратора хотя бы на одном сервере ГДЕ ЕСТЬ БОТ
+    const userGuilds = req.session.guilds || [];
+    const adminGuilds = userGuilds.filter(guild => {
+        const botGuild = client.guilds.cache.get(guild.id);
+        return botGuild && (guild.permissions & 0x8) === 0x8; // ADMINISTRATOR permission + бот на сервере
+    });
+    
+    if (adminGuilds.length === 0) {
+        return res.status(403).send(`
+            <!DOCTYPE html>
+            <html lang="ru">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Доступ запрещен - Haki Bot</title>
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body { 
+                        font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+                        background: #1a1a1a; 
+                        color: #ffffff; 
+                        line-height: 1.6;
+                        display: flex;
+                        min-height: 100vh;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    .error-container {
+                        background: #2b2b2b;
+                        padding: 40px;
+                        border-radius: 15px;
+                        text-align: center;
+                        max-width: 500px;
+                        border: 1px solid #ed4245;
+                    }
+                    .error-icon {
+                        font-size: 4rem;
+                        margin-bottom: 20px;
+                    }
+                    .back-btn {
+                        background: #5865F2;
+                        color: white;
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        text-decoration: none;
+                        display: inline-block;
+                        margin-top: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="error-container">
+                    <div class="error-icon">🚫</div>
+                    <h1>Доступ запрещен</h1>
+                    <p style="color: #b9bbbe; margin: 15px 0;">
+                        Для доступа к разделу "Транскрипты" необходимы права администратора 
+                        хотя бы на одном сервере где есть бот.
+                    </p>
+                    <a href="/" class="back-btn">Вернуться на главную</a>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    res.send(createTranscriptsPage(user, baseUrl, adminGuilds));
+});
 });
 
 app.get('/transcript/:id', (req, res) => {
@@ -1110,14 +1179,24 @@ function createServerPage(guild, user, baseUrl) {
 </html>`;
 }
 
-function createTranscriptsPage(user, baseUrl) {
-    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
-        id,
-        channelName: data.ticketInfo?.channelName,
-        server: data.ticketInfo?.server,
-        messageCount: data.ticketInfo?.messageCount,
-        createdAt: new Date(data.createdAt).toLocaleDateString('ru-RU')
-    }));
+function createTranscriptsPage(user, baseUrl, adminGuilds) {
+    // Фильтруем транскрипты только для серверов, где пользователь администратор
+    const adminGuildIds = adminGuilds.map(guild => guild.id);
+    const transcripts = Array.from(transcriptsStorage.entries())
+        .map(([id, data]) => ({
+            id,
+            channelName: data.ticketInfo?.channelName,
+            server: data.ticketInfo?.server,
+            serverId: data.ticketInfo?.serverId,
+            messageCount: data.ticketInfo?.messageCount,
+            createdAt: new Date(data.createdAt).toLocaleDateString('ru-RU')
+        }))
+        .filter(transcript => {
+            // Если нет serverId, показываем всем администраторам
+            if (!transcript.serverId) return true;
+            // Показываем только транскрипты с серверов, где пользователь администратор
+            return adminGuildIds.includes(transcript.serverId);
+        });
 
     return `
 <!DOCTYPE html>
@@ -1219,9 +1298,25 @@ function createTranscriptsPage(user, baseUrl) {
             padding: 60px 20px;
             color: #b9bbbe;
         }
+        .admin-badge {
+            background: #ed4245;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }
+        .access-info {
+            background: #2b2b2b;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #5865F2;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
+    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -1229,6 +1324,9 @@ function createTranscriptsPage(user, baseUrl) {
             <div>
                 <div style="font-weight: bold;">${user.global_name || user.username}</div>
                 <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
+                <div style="color: #57F287; font-size: 0.8rem; margin-top: 5px;">
+                    ✅ Администратор
+                </div>
             </div>
         </div>
 
@@ -1249,24 +1347,44 @@ function createTranscriptsPage(user, baseUrl) {
             Команды
         </a>
 
+        <div style="margin: 30px 0 10px 0; color: #b9bbbe; font-size: 0.9rem; padding: 0 15px;">ВАШИ СЕРВЕРА</div>
+        
+        ${adminGuilds.map(guild => `
+            <a href="/server/${guild.id}" class="nav-item">
+                <span class="nav-icon">🏰</span>
+                ${guild.name}
+                <span class="admin-badge">ADMIN</span>
+            </a>
+        `).join('')}
+
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
+    <!-- Основной контент -->
     <div class="main-content">
         <div style="margin-bottom: 30px;">
-            <h1>📄 Транскрипты</h1>
-            <p style="color: #b9bbbe;">Управление архивами бесед и сообщений</p>
+            <h1>📄 Транскрипты <span class="admin-badge">ТОЛЬКО ДЛЯ АДМИНИСТРАТОРОВ</span></h1>
+            <p style="color: #b9bbbe;">Управление архивами бесед - доступно только администраторам серверов</p>
+        </div>
+
+        <div class="access-info">
+            <strong>🔐 Уровень доступа:</strong> Администратор сервера
+            <br>
+            <strong>🏠 Доступные сервера:</strong> ${adminGuilds.map(g => g.name).join(', ')}
         </div>
 
         ${transcripts.length === 0 ? `
             <div class="empty-state">
                 <div style="font-size: 4rem; margin-bottom: 20px;">📝</div>
                 <h3>Транскрипты не найдены</h3>
-                <p>Создайте первый транскрипт командой -transcript в Discord</p>
+                <p>На ваших серверах пока нет созданных транскриптов</p>
+                <p style="font-size: 0.9rem; margin-top: 10px; color: #8e9297;">
+                    Используйте команду <code>-transcript</code> в канале на сервере где вы администратор
+                </p>
             </div>
         ` : `
             <div style="margin-bottom: 20px; color: #b9bbbe;">
-                Всего транскриптов: <strong>${transcripts.length}</strong>
+                Всего транскриптов на ваших серверах: <strong>${transcripts.length}</strong>
             </div>
             
             ${transcripts.map(transcript => `
