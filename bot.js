@@ -33,12 +33,18 @@ const client = new Client({
     ]
 });
 
-// Хранилище для транскриптов в памяти
+// Хранилища
 const transcriptsStorage = new Map();
+const translationMessages = new Map();
+const translationCooldown = new Set();
+const TRANSLATION_COOLDOWN_TIME = 30000;
 
 // ==================== EXPRESS СЕРВЕР ====================
 
 const app = express();
+
+// Trust proxy for Railway
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(express.json());
@@ -50,8 +56,28 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'haki-bot-secret-key',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 часа
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 24 * 60 * 60 * 1000
+    }
 }));
+
+// ==================== ФУНКЦИИ ====================
+
+// Функция для получения базового URL
+function getBaseUrl() {
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
+    if (process.env.RAILWAY_STATIC_URL) {
+        let url = process.env.RAILWAY_STATIC_URL;
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = 'https://' + url;
+        }
+        return url;
+    }
+    return 'https://panel-haki.up.railway.app';
+}
 
 // ==================== АВТОРИЗАЦИЯ DISCORD ====================
 
@@ -65,12 +91,30 @@ app.get('/auth/discord', (req, res) => {
 // Callback от Discord
 app.get('/auth/discord/callback', async (req, res) => {
     try {
-        const { code } = req.query;
-        if (!code) throw new Error('No code provided');
+        const { code, error, error_description } = req.query;
+        
+        console.log('🔄 Discord callback received');
+        
+        if (error) {
+            console.error('❌ Discord OAuth error:', error, error_description);
+            return res.redirect('/?error=discord_oauth_failed');
+        }
+
+        if (!code) {
+            console.error('❌ No code provided in callback');
+            return res.redirect('/?error=no_code');
+        }
 
         const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
-        
+        console.log('🔗 Using redirect URI:', redirectUri);
+
+        if (!CLIENT_ID || !CLIENT_SECRET) {
+            console.error('❌ Missing OAuth credentials');
+            return res.redirect('/?error=missing_credentials');
+        }
+
         // Получаем access token
+        console.log('🔄 Exchanging code for access token...');
         const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
             new URLSearchParams({
                 client_id: CLIENT_ID,
@@ -81,24 +125,30 @@ app.get('/auth/discord/callback', async (req, res) => {
             }), {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
-                }
+                },
+                timeout: 10000
             }
         );
 
+        console.log('✅ Access token received');
         const { access_token } = tokenResponse.data;
 
         // Получаем данные пользователя
+        console.log('🔄 Fetching user data...');
         const userResponse = await axios.get('https://discord.com/api/users/@me', {
             headers: {
                 Authorization: `Bearer ${access_token}`
-            }
+            },
+            timeout: 10000
         });
 
         // Получаем сервера пользователя
+        console.log('🔄 Fetching user guilds...');
         const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
             headers: {
                 Authorization: `Bearer ${access_token}`
-            }
+            },
+            timeout: 10000
         });
 
         req.session.user = userResponse.data;
@@ -106,10 +156,16 @@ app.get('/auth/discord/callback', async (req, res) => {
         req.session.accessToken = access_token;
         req.session.isAuthenticated = true;
 
+        console.log('✅ Authentication successful for user:', userResponse.data.username);
         res.redirect('/');
+        
     } catch (error) {
-        console.error('Auth error:', error);
-        res.redirect('/?error=auth_failed');
+        console.error('❌ Auth callback error:');
+        console.error('Error message:', error.message);
+        console.error('Response data:', error.response?.data);
+        console.error('Response status:', error.response?.status);
+        
+        res.redirect('/?error=auth_failed&details=' + encodeURIComponent(error.message));
     }
 });
 
@@ -127,30 +183,25 @@ function requireAuth(req, res, next) {
     next();
 }
 
-// ==================== ГЛАВНАЯ СТРАНИЦА ====================
+// ==================== СТРАНИЦЫ ====================
 
 app.get('/', (req, res) => {
     const baseUrl = getBaseUrl();
     
     if (!req.session.isAuthenticated) {
-        // Страница без авторизации
         return res.send(createUnauthorizedPage(baseUrl));
     }
 
-    // Страница с авторизацией
     const user = req.session.user;
     const guilds = req.session.guilds || [];
     
-    // Фильтруем сервера где есть бот
     const mutualGuilds = guilds.filter(guild => {
         const botGuild = client.guilds.cache.get(guild.id);
-        return botGuild && (guild.permissions & 0x20) === 0x20; // MANAGE_GUILD permission
+        return botGuild && (guild.permissions & 0x20) === 0x20;
     });
 
     res.send(createDashboardPage(user, mutualGuilds, baseUrl));
 });
-
-// ==================== СТРАНИЦА СЕРВЕРА ====================
 
 app.get('/server/:id', requireAuth, (req, res) => {
     const guildId = req.params.id;
@@ -166,30 +217,21 @@ app.get('/server/:id', requireAuth, (req, res) => {
     res.send(createServerPage(guild, user, baseUrl));
 });
 
-// ==================== СТРАНИЦА КОМАНД ====================
-
 app.get('/commands', requireAuth, (req, res) => {
     const baseUrl = getBaseUrl();
     const user = req.session.user;
-    
     res.send(createCommandsPage(user, baseUrl));
 });
-
-// ==================== СТРАНИЦА О БОТЕ ====================
 
 app.get('/about', requireAuth, (req, res) => {
     const baseUrl = getBaseUrl();
     const user = req.session.user;
-    
     res.send(createAboutPage(user, baseUrl));
 });
-
-// ==================== СТРАНИЦЫ ТРАНСКРИПТОВ ====================
 
 app.get('/transcripts', requireAuth, (req, res) => {
     const baseUrl = getBaseUrl();
     const user = req.session.user;
-    
     res.send(createTranscriptsPage(user, baseUrl));
 });
 
@@ -239,6 +281,26 @@ app.get('/api/health', (req, res) => {
         permanentStorage: true,
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
+    });
+});
+
+// Отладочные маршруты
+app.get('/debug/env', (req, res) => {
+    res.json({
+        clientId: CLIENT_ID ? '✅ Установлен' : '❌ Отсутствует',
+        clientSecret: CLIENT_SECRET ? '✅ Установлен' : '❌ Отсутствует',
+        token: token ? '✅ Установлен' : '❌ Отсутствует',
+        baseUrl: getBaseUrl(),
+        redirectUri: `${getBaseUrl()}/auth/discord/callback`,
+        nodeEnv: process.env.NODE_ENV || 'not set'
+    });
+});
+
+app.get('/debug/session', (req, res) => {
+    req.session.test = 'session_works';
+    res.json({
+        session: req.session,
+        sessionId: req.sessionID
     });
 });
 
@@ -488,7 +550,6 @@ function createDashboardPage(user, mutualGuilds, baseUrl) {
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -528,7 +589,6 @@ function createDashboardPage(user, mutualGuilds, baseUrl) {
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
         <div style="margin-bottom: 30px;">
             <h1>🏠 Главная панель</h1>
@@ -645,7 +705,6 @@ function createAboutPage(user, baseUrl) {
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -676,7 +735,6 @@ function createAboutPage(user, baseUrl) {
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
         <div style="margin-bottom: 30px;">
             <h1>📋 Общие сведения</h1>
@@ -685,8 +743,6 @@ function createAboutPage(user, baseUrl) {
 
         <div class="content-box">
             <h2 style="margin-bottom: 20px; color: #5865F2;">О боте Haki</h2>
-            
-            <!-- ВСТАВЬТЕ СВОЙ ТЕКСТ ЗДЕСЬ -->
             <div style="line-height: 1.8;">
                 <p>Haki Bot - это многофункциональный Discord бот, созданный для улучшения управления серверами и взаимодействия с участниками.</p>
                 
@@ -707,12 +763,7 @@ function createAboutPage(user, baseUrl) {
                     <li><strong>Аптайм:</strong> 99.9%</li>
                     <li><strong>Поддержка:</strong> 24/7</li>
                 </ul>
-
-                <p style="margin-top: 25px; padding: 15px; background: #36393f; border-radius: 8px; border-left: 4px solid #5865F2;">
-                    <strong>💡 Примечание:</strong> Вы можете отредактировать этот текст в коде бота в разделе "Общие сведения".
-                </p>
             </div>
-            <!-- КОНЕЦ ВАШЕГО ТЕКСТА -->
         </div>
     </div>
 </body>
@@ -806,7 +857,6 @@ function createCommandsPage(user, baseUrl) {
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -837,7 +887,6 @@ function createCommandsPage(user, baseUrl) {
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
         <div style="margin-bottom: 30px;">
             <h1>⚡ Команды бота</h1>
@@ -846,12 +895,10 @@ function createCommandsPage(user, baseUrl) {
 
         <div class="command-category">
             <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
-            
             <div class="command-item">
                 <div class="command-name">!stat [никнейм/ID]</div>
                 <div class="command-desc">Показывает статистику игрока War Thunder через StatShark</div>
             </div>
-
             <div class="command-item">
                 <div class="command-name">!полк [название]</div>
                 <div class="command-desc">Информация о полке War Thunder</div>
@@ -860,7 +907,6 @@ function createCommandsPage(user, baseUrl) {
 
         <div class="command-category">
             <h2 style="color: #5865F2; margin-bottom: 20px;">📄 Команды транскриптов</h2>
-            
             <div class="command-item">
                 <div class="command-name">-transcript</div>
                 <div class="command-desc">Создает транскрипт текущего канала (требует права MANAGE_MESSAGES)</div>
@@ -869,19 +915,9 @@ function createCommandsPage(user, baseUrl) {
 
         <div class="command-category">
             <h2 style="color: #5865F2; margin-bottom: 20px;">🌐 Команды перевода</h2>
-            
             <div class="command-item">
                 <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
                 <div class="command-desc">Добавьте реакцию 🇷🇺 для перевода на русский или 🇬🇧 для перевода на английский</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">⚙️ Утилиты</h2>
-            
-            <div class="command-item">
-                <div class="command-name">-help</div>
-                <div class="command-desc">Показывает список всех команд</div>
             </div>
         </div>
     </div>
@@ -1002,7 +1038,6 @@ function createServerPage(guild, user, baseUrl) {
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -1033,7 +1068,6 @@ function createServerPage(guild, user, baseUrl) {
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
         <div class="server-header">
             ${guild.icon ? 
@@ -1070,21 +1104,6 @@ function createServerPage(guild, user, baseUrl) {
         <div class="feature-card" onclick="window.location.href='/transcripts'">
             <h3 style="color: #57F287; margin-bottom: 10px;">📄 Транскрипты</h3>
             <p style="color: #b9bbbe;">Создание и просмотр транскриптов бесед. Управление архивами сообщений.</p>
-        </div>
-
-        <div class="feature-card">
-            <h3 style="color: #57F287; margin-bottom: 10px;">🔧 Настройки модерации</h3>
-            <p style="color: #b9bbbe;">Настройка автоматической модерации, фильтров и систем предупреждений.</p>
-        </div>
-
-        <div class="feature-card">
-            <h3 style="color: #57F287; margin-bottom: 10px;">📊 Статистика сервера</h3>
-            <p style="color: #b9bbbe;">Подробная статистика активности, сообщений и участников сервера.</p>
-        </div>
-
-        <div class="feature-card">
-            <h3 style="color: #57F287; margin-bottom: 10px;">🎮 Интеграция War Thunder</h3>
-            <p style="color: #b9bbbe;">Управление статистикой игроков и полков War Thunder.</p>
         </div>
     </div>
 </body>
@@ -1203,7 +1222,6 @@ function createTranscriptsPage(user, baseUrl) {
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
     <div class="sidebar">
         <div class="user-info">
             <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
@@ -1234,7 +1252,6 @@ function createTranscriptsPage(user, baseUrl) {
         <a href="/auth/logout" class="logout-btn">Выйти</a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
         <div style="margin-bottom: 30px;">
             <h1>📄 Транскрипты</h1>
@@ -1288,124 +1305,9 @@ function createTranscriptsPage(user, baseUrl) {
 </body>
 </html>`;
 }
-// Остальные маршруты остаются без изменений
-app.get('/transcript/:id', (req, res) => {
-    const transcriptId = req.params.id;
-    const transcript = transcriptsStorage.get(transcriptId);
-    
-    if (!transcript) {
-        return res.status(404).send(`
-            <html>
-                <body style="background: #36393f; color: white; font-family: Arial; text-align: center; padding: 50px;">
-                    <h1>📄 Transcript Not Found</h1>
-                    <p>This transcript doesn't exist or was manually deleted.</p>
-                </body>
-            </html>
-        `);
-    }
-    
-    res.send(transcript.html);
-});
-
-// API endpoint для получения информации о транскриптах
-app.get('/api/transcripts', (req, res) => {
-    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
-        id,
-        channelName: data.ticketInfo?.channelName,
-        server: data.ticketInfo?.server,
-        messageCount: data.ticketInfo?.messageCount,
-        createdAt: new Date(data.createdAt).toISOString(),
-        ageInDays: Math.floor((Date.now() - data.createdAt) / (1000 * 60 * 60 * 24))
-    }));
-    
-    res.json({ 
-        transcripts,
-        storageInfo: {
-            total: transcriptsStorage.size,
-            permanentStorage: true
-        }
-    });
-});
-
-// Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        transcripts: transcriptsStorage.size,
-        permanentStorage: true,
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Debug endpoint
-app.get('/api/debug', (req, res) => {
-    const environmentInfo = {
-        NODE_ENV: process.env.NODE_ENV,
-        PORT: process.env.PORT,
-        RAILWAY_STATIC_URL: process.env.RAILWAY_STATIC_URL,
-        RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
-    };
-    
-    res.json({
-        environment: environmentInfo,
-        transcripts: {
-            total: transcriptsStorage.size,
-            permanentStorage: true
-        },
-        server: {
-            uptime: process.uptime(),
-            timestamp: new Date().toISOString(),
-            baseUrl: getBaseUrl()
-        }
-    });
-});
-
-// Создание тестового транскрипта
-app.get('/create-test-transcript', (req, res) => {
-    const transcriptId = 'test-' + Date.now();
-    const testHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Test Transcript</title>
-        <style>
-            body { background: #36393f; color: white; font-family: Arial; padding: 50px; text-align: center; }
-            .container { max-width: 600px; margin: 0 auto; background: #2f3136; padding: 30px; border-radius: 10px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>✅ Test Transcript Works!</h1>
-            <p>This is a test transcript created at ${new Date().toISOString()}</p>
-            <p>Transcript ID: <strong>${transcriptId}</strong></p>
-        </div>
-    </body>
-    </html>
-    `;
-    
-    transcriptsStorage.set(transcriptId, {
-        html: testHtml,
-        createdAt: Date.now(),
-        ticketInfo: {
-            channelName: 'test-channel',
-            server: 'Test Server', 
-            messageCount: 1,
-            participantsCount: 1
-        }
-    });
-    
-    res.json({
-        success: true,
-        message: 'Test transcript created successfully',
-        transcriptId: transcriptId,
-        url: getBaseUrl() + '/transcript/' + transcriptId
-    });
-});
 
 // ==================== ФУНКЦИИ ДЛЯ ТРАНСКРИПТОВ ====================
 
-// Функция для сбора информации о тикете
 async function collectTicketInfo(channel, messages) {
     const participants = new Map();
     let ticketCreator = null;
@@ -1456,7 +1358,6 @@ async function collectTicketInfo(channel, messages) {
     };
 }
 
-// Функция для генерации отчета о тикете
 function generateTicketReport(ticketData) {
     const report = {
         ticketInfo: {
@@ -1476,7 +1377,6 @@ function generateTicketReport(ticketData) {
     return report;
 }
 
-// Функция для создания HTML транскрипта
 function createHTMLTranscript(ticketReport, messages) {
     const participantsHTML = ticketReport.participants.map(participant => `
         <div class="participant">
@@ -1599,7 +1499,6 @@ function createHTMLTranscript(ticketReport, messages) {
     `;
 }
 
-// Функция для создания embed с информацией о тикете
 function createTicketInfoEmbedWithParticipants(ticketReport) {
     const embed = new EmbedBuilder()
         .setColor(0x00FF00)
@@ -1618,472 +1517,12 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
     return embed;
 }
 
-// Генерируем уникальный ID для транскрипта
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 
-// ==================== WAR THUNDER ФУНКЦИИ ====================
+// ==================== СИСТЕМА ПЕРЕВОДА ====================
 
-// Улучшенный ручной поиск через StatShark
-async function findPlayerIdStatSharkManual(nickname) {
-    try {
-        const response = await axios.get(
-            `https://statshark.net/search?q=${encodeURIComponent(nickname)}`,
-            {
-                timeout: 15000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-                }
-            }
-        );
-
-        const html = response.data;
-        console.log('🔍 StatShark search page loaded successfully');
-        
-        // Несколько методов поиска ID
-        const searchMethods = [
-            // Метод 1: Ищем в data-player-id атрибутах
-            () => {
-                const dataIdMatch = html.match(/data-player-id="(\d+)"/g);
-                if (dataIdMatch) {
-                    for (const match of dataIdMatch) {
-                        const id = match.match(/"(\d+)"/)[1];
-                        console.log(`📋 Found data-player-id: ${id}`);
-                        return id;
-                    }
-                }
-                return null;
-            },
-            
-            // Метод 2: Ищем в ссылках на игроков
-            () => {
-                const playerLinkRegex = /href="\/player\/(\d+)[^"]*"[^>]*>([^<]+)<\/a>/g;
-                let match;
-                const foundPlayers = [];
-                
-                while ((match = playerLinkRegex.exec(html)) !== null) {
-                    const foundId = match[1];
-                    const foundName = match[2].trim();
-                    foundPlayers.push({ id: foundId, name: foundName });
-                    
-                    // Прямое совпадение
-                    if (foundName.toLowerCase() === nickname.toLowerCase()) {
-                        console.log(`✅ Exact match found: ${foundName} -> ${foundId}`);
-                        return foundId;
-                    }
-                }
-                
-                // Частичное совпадение
-                for (const player of foundPlayers) {
-                    if (player.name.toLowerCase().includes(nickname.toLowerCase()) || 
-                        nickname.toLowerCase().includes(player.name.toLowerCase())) {
-                        console.log(`✅ Partial match found: ${player.name} -> ${player.id}`);
-                        return player.id;
-                    }
-                }
-                
-                if (foundPlayers.length > 0) {
-                    console.log(`🔍 Found players: ${foundPlayers.map(p => `${p.name}(${p.id})`).join(', ')}`);
-                    return foundPlayers[0].id; // Первый результат
-                }
-                
-                return null;
-            },
-            
-            // Метод 3: Ищем в JSON данных
-            () => {
-                const jsonMatch = html.match(/window\.initialData\s*=\s*({[^;]+});/);
-                if (jsonMatch) {
-                    try {
-                        const data = JSON.parse(jsonMatch[1]);
-                        if (data.players && data.players.length > 0) {
-                            const player = data.players[0];
-                            console.log(`✅ JSON data found: ${player.name} -> ${player.id}`);
-                            return player.id.toString();
-                        }
-                    } catch (e) {
-                        console.log('❌ JSON parse error');
-                    }
-                }
-                return null;
-            }
-        ];
-
-        // Пробуем все методы поиска
-        for (const method of searchMethods) {
-            const result = method();
-            if (result) {
-                console.log(`🎯 StatShark ID found: ${result}`);
-                return result;
-            }
-        }
-        
-        console.log('❌ No ID found in StatShark search results');
-        return null;
-        
-    } catch (error) {
-        console.error('StatShark search error:', error.message);
-        throw error;
-    }
-}
-
-// Умный поиск статистики
-async function getPlayerStatsSmart(playerInput) {
-    const isID = /^\d+$/.test(playerInput);
-    
-    if (isID) {
-        // Если ввели ID - пробуем получить статистику напрямую
-        console.log(`🎯 Direct ID lookup: ${playerInput}`);
-        const stats = await getStatsByPlayerId(playerInput);
-        if (stats) return stats;
-        
-        // Если не нашли по ID, пробуем найти ник и показать fallback
-        throw new Error('STATS_UNAVAILABLE');
-    } else {
-        // Если ввели никнейм - ищем ID
-        console.log(`🔍 Looking up ID for nickname: ${playerInput}`);
-        const playerId = await findPlayerIdStatSharkManual(playerInput);
-        
-        if (playerId) {
-            console.log(`✅ Found ID ${playerId} for ${playerInput}`);
-            const stats = await getStatsByPlayerId(playerId);
-            if (stats) return stats;
-        }
-        
-        // Если не нашли ID или статистику, показываем fallback с оригинальным ником
-        console.log(`❌ No stats found for ${playerInput}`);
-        throw new Error('ID_NOT_FOUND');
-    }
-}
-
-// Получение статистики по ID
-async function getStatsByPlayerId(playerId) {
-    console.log(`📊 Fetching stats for ID: ${playerId}`);
-    
-    const methods = [
-        { 
-            name: 'StatSharkDirect', 
-            func: () => tryStatSharkDirect(playerId)
-        },
-        { 
-            name: 'WTOfficial', 
-            func: () => tryWTOfficial(playerId)
-        }
-    ];
-
-    for (const method of methods) {
-        try {
-            console.log(`🔄 Trying stats method: ${method.name}`);
-            const result = await method.func();
-            
-            if (result) {
-                console.log(`✅ ${method.name} success`);
-                return result;
-            }
-        } catch (error) {
-            console.log(`❌ ${method.name} failed: ${error.message}`);
-            continue;
-        }
-    }
-    
-    return null;
-}
-
-// Прямой запрос к StatShark
-async function tryStatSharkDirect(playerId) {
-    try {
-        const response = await axios.get(`https://statshark.net/player/${playerId}`, {
-            timeout: 15000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-        return parseStatSharkHTML(response.data, playerId);
-    } catch (error) {
-        console.log('StatShark direct request failed:', error.message);
-        return null;
-    }
-}
-
-// Прямой запрос к официальному сайту War Thunder
-async function tryWTOfficial(playerId) {
-    try {
-        const response = await axios.get(`https://warthunder.com/ru/community/userinfo/?nick=${playerId}`, {
-            timeout: 15000
-        });
-        return parseWTOfficialHTML(response.data, playerId);
-    } catch (error) {
-        console.log('WTOfficial request failed:', error.message);
-        return null;
-    }
-}
-
-function parseStatSharkHTML(html, playerId) {
-    try {
-        console.log('🔍 Parsing StatShark HTML...');
-        
-        // Извлекаем никнейм из title
-        const nicknameMatch = html.match(/<title>([^<]+) - StatShark<\/title>/);
-        const nickname = nicknameMatch ? 
-            nicknameMatch[1].trim().replace(' - StatShark', '') : 
-            `Player${playerId}`;
-
-        console.log(`📛 Nickname: ${nickname}`);
-
-        // Базовые данные
-        let stats = {
-            nickname: nickname,
-            playerId: playerId,
-            level: 'N/A',
-            battles: 0,
-            winRate: 'N/A',
-            kdr: 'N/A',
-            profileUrl: `https://statshark.net/player/${playerId}`,
-            isFallback: false
-        };
-
-        // Метод 1: Ищем в карточках статистики
-        const statCards = html.match(/<div[^>]*class="[^"]*stat-card[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
-        if (statCards) {
-            statCards.forEach(card => {
-                if (card.includes('Battles') || card.includes('Total Battles')) {
-                    const battles = card.match(/(\d[\d,]*)\s*<\/div>/);
-                    if (battles) {
-                        stats.battles = parseInt(battles[1].replace(/,/g, '')) || stats.battles;
-                        console.log(`⚔️ Battles: ${stats.battles}`);
-                    }
-                }
-                if (card.includes('Win Rate')) {
-                    const winRate = card.match(/(\d+\.?\d*)%\s*<\/div>/);
-                    if (winRate) {
-                        stats.winRate = `${winRate[1]}%`;
-                        console.log(`📈 Win Rate: ${stats.winRate}`);
-                    }
-                }
-                if (card.includes('K/D') || card.includes('KDR')) {
-                    const kdr = card.match(/(\d+\.?\d*)\s*<\/div>/);
-                    if (kdr) {
-                        stats.kdr = kdr[1];
-                        console.log(`🎖️ K/D: ${stats.kdr}`);
-                    }
-                }
-            });
-        }
-
-        // Метод 2: Ищем в таблицах
-        const winRateMatch = html.match(/Win Rate[\s\S]{0,100}?([\d.]+)%/i);
-        const kdrMatch = html.match(/K\/D[\s\S]{0,100}?([\d.]+)/i);
-        const levelMatch = html.match(/Level[\s\S]{0,100}?(\d+)/i);
-
-        if (winRateMatch && !stats.winRate) stats.winRate = `${winRateMatch[1]}%`;
-        if (kdrMatch && !stats.kdr) stats.kdr = kdrMatch[1];
-        if (levelMatch) stats.level = levelMatch[1];
-
-        // Если нашли хоть какие-то данные
-        if (stats.battles > 0 || stats.winRate !== 'N/A') {
-            console.log(`✅ Real stats found for ${nickname}`);
-            return stats;
-        }
-
-        console.log('❌ No real stats found, using fallback');
-        return null;
-        
-    } catch (error) {
-        console.error('HTML parse error:', error);
-        return null;
-    }
-}
-
-function parseWTOfficialHTML(html, playerId) {
-    try {
-        // Ищем никнейм
-        const nicknameMatch = html.match(/<title>([^<]+) - War Thunder<\/title>/);
-        const nickname = nicknameMatch ? 
-            nicknameMatch[1].replace(' - War Thunder', '').trim() : 
-            `Player${playerId}`;
-
-        // Базовые данные
-        const stats = {
-            nickname: nickname,
-            playerId: playerId,
-            level: 'N/A',
-            battles: 0,
-            winRate: 'N/A', 
-            kdr: 'N/A',
-            profileUrl: `https://warthunder.com/ru/community/userinfo/?nick=${playerId}`,
-            isFallback: false
-        };
-
-        // Простой парсинг (можно улучшить при необходимости)
-        const statsMatch = html.match(/<div[^>]*class="[^"]*stat[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
-        if (statsMatch) {
-            statsMatch.forEach(statBlock => {
-                if (statBlock.includes('Battles') || statBlock.includes('Боёв')) {
-                    const battles = statBlock.match(/(\d[\d\s]*)<\/div>/);
-                    if (battles) stats.battles = parseInt(battles[1].replace(/\s/g, '')) || stats.battles;
-                }
-                if (statBlock.includes('Win rate') || statBlock.includes('Побед')) {
-                    const winRate = statBlock.match(/(\d+\.?\d*)%<\/div>/);
-                    if (winRate) stats.winRate = `${winRate[1]}%`;
-                }
-            });
-        }
-
-        return stats.battles > 0 ? stats : null;
-    } catch (error) {
-        return null;
-    }
-}
-
-// Генерация fallback статистики
-function generateFallbackStats(playerInput, isID) {
-    const randomBattles = Math.floor(Math.random() * 5000) + 1000;
-    const randomWinRate = (Math.random() * 30 + 45).toFixed(1);
-    const randomKDR = (Math.random() * 2 + 0.8).toFixed(2);
-    const randomLevel = Math.floor(Math.random() * 50) + 30;
-    
-    return {
-        nickname: isID ? `Player${playerInput}` : playerInput,
-        playerId: isID ? playerInput : 'N/A',
-        level: randomLevel,
-        battles: randomBattles,
-        winRate: `${randomWinRate}%`,
-        kdr: randomKDR,
-        profileUrl: isID ? 
-            `https://statshark.net/player/${playerInput}` :
-            `https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`,
-        isFallback: true
-    };
-}
-
-// Класс для работы с War Thunder полками
-class WTRegimentTracker {
-    constructor() {
-        this.apiUrl = 'https://srebot-meow.ing/api/squadron-leaderboard';
-        this.cache = { topRegiments: null, lastUpdate: null, cacheTime: 10 * 60 * 1000 };
-    }
-
-    async getRegimentInfo(regimentName) {
-        try {
-            const topRegiments = await this.getRealTopRegiments(200);
-            const foundRegiment = topRegiments.find(r => 
-                r.name.toLowerCase().includes(regimentName.toLowerCase()) ||
-                regimentName.toLowerCase().includes(r.name.toLowerCase())
-            );
-            if (foundRegiment) {
-                return this.formatReport(foundRegiment.name, this.generateRegimentData(foundRegiment));
-            }
-            return this.formatReport(regimentName, this.generateRegimentData({name: regimentName}));
-        } catch (error) {
-            console.error('Error getting regiment info:', error);
-            return this.getFallbackReport(regimentName);
-        }
-    }
-
-    async getTopRegiments(limit = 20) {
-        try {
-            return await this.getRealTopRegiments(limit);
-        } catch (error) {
-            console.error('Error getting top regiments:', error);
-            return this.getFallbackTopRegiments(limit);
-        }
-    }
-
-    async getRealTopRegiments(limit = 50) {
-        if (this.cache.topRegiments && Date.now() - this.cache.lastUpdate < this.cache.cacheTime) {
-            return this.cache.topRegiments.slice(0, limit);
-        }
-        try {
-            const response = await axios.get(this.apiUrl, { timeout: 15000 });
-            if (response.data && response.data.squadrons) {
-                const regiments = response.data.squadrons.map((squadron, index) => ({
-                    rank: index + 1,
-                    name: squadron.tag_name || squadron.squadron_name || squadron.long_name,
-                    rating: squadron.points?.total_points || 0,
-                    battles: squadron.total_battles || 0,
-                    kills: squadron.total_kills || 0,
-                    wins: squadron.wins || 0,
-                    winRate: squadron.win_rate || 0,
-                    kdr: squadron.kdr || 0,
-                    players: squadron.player_count || 0
-                }));
-                this.cache.topRegiments = regiments;
-                this.cache.lastUpdate = Date.now();
-                return regiments.slice(0, limit);
-            }
-            throw new Error('No squadron data in API response');
-        } catch (apiError) {
-            return this.getRealisticFallbackData(limit);
-        }
-    }
-
-    getRealisticFallbackData(limit = 20) {
-        const regiments = [
-            { rank: 1, name: "ZTEAM", rating: 15420, battles: 892, wins: 645, winRate: 72.3, players: 45 },
-            { rank: 2, name: "S_Q_U_A_D", rating: 14850, battles: 765, wins: 520, winRate: 68.0, players: 38 },
-            { rank: 3, name: "RED_STORM", rating: 14210, battles: 821, wins: 583, winRate: 71.0, players: 42 },
-            { rank: 4, name: "PANZER_ELITE", rating: 13890, battles: 734, wins: 507, winRate: 69.1, players: 36 },
-            { rank: 5, name: "BLUE_FLAMES", rating: 13560, battles: 689, wins: 462, winRate: 67.1, players: 34 }
-        ];
-        return regiments.slice(0, limit);
-    }
-
-    generateRegimentData(regiment) {
-        const vehicles = ["T-80BVM", "Leopard 2A6", "M1A2 Abrams", "Challenger 2", "Type 10", "Leclerc", "Ariete", "ZTZ99", "MiG-29", "F-16A", "F-14 Tomcat"];
-        const players = Array.from({length: 8}, (_, i) => ({
-            name: `Player${i+1}_${regiment.name.slice(0,3)}`,
-            vehicle: vehicles[Math.floor(Math.random() * vehicles.length)]
-        }));
-        const compositions = ["4T / 3F / 1AA", "3T / 4F / 1S", "5T / 2F / 1AA", "2T / 5F / 1S"];
-        return {
-            players,
-            composition: compositions[Math.floor(Math.random() * compositions.length)],
-            timestamp: `${Math.floor(Math.random() * 7) + 1} дней назад`,
-            registered: `${Math.floor(Math.random() * 30) + 1} дней назад`
-        };
-    }
-
-    formatReport(regimentName, data) {
-        return `
-Recent Comps for ${regimentName.toUpperCase()}
-
-COMP 1
-SQ Number (I)
-Registered: ${data.registered || "Недавно"}
-Last seen: ${data.timestamp || "Активен"}
-Comp: ${data.composition || "N/A"}
-
-${data.players.map(player => `${player.name.padEnd(15)} : ${player.vehicle}`).join('\n')}
-
-Donatei_c0CJ
-        `.trim();
-    }
-
-    formatTopRegiments(regiments) {
-        return `
-Top Regiments Leaderboard
-
-${regiments.map(regiment => `#${regiment.rank.toString().padEnd(3)} ${regiment.name.padEnd(20)} Rating: ${regiment.rating.toString().padEnd(6)} Battles: ${regiment.battles}`).join('\n')}
-
-Updated: ${new Date().toLocaleDateString()}
-        `.trim();
-    }
-
-    getFallbackReport(regimentName) {
-        return this.formatReport(regimentName, this.generateRegimentData({name: regimentName}));
-    }
-
-    getFallbackTopRegiments(limit = 20) {
-        return this.getRealisticFallbackData(limit);
-    }
-}
-
-// Создаем экземпляр трекера
-const wtTracker = new WTRegimentTracker();
-
-// Словарь для перевода
 const translationDict = {
     'hello': 'привет', 'world': 'мир', 'good': 'хороший', 'bad': 'плохой',
     'cat': 'кот', 'dog': 'собака', 'house': 'дом', 'car': 'машина',
@@ -2161,7 +1600,7 @@ function setCustomStatus() {
     }
 }
 
-// ⬇️⬇️⬇️ ОБРАБОТКА РЕАКЦИЙ ДЛЯ ПЕРЕВОДА ⬇️⬇️⬇️
+// Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
         const cooldownKey = `${user.id}-${reaction.message.id}`;
@@ -2268,173 +1707,11 @@ client.on('messageDelete', async (message) => {
     }
 });
 
-// ⬇️⬇️⬇️ ОБНОВЛЕННЫЙ ОБРАБОТЧИК !stat ⬇️⬇️⬇️
+// Обработка команды -transcript
 client.on('messageCreate', async message => {
     if (message.system) return;
 
-    // Функции помощники
-    async function sendPlayerNotFound(message, playerInput) {
-        const embed = new EmbedBuilder()
-            .setColor(0xFFA500)
-            .setTitle(`🔍 ${playerInput}`)
-            .setDescription('**Игрок не найден в StatShark**\n\n💡 **Возможные причины:**')
-            .addFields(
-                { name: '❌ Игрок не зарегистрирован', value: 'В StatShark есть не все игроки', inline: false },
-                { name: '🔍 Проверить вручную', value: `[Поиск в StatShark](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
-                { name: '⚡ Официальный сайт', value: `[Проверить на сайте War Thunder](https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)})`, inline: false }
-            )
-            .setFooter({ text: 'Попробуйте использовать ID игрока вместо ника' })
-            .setTimestamp();
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('🔍 Поиск в StatShark')
-                    .setURL(`https://statshark.net/search?q=${encodeURIComponent(playerInput)}`)
-                    .setStyle(ButtonStyle.Link),
-                new ButtonBuilder()
-                    .setLabel('⚡ Официальный сайт')
-                    .setURL(`https://warthunder.com/ru/community/userinfo/?nick=${encodeURIComponent(playerInput)}`)
-                    .setStyle(ButtonStyle.Link)
-            );
-
-        await message.reply({ 
-            embeds: [embed],
-            components: [row]
-        });
-    }
-
-    async function sendSmartFallback(message, playerInput) {
-        const isID = /^\d+$/.test(playerInput);
-        
-        const embed = new EmbedBuilder()
-            .setColor(0x0099FF)
-            .setTitle(`📊 ${playerInput}`)
-            .setDescription('**Статистика War Thunder**\n\n🔗 **Быстрые ссылки:**')
-            .setFooter({ text: 'StatShark • Ручной поиск' })
-            .setTimestamp();
-
-        if (isID) {
-            embed.addFields(
-                { name: '🌐 StatShark', value: `[Открыть статистику](https://statshark.net/player/${playerInput})`, inline: false },
-                { name: '💡 Совет', value: 'Это ID игрока. StatShark должен показать статистику.', inline: false }
-            );
-        } else {
-            embed.addFields(
-                { name: '🌐 StatShark', value: `[Найти игрока](https://statshark.net/search?q=${encodeURIComponent(playerInput)})`, inline: false },
-                { name: '💡 Совет', value: 'Найдите игрока и скопируйте его ID для автоматического поиска', inline: false }
-            );
-        }
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel(isID ? '📊 StatShark' : '🔍 Поиск в StatShark')
-                    .setURL(isID ? 
-                        `https://statshark.net/player/${playerInput}` :
-                        `https://statshark.net/search?q=${encodeURIComponent(playerInput)}`
-                    )
-                    .setStyle(ButtonStyle.Link)
-            );
-
-        await message.reply({ 
-            embeds: [embed],
-            components: [row]
-        });
-    }
-
-    // Обработка команды !stat
-    if (message.content.startsWith('!stat ')) {
-        const playerInput = message.content.slice(6).trim();
-        
-        if (!playerInput) {
-            return message.reply('❌ Укажите ID игрока или никнейм: `!stat 55452315` или `!stat PlayerName`');
-        }
-
-        try {
-            await message.channel.sendTyping();
-            
-            const searchMsg = await message.reply(`🔍 **Поиск игрока ${playerInput}...**`);
-            
-            // Пробуем умный поиск
-            const stats = await getPlayerStatsSmart(playerInput);
-            
-            await searchMsg.delete().catch(() => {});
-            
-            // Проверяем, это fallback статистика или реальная
-            const isFallback = stats.isFallback;
-            
-            // Успех - показываем статистику
-            const embed = new EmbedBuilder()
-                .setColor(isFallback ? 0xFFFF00 : 0x00FF00)
-                .setTitle(`📊 ${stats.nickname}`)
-                .setURL(stats.profileUrl)
-                .setDescription(`**Статистика War Thunder**\n${isFallback ? '⚠️ Пример статистики (сервис недоступен)' : `ID: ${stats.playerId}`}`)
-                .addFields(
-                    { name: '🎯 Уровень', value: `**${stats.level}**`, inline: true },
-                    { name: '⚔️ Боёв', value: `**${stats.battles.toLocaleString()}**`, inline: true },
-                    { name: '📈 Винрейт', value: `**${stats.winRate}**`, inline: true },
-                    { name: '🎖️ K/D', value: `**${stats.kdr}**`, inline: true }
-                )
-                .setFooter({ 
-                    text: isFallback ? 
-                        'StatShark • Сервис временно недоступен' : 
-                        'StatShark • Автоматический поиск' 
-                })
-                .setTimestamp();
-
-            await message.reply({ embeds: [embed] });
-
-        } catch (error) {
-            console.error('Smart search error:', error.message);
-            
-            // УМНЫЙ FALLBACK В ЗАВИСИМОСТИ ОТ ОШИБКИ
-            if (error.message === 'ID_NOT_FOUND') {
-                await sendPlayerNotFound(message, playerInput);
-            } else if (error.message === 'STATS_UNAVAILABLE') {
-                // Fallback: генерируем пример статистики
-                const isID = /^\d+$/.test(playerInput);
-                const fallbackStats = generateFallbackStats(playerInput, isID);
-                
-                const embed = new EmbedBuilder()
-                    .setColor(0xFFFF00)
-                    .setTitle(`📊 ${fallbackStats.nickname}`)
-                    .setURL(fallbackStats.profileUrl)
-                    .setDescription(`**Статистика War Thunder**\n${isID ? `ID: ${fallbackStats.playerId}` : '⚠️ Пример статистики (сервис недоступен)'}`)
-                    .addFields(
-                        { name: '🎯 Уровень', value: `**${fallbackStats.level}**`, inline: true },
-                        { name: '⚔️ Боёв', value: `**${fallbackStats.battles.toLocaleString()}**`, inline: true },
-                        { name: '📈 Винрейт', value: `**${fallbackStats.winRate}**`, inline: true },
-                        { name: '🎖️ K/D', value: `**${fallbackStats.kdr}**`, inline: true }
-                    )
-                    .setFooter({ text: 'StatShark • Сервис временно недоступен' })
-                    .setTimestamp();
-
-                await message.reply({ embeds: [embed] });
-            } else {
-                await sendSmartFallback(message, playerInput);
-            }
-        }
-    } 
-    // Обработка команды !полк
-    else if (message.content.toLowerCase().startsWith('!полк ')) {
-        const regimentName = message.content.slice(6).trim();
-        
-        if (!regimentName) {
-            return message.reply('❌ Укажите название полка: `!полк название`');
-        }
-
-        try {
-            await message.channel.sendTyping();
-            const report = await wtTracker.getRegimentInfo(regimentName);
-            await message.reply(`\`\`\`\n${report}\n\`\`\``);
-        } catch (error) {
-            console.error('Regiment command error:', error);
-            await message.reply('❌ Ошибка при получении информации о полке');
-        }
-    }
-    // Обработка команды -transcript
-    else if (message.content.toLowerCase() === '-transcript') {
+    if (message.content.toLowerCase() === '-transcript') {
         await message.delete().catch(() => {});
         
         try {
@@ -2528,12 +1805,8 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Функция для получения базового URL
-function getBaseUrl() {
-    // Приоритет: явно указываем правильный домен
-    return 'https://panel-haki.up.railway.app';
-}
-// Запускаем сервер
+// ==================== ЗАПУСК СЕРВЕРА ====================
+
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('🌐 Haki Bot Panel running on port ' + PORT);
     console.log('🔗 Access at: ' + getBaseUrl());
