@@ -2529,21 +2529,10 @@ client.on('messageCreate', async message => {
 });
 
 // Функция для получения базового URL
-// Функция для получения базового URL
 function getBaseUrl() {
-    // Используем Railway URL автоматически
-    if (process.env.RAILWAY_STATIC_URL) {
-        let url = process.env.RAILWAY_STATIC_URL;
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'https://' + url;
-        }
-        return url;
-    }
-    
-    // Fallback на конкретный URL
-    return 'https://haki-bot.up.railway.app';
+    // Приоритет: явно указываем правильный домен
+    return 'https://panel-haki.up.railway.app';
 }
-
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('🌐 Haki Bot Panel running on port ' + PORT);
