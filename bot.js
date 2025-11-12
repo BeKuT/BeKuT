@@ -1551,6 +1551,7 @@ function createHTMLTranscript(ticketReport, messages) {
         .message-time { color: #72767d; font-size: 12px; }
         .message-text { color: #dcddde; word-wrap: break-word; white-space: pre-wrap; }
         .footer { text-align: center; margin-top: 30px; color: #72767d; font-size: 12px; padding: 20px; border-top: 1px solid #40444b; }
+    </style>
 </head>
 <body>
     <div class="container">
