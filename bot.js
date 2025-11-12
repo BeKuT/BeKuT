@@ -302,7 +302,6 @@ app.get('/transcripts', requireAuth, (req, res) => {
     
     res.send(createTranscriptsPage(user, baseUrl, adminGuilds));
 });
-});
 
 app.get('/transcript/:id', (req, res) => {
     const transcriptId = req.params.id;
