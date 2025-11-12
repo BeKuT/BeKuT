@@ -2533,6 +2533,7 @@ client.on('messageCreate', async message => {
 });
 
 // Функция для получения базового URL
+// Функция для получения базового URL
 function getBaseUrl() {
     // Используем Railway URL автоматически
     if (process.env.RAILWAY_STATIC_URL) {
@@ -2546,11 +2547,11 @@ function getBaseUrl() {
     // Fallback на конкретный URL
     return 'https://haki-bot.up.railway.app';
 }
+
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('🌐 Transcript server running on port ' + PORT);
+    console.log('🌐 Haki Bot Panel running on port ' + PORT);
     console.log('🔗 Access at: ' + getBaseUrl());
-    console.log('💾 Transcripts are now stored PERMANENTLY (no auto-deletion)');
 });
 
 // Обработка graceful shutdown
