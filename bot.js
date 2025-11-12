@@ -1290,7 +1290,6 @@ function createTranscriptsPage(user, baseUrl) {
 }
     
     res.send(html);
-});
 
 // Остальные маршруты остаются без изменений
 app.get('/transcript/:id', (req, res) => {
