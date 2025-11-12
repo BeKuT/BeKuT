@@ -3,12 +3,15 @@ const fs = require('fs').promises;
 const axios = require('axios');
 const express = require('express');
 const path = require('path');
+const session = require('express-session');
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1433893954759295157';
 const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
 // Проверка наличия токена
 if (!token) {
@@ -18,7 +21,6 @@ if (!token) {
 }
 
 console.log('✅ Token loaded successfully');
-console.log(`📝 Channel ID: ${TRANSCRIPT_CHANNEL_ID}`);
 
 // ==================== ДИСКОРД БОТ ====================
 
@@ -31,726 +33,1261 @@ const client = new Client({
     ]
 });
 
-// Хранилище для связи реакций с сообщениями переводов
-const translationMessages = new Map();
-const translationCooldown = new Set();
-const TRANSLATION_COOLDOWN_TIME = 5000;
+// Хранилище для транскриптов в памяти
+const transcriptsStorage = new Map();
 
-// Создаем Express сервер для хостинга транскриптов
+// ==================== EXPRESS СЕРВЕР ====================
+
 const app = express();
 
-// Важные middleware для Railway
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Хранилище для транскриптов в памяти
-const transcriptsStorage = new Map();
+// Сессии для авторизации
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'haki-bot-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 часа
+}));
 
-// ==================== ВЕБ-ИНТЕРФЕЙС ====================
+// ==================== АВТОРИЗАЦИЯ DISCORD ====================
 
-// Главная страница с красивым интерфейсом
+// Реддирект на Discord OAuth
+app.get('/auth/discord', (req, res) => {
+    const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
+    const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds`;
+    res.redirect(authUrl);
+});
+
+// Callback от Discord
+app.get('/auth/discord/callback', async (req, res) => {
+    try {
+        const { code } = req.query;
+        if (!code) throw new Error('No code provided');
+
+        const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
+        
+        // Получаем access token
+        const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
+            new URLSearchParams({
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: redirectUri
+            }), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+
+        const { access_token } = tokenResponse.data;
+
+        // Получаем данные пользователя
+        const userResponse = await axios.get('https://discord.com/api/users/@me', {
+            headers: {
+                Authorization: `Bearer ${access_token}`
+            }
+        });
+
+        // Получаем сервера пользователя
+        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+            headers: {
+                Authorization: `Bearer ${access_token}`
+            }
+        });
+
+        req.session.user = userResponse.data;
+        req.session.guilds = guildsResponse.data;
+        req.session.accessToken = access_token;
+        req.session.isAuthenticated = true;
+
+        res.redirect('/');
+    } catch (error) {
+        console.error('Auth error:', error);
+        res.redirect('/?error=auth_failed');
+    }
+});
+
+// Выход
+app.get('/auth/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/');
+});
+
+// Middleware проверки авторизации
+function requireAuth(req, res, next) {
+    if (!req.session.isAuthenticated) {
+        return res.redirect('/auth/discord');
+    }
+    next();
+}
+
+// ==================== ГЛАВНАЯ СТРАНИЦА ====================
+
 app.get('/', (req, res) => {
     const baseUrl = getBaseUrl();
-    const port = PORT;
     
-    const html = `
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BeKuT Bot Dashboard</title>
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
+    if (!req.session.isAuthenticated) {
+        // Страница без авторизации
+        return res.send(createUnauthorizedPage(baseUrl));
+    }
 
-            :root {
-                --primary: #5865F2;
-                --primary-dark: #4752C4;
-                --background: #36393f;
-                --surface: #2f3136;
-                --surface-light: #40444b;
-                --text: #ffffff;
-                --text-muted: #b9bbbe;
-                --success: #57F287;
-                --warning: #FEE75C;
-                --danger: #ED4245;
-                --border: #40444b;
-            }
+    // Страница с авторизацией
+    const user = req.session.user;
+    const guilds = req.session.guilds || [];
+    
+    // Фильтруем сервера где есть бот
+    const mutualGuilds = guilds.filter(guild => {
+        const botGuild = client.guilds.cache.get(guild.id);
+        return botGuild && (guild.permissions & 0x20) === 0x20; // MANAGE_GUILD permission
+    });
 
-            body {
-                font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-                background: var(--background);
-                color: var(--text);
-                line-height: 1.6;
-            }
+    res.send(createDashboardPage(user, mutualGuilds, baseUrl));
+});
 
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-                padding: 20px;
-            }
+// ==================== СТРАНИЦА СЕРВЕРА ====================
 
-            .header {
-                background: var(--surface);
-                padding: 30px;
-                border-radius: 12px;
-                margin-bottom: 30px;
-                border-left: 4px solid var(--primary);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            }
+app.get('/server/:id', requireAuth, (req, res) => {
+    const guildId = req.params.id;
+    const guild = client.guilds.cache.get(guildId);
+    
+    if (!guild) {
+        return res.status(404).send('Сервер не найден или бот не на этом сервере');
+    }
 
-            .header h1 {
-                font-size: 2.5rem;
-                margin-bottom: 10px;
-                background: linear-gradient(135deg, var(--primary), var(--success));
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-            }
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    res.send(createServerPage(guild, user, baseUrl));
+});
 
-            .header p {
-                color: var(--text-muted);
-                font-size: 1.1rem;
-            }
+// ==================== СТРАНИЦА КОМАНД ====================
 
-            .nav-tabs {
-                display: flex;
-                background: var(--surface);
-                border-radius: 12px;
-                padding: 10px;
-                margin-bottom: 30px;
-                gap: 10px;
-            }
+app.get('/commands', requireAuth, (req, res) => {
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    res.send(createCommandsPage(user, baseUrl));
+});
 
-            .nav-tab {
-                padding: 15px 25px;
-                background: transparent;
-                border: none;
-                color: var(--text-muted);
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 1rem;
-                font-weight: 500;
-                transition: all 0.3s ease;
-            }
+// ==================== СТРАНИЦА О БОТЕ ====================
 
-            .nav-tab:hover {
-                background: var(--surface-light);
-                color: var(--text);
-            }
+app.get('/about', requireAuth, (req, res) => {
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    res.send(createAboutPage(user, baseUrl));
+});
 
-            .nav-tab.active {
-                background: var(--primary);
-                color: white;
-            }
+// ==================== СТРАНИЦЫ ТРАНСКРИПТОВ ====================
 
-            .tab-content {
-                display: none;
-            }
+app.get('/transcripts', requireAuth, (req, res) => {
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    res.send(createTranscriptsPage(user, baseUrl));
+});
 
-            .tab-content.active {
-                display: block;
-            }
+app.get('/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcript = transcriptsStorage.get(transcriptId);
+    
+    if (!transcript) {
+        return res.status(404).send(`
+            <html>
+                <body style="background: #1a1a1a; color: white; font-family: Arial; text-align: center; padding: 50px;">
+                    <h1>📄 Transcript Not Found</h1>
+                    <p>This transcript doesn't exist or was manually deleted.</p>
+                </body>
+            </html>
+        `);
+    }
+    
+    res.send(transcript.html);
+});
 
-            .stats-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
-            }
+// ==================== API МАРШРУТЫ ====================
 
-            .stat-card {
-                background: var(--surface);
-                padding: 25px;
-                border-radius: 12px;
-                border-left: 4px solid var(--primary);
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
-            }
+app.get('/api/transcripts', (req, res) => {
+    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
+        id,
+        channelName: data.ticketInfo?.channelName,
+        server: data.ticketInfo?.server,
+        messageCount: data.ticketInfo?.messageCount,
+        createdAt: new Date(data.createdAt).toISOString(),
+        ageInDays: Math.floor((Date.now() - data.createdAt) / (1000 * 60 * 60 * 24))
+    }));
+    
+    res.json({ 
+        transcripts,
+        storageInfo: {
+            total: transcriptsStorage.size,
+            permanentStorage: true
+        }
+    });
+});
 
-            .stat-card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-            }
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        transcripts: transcriptsStorage.size,
+        permanentStorage: true,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
 
-            .stat-card.success {
-                border-left-color: var(--success);
-            }
+// ==================== HTML ШАБЛОНЫ ====================
 
-            .stat-card.warning {
-                border-left-color: var(--warning);
-            }
+function createUnauthorizedPage(baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haki Bot - Панель управления</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header { 
+            background: #2b2b2b; 
+            padding: 30px; 
+            border-radius: 15px; 
+            margin-bottom: 30px; 
+            border-left: 5px solid #5865F2;
+            text-align: center;
+        }
+        .header h1 { 
+            font-size: 2.5rem; 
+            margin-bottom: 10px; 
+            background: linear-gradient(135deg, #5865F2, #57F287);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .login-box {
+            background: #2b2b2b;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 500px;
+            margin: 50px auto;
+            border: 1px solid #40444b;
+        }
+        .login-btn {
+            background: #5865F2;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+            transition: background 0.3s ease;
+        }
+        .login-btn:hover {
+            background: #4752C4;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        .feature-card {
+            background: #2b2b2b;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #40444b;
+        }
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Haki Bot</h1>
+            <p>Мощная панель управления для вашего Discord сервера</p>
+        </div>
+        
+        <div class="login-box">
+            <h2>🔐 Требуется авторизация</h2>
+            <p>Для доступа к панели управления необходимо войти через Discord</p>
+            <a href="/auth/discord" class="login-btn">Войти через Discord</a>
+        </div>
 
-            .stat-card.danger {
-                border-left-color: var(--danger);
-            }
-
-            .stat-icon {
-                font-size: 2rem;
-                margin-bottom: 15px;
-            }
-
-            .stat-value {
-                font-size: 2rem;
-                font-weight: bold;
-                margin-bottom: 5px;
-            }
-
-            .stat-label {
-                color: var(--text-muted);
-                font-size: 0.9rem;
-            }
-
-            .transcripts-list {
-                background: var(--surface);
-                border-radius: 12px;
-                overflow: hidden;
-            }
-
-            .transcript-item {
-                padding: 20px;
-                border-bottom: 1px solid var(--border);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                transition: background 0.3s ease;
-            }
-
-            .transcript-item:hover {
-                background: var(--surface-light);
-            }
-
-            .transcript-item:last-child {
-                border-bottom: none;
-            }
-
-            .transcript-info {
-                flex: 1;
-            }
-
-            .transcript-title {
-                font-weight: 600;
-                margin-bottom: 5px;
-            }
-
-            .transcript-meta {
-                color: var(--text-muted);
-                font-size: 0.9rem;
-            }
-
-            .transcript-actions {
-                display: flex;
-                gap: 10px;
-            }
-
-            .btn {
-                padding: 8px 16px;
-                border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                font-weight: 500;
-                transition: all 0.3s ease;
-                text-decoration: none;
-                display: inline-flex;
-                align-items: center;
-                gap: 5px;
-            }
-
-            .btn-primary {
-                background: var(--primary);
-                color: white;
-            }
-
-            .btn-primary:hover {
-                background: var(--primary-dark);
-            }
-
-            .btn-success {
-                background: var(--success);
-                color: black;
-            }
-
-            .btn-danger {
-                background: var(--danger);
-                color: white;
-            }
-
-            .btn-outline {
-                background: transparent;
-                border: 1px solid var(--border);
-                color: var(--text);
-            }
-
-            .btn-outline:hover {
-                background: var(--surface-light);
-            }
-
-            .empty-state {
-                text-align: center;
-                padding: 60px 20px;
-                color: var(--text-muted);
-            }
-
-            .empty-state i {
-                font-size: 3rem;
-                margin-bottom: 20px;
-                opacity: 0.5;
-            }
-
-            .search-box {
-                background: var(--surface);
-                padding: 20px;
-                border-radius: 12px;
-                margin-bottom: 20px;
-            }
-
-            .search-input {
-                width: 100%;
-                padding: 12px 16px;
-                background: var(--surface-light);
-                border: 1px solid var(--border);
-                border-radius: 8px;
-                color: var(--text);
-                font-size: 1rem;
-            }
-
-            .search-input:focus {
-                outline: none;
-                border-color: var(--primary);
-            }
-
-            .status-indicator {
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                padding: 4px 12px;
-                background: var(--success);
-                color: black;
-                border-radius: 20px;
-                font-size: 0.8rem;
-                font-weight: 500;
-            }
-
-            .status-indicator::before {
-                content: '';
-                width: 8px;
-                height: 8px;
-                background: currentColor;
-                border-radius: 50%;
-            }
-
-            .status-indicator.offline {
-                background: var(--danger);
-                color: white;
-            }
-
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(20px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-
-            .fade-in {
-                animation: fadeIn 0.5s ease;
-            }
-
-            @media (max-width: 768px) {
-                .container {
-                    padding: 10px;
-                }
-                
-                .nav-tabs {
-                    flex-direction: column;
-                }
-                
-                .stats-grid {
-                    grid-template-columns: 1fr;
-                }
-                
-                .transcript-item {
-                    flex-direction: column;
-                    align-items: flex-start;
-                    gap: 15px;
-                }
-                
-                .transcript-actions {
-                    width: 100%;
-                    justify-content: flex-end;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header fade-in">
-                <h1>🤖 BeKuT Bot Dashboard</h1>
-                <p>Управление ботом и просмотр транскриптов</p>
-                <div style="margin-top: 15px;">
-                    <span class="status-indicator" id="botStatus">Загрузка...</span>
-                </div>
+        <div class="features">
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Статистика серверов</h3>
+                <p>Просматривайте информацию о всех серверах где есть бот</p>
             </div>
-
-            <div class="nav-tabs">
-                <button class="nav-tab active" onclick="switchTab('overview')">📊 Обзор</button>
-                <button class="nav-tab" onclick="switchTab('transcripts')">📄 Транскрипты</button>
-                <button class="nav-tab" onclick="switchTab('settings')">⚙️ Настройки</button>
+            <div class="feature-card">
+                <div class="feature-icon">📄</div>
+                <h3>Управление транскриптами</h3>
+                <p>Создавайте и просматривайте транскрипты бесед</p>
             </div>
-
-            <!-- Вкладка Обзор -->
-            <div id="overview" class="tab-content active">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">🤖</div>
-                        <div class="stat-value" id="botUptime">--</div>
-                        <div class="stat-label">Аптайм бота</div>
-                    </div>
-                    <div class="stat-card success">
-                        <div class="stat-icon">📊</div>
-                        <div class="stat-value" id="transcriptsCount">--</div>
-                        <div class="stat-label">Транскриптов</div>
-                    </div>
-                    <div class="stat-card warning">
-                        <div class="stat-icon">💾</div>
-                        <div class="stat-value" id="storageUsage">--</div>
-                        <div class="stat-label">Использование памяти</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🚀</div>
-                        <div class="stat-value" id="serverStatus">--</div>
-                        <div class="stat-label">Статус сервера</div>
-                    </div>
-                </div>
-
-                <div class="search-box">
-                    <h3 style="margin-bottom: 15px;">🔍 Быстрый поиск</h3>
-                    <input type="text" class="search-input" placeholder="Поиск транскриптов по ID, серверу или каналу..." id="searchInput">
-                </div>
-
-                <div style="background: var(--surface); padding: 25px; border-radius: 12px;">
-                    <h3 style="margin-bottom: 15px;">📈 Последняя активность</h3>
-                    <div id="recentActivity">
-                        <div class="empty-state">
-                            <i>📊</i>
-                            <p>Загрузка данных...</p>
-                        </div>
-                    </div>
-                </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚙️</div>
+                <h3>Настройка бота</h3>
+                <p>Управляйте настройками бота для каждого сервера</p>
             </div>
+        </div>
+    </div>
+</body>
+</html>`;
+}
 
-            <!-- Вкладка Транскрипты -->
-            <div id="transcripts" class="tab-content">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3>📄 Все транскрипты</h3>
-                    <div class="transcript-actions">
-                        <button class="btn btn-primary" onclick="refreshTranscripts()">
-                            🔄 Обновить
-                        </button>
-                    </div>
-                </div>
-
-                <div class="search-box">
-                    <input type="text" class="search-input" placeholder="Поиск транскриптов..." id="transcriptSearch">
-                </div>
-
-                <div class="transcripts-list" id="transcriptsContainer">
-                    <div class="empty-state">
-                        <i>📝</i>
-                        <p>Загрузка транскриптов...</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Вкладка Настройки -->
-            <div id="settings" class="tab-content">
-                <div style="background: var(--surface); padding: 25px; border-radius: 12px;">
-                    <h3 style="margin-bottom: 20px;">⚙️ Настройки системы</h3>
-                    
-                    <div style="display: grid; gap: 20px;">
-                        <div>
-                            <h4 style="margin-bottom: 10px;">🌐 Информация о сервере</h4>
-                            <div style="background: var(--surface-light); padding: 15px; border-radius: 8px;">
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                                    <div>
-                                        <strong>Base URL:</strong><br>
-                                        <code>${baseUrl}</code>
-                                    </div>
-                                    <div>
-                                        <strong>Порт:</strong><br>
-                                        <code>${port}</code>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <h4 style="margin-bottom: 10px;">🛠️ Действия</h4>
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                                <a href="/api/health" class="btn btn-outline" target="_blank">
-                                    ❤️ Health Check
-                                </a>
-                                <a href="/api/debug" class="btn btn-outline" target="_blank">
-                                    🐛 Debug Info
-                                </a>
-                                <a href="/create-test-transcript" class="btn btn-outline" target="_blank">
-                                    🧪 Test Transcript
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+function createDashboardPage(user, mutualGuilds, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haki Bot - Панель управления</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #2b2b2b;
+            padding: 20px;
+            border-right: 1px solid #40444b;
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            background: #36393f;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: #36393f;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .nav-item:hover {
+            background: #40444b;
+        }
+        .nav-item.active {
+            background: #5865F2;
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        .server-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .server-card {
+            background: #2b2b2b;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+        .server-card:hover {
+            transform: translateY(-5px);
+            border-color: #5865F2;
+        }
+        .server-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+        .server-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #2b2b2b;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 4px solid #5865F2;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .logout-btn {
+            background: #ed4245;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <!-- Боковая панель -->
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
             </div>
         </div>
 
-        <script>
-            let allTranscripts = [];
+        <a href="/" class="nav-item active">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/about" class="nav-item">
+            <span class="nav-icon">📋</span>
+            Общие сведения
+        </a>
+        <a href="/transcripts" class="nav-item">
+            <span class="nav-icon">📄</span>
+            Транскрипты
+        </a>
+        <a href="/commands" class="nav-item">
+            <span class="nav-icon">⚡</span>
+            Команды
+        </a>
 
-            function switchTab(tabName) {
-                // Скрыть все вкладки
-                document.querySelectorAll('.tab-content').forEach(tab => {
-                    tab.classList.remove('active');
-                });
-                
-                // Убрать активный класс со всех кнопок
-                document.querySelectorAll('.nav-tab').forEach(btn => {
-                    btn.classList.remove('active');
-                });
-                
-                // Показать выбранную вкладку
-                document.getElementById(tabName).classList.add('active');
-                
-                // Активировать кнопку
-                event.target.classList.add('active');
-                
-                // Загрузить данные для соответствующих вкладок
-                if (tabName === 'transcripts') {
-                    loadTranscripts();
-                } else if (tabName === 'overview') {
-                    loadRecentActivity();
-                }
-            }
+        <div style="margin: 30px 0 10px 0; color: #b9bbbe; font-size: 0.9rem; padding: 0 15px;">СЕРВЕРА</div>
+        
+        ${mutualGuilds.map(guild => `
+            <a href="/server/${guild.id}" class="nav-item">
+                <span class="nav-icon">🏰</span>
+                ${guild.name}
+            </a>
+        `).join('')}
 
-            async function loadBotStatus() {
-                try {
-                    const response = await fetch('/api/health');
-                    const data = await response.json();
-                    
-                    document.getElementById('botUptime').textContent = formatUptime(data.uptime);
-                    document.getElementById('transcriptsCount').textContent = data.transcripts;
-                    document.getElementById('storageUsage').textContent = 'Permanent';
-                    document.getElementById('serverStatus').textContent = data.status === 'ok' ? 'Online' : 'Offline';
-                    
-                    const statusIndicator = document.getElementById('botStatus');
-                    statusIndicator.textContent = data.status === 'ok' ? 'Bot Online' : 'Bot Offline';
-                    if (data.status !== 'ok') {
-                        statusIndicator.classList.add('offline');
-                    }
-                } catch (error) {
-                    console.error('Error loading bot status:', error);
-                    document.getElementById('botStatus').classList.add('offline');
-                    document.getElementById('botStatus').textContent = 'Connection Error';
-                }
-            }
+        <a href="/auth/logout" class="logout-btn">Выйти</a>
+    </div>
 
-            function formatUptime(seconds) {
-                const days = Math.floor(seconds / (24 * 60 * 60));
-                const hours = Math.floor((seconds % (24 * 60 * 60)) / (60 * 60));
-                const minutes = Math.floor((seconds % (60 * 60)) / 60);
-                
-                if (days > 0) return days + 'd ' + hours + 'h';
-                if (hours > 0) return hours + 'h ' + minutes + 'm';
-                return minutes + 'm';
-            }
+    <!-- Основной контент -->
+    <div class="main-content">
+        <div style="margin-bottom: 30px;">
+            <h1>🏠 Главная панель</h1>
+            <p style="color: #b9bbbe;">Добро пожаловать в панель управления Haki Bot</p>
+        </div>
 
-            async function loadRecentActivity() {
-                try {
-                    const response = await fetch('/api/transcripts');
-                    const data = await response.json();
-                    
-                    const recentTranscripts = data.transcripts
-                        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-                        .slice(0, 5);
-                    
-                    displayRecentActivity(recentTranscripts);
-                } catch (error) {
-                    console.error('Error loading recent activity:', error);
-                    document.getElementById('recentActivity').innerHTML = 
-                        '<div class="empty-state"><i>❌</i><p>Ошибка загрузки активности</p></div>';
-                }
-            }
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">${mutualGuilds.length}</div>
+                <div style="color: #b9bbbe;">Серверов с ботом</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${transcriptsStorage.size}</div>
+                <div style="color: #b9bbbe;">Транскриптов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">24/7</div>
+                <div style="color: #b9bbbe;">Аптайм</div>
+            </div>
+        </div>
 
-            function displayRecentActivity(transcripts) {
-                const container = document.getElementById('recentActivity');
-                
-                if (transcripts.length === 0) {
-                    container.innerHTML = \`
-                        <div class="empty-state">
-                            <i>📝</i>
-                            <p>Активность не найдена</p>
-                            <small>Создайте первый транскрипт командой -transcript в Discord</small>
+        <h2 style="margin-bottom: 20px;">🏰 Ваши сервера</h2>
+        <div class="server-grid">
+            ${mutualGuilds.map(guild => `
+                <div class="server-card" onclick="window.location.href='/server/${guild.id}'">
+                    <div class="server-header">
+                        ${guild.icon ? 
+                            `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png" alt="${guild.name}" class="server-icon">` :
+                            `<div style="width: 50px; height: 50px; background: #5865F2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; margin-right: 15px;">🏰</div>`
+                        }
+                        <div>
+                            <div style="font-weight: bold; font-size: 1.1rem;">${guild.name}</div>
+                            <div style="color: #b9bbbe; font-size: 0.9rem;">Участников: ${guild.approximate_member_count || 'N/A'}</div>
                         </div>
-                    \`;
-                    return;
-                }
-
-                container.innerHTML = \`
-                    <div style="display: grid; gap: 10px;">
-                        \${transcripts.map(transcript => {
-                            const timeAgo = getTimeAgo(new Date(transcript.createdAt));
-                            const channelName = transcript.channelName || 'unknown';
-                            const server = transcript.server || 'Unknown Server';
-                            const messageCount = transcript.messageCount || 0;
-                            
-                            return \`
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface-light); border-radius: 8px;">
-                                <div style="flex: 1;">
-                                    <div style="font-weight: 600; margin-bottom: 4px;">
-                                        📄 Транскрипт #\${channelName}
-                                    </div>
-                                    <div style="font-size: 0.9rem; color: var(--text-muted);">
-                                        🏠 \${server} • 💬 \${messageCount} сообщений
-                                    </div>
-                                </div>
-                                <div style="text-align: right;">
-                                    <div style="font-size: 0.8rem; color: var(--text-muted);">
-                                        \${timeAgo}
-                                    </div>
-                                    <a href="/transcript/\${transcript.id}" class="btn btn-outline" style="padding: 4px 8px; font-size: 0.8rem; margin-top: 5px;">
-                                        👁️ Просмотр
-                                    </a>
-                                </div>
-                            </div>
-                            \`;
-                        }).join('')}
                     </div>
-                \`;
-            }
+                    <div style="color: #57F287; font-size: 0.9rem;">✓ Бот активен</div>
+                </div>
+            `).join('')}
+        </div>
+    </div>
+</body>
+</html>`;
+}
 
-            function getTimeAgo(date) {
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMs / 3600000);
-                const diffDays = Math.floor(diffMs / 86400000);
+function createAboutPage(user, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Общие сведения - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #2b2b2b;
+            padding: 20px;
+            border-right: 1px solid #40444b;
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .content-box {
+            background: #2b2b2b;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+            margin-bottom: 20px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: #36393f;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .nav-item:hover {
+            background: #40444b;
+        }
+        .nav-item.active {
+            background: #5865F2;
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: #ed4245;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <!-- Боковая панель -->
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
+            </div>
+        </div>
 
-                if (diffMins < 1) return 'только что';
-                if (diffMins < 60) return \`\${diffMins} мин. назад\`;
-                if (diffHours < 24) return \`\${diffHours} ч. назад\`;
-                if (diffDays === 1) return 'вчера';
-                if (diffDays < 7) return \`\${diffDays} дн. назад\`;
-                if (diffDays < 30) return \`\${Math.floor(diffDays / 7)} нед. назад\`;
-                return \`\${Math.floor(diffDays / 30)} мес. назад\`;
-            }
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/about" class="nav-item active">
+            <span class="nav-icon">📋</span>
+            Общие сведения
+        </a>
+        <a href="/transcripts" class="nav-item">
+            <span class="nav-icon">📄</span>
+            Транскрипты
+        </a>
+        <a href="/commands" class="nav-item">
+            <span class="nav-icon">⚡</span>
+            Команды
+        </a>
 
-            async function loadTranscripts() {
-                try {
-                    const response = await fetch('/api/transcripts');
-                    const data = await response.json();
-                    allTranscripts = data.transcripts;
-                    displayTranscripts(allTranscripts);
-                } catch (error) {
-                    console.error('Error loading transcripts:', error);
-                    document.getElementById('transcriptsContainer').innerHTML = '<div class="empty-state"><i>❌</i><p>Ошибка загрузки транскриптов</p></div>';
-                }
-            }
+        <a href="/auth/logout" class="logout-btn">Выйти</a>
+    </div>
 
-            function displayTranscripts(transcripts) {
-                const container = document.getElementById('transcriptsContainer');
+    <!-- Основной контент -->
+    <div class="main-content">
+        <div style="margin-bottom: 30px;">
+            <h1>📋 Общие сведения</h1>
+            <p style="color: #b9bbbe;">Информация о боте Haki и его возможностях</p>
+        </div>
+
+        <div class="content-box">
+            <h2 style="margin-bottom: 20px; color: #5865F2;">О боте Haki</h2>
+            
+            <!-- ВСТАВЬТЕ СВОЙ ТЕКСТ ЗДЕСЬ -->
+            <div style="line-height: 1.8;">
+                <p>Haki Bot - это многофункциональный Discord бот, созданный для улучшения управления серверами и взаимодействия с участниками.</p>
                 
-                if (transcripts.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><i>📝</i><p>Транскрипты не найдены</p></div>';
-                    return;
-                }
+                <h3 style="margin: 25px 0 15px 0; color: #57F287;">Основные возможности:</h3>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Создание транскриптов бесед</li>
+                    <li>Система тикетов</li>
+                    <li>Модерационные команды</li>
+                    <li>Интеграция с War Thunder</li>
+                    <li>Автоматический перевод сообщений</li>
+                    <li>Панель управления через веб-интерфейс</li>
+                </ul>
 
-                container.innerHTML = transcripts.map(transcript => {
-                    const channelName = transcript.channelName || 'unknown';
-                    const server = transcript.server || 'Unknown Server';
-                    const messageCount = transcript.messageCount || 0;
-                    const date = new Date(transcript.createdAt).toLocaleDateString('ru-RU');
-                    
-                    return '<div class="transcript-item fade-in">' +
-                        '<div class="transcript-info">' +
-                            '<div class="transcript-title">#' + channelName + '</div>' +
-                            '<div class="transcript-meta">🏠 ' + server + ' • 💬 ' + messageCount + ' сообщений • 📅 ' + date + '</div>' +
-                        '</div>' +
-                        '<div class="transcript-actions">' +
-                            '<a href="/transcript/' + transcript.id + '" class="btn btn-primary" target="_blank">👁️ Просмотр</a>' +
-                            '<button class="btn btn-outline" onclick="copyTranscriptUrl(\\'' + transcript.id + '\\')">📋 Ссылка</button>' +
-                        '</div>' +
-                    '</div>';
-                }).join('');
+                <h3 style="margin: 25px 0 15px 0; color: #57F287;">Техническая информация:</h3>
+                <ul style="margin-left: 20px;">
+                    <li><strong>Версия:</strong> 2.0.0</li>
+                    <li><strong>База данных:</strong> In-memory хранилище</li>
+                    <li><strong>Аптайм:</strong> 99.9%</li>
+                    <li><strong>Поддержка:</strong> 24/7</li>
+                </ul>
+
+                <p style="margin-top: 25px; padding: 15px; background: #36393f; border-radius: 8px; border-left: 4px solid #5865F2;">
+                    <strong>💡 Примечание:</strong> Вы можете отредактировать этот текст в коде бота в разделе "Общие сведения".
+                </p>
+            </div>
+            <!-- КОНЕЦ ВАШЕГО ТЕКСТА -->
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function createCommandsPage(user, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Команды - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #2b2b2b;
+            padding: 20px;
+            border-right: 1px solid #40444b;
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .command-category {
+            background: #2b2b2b;
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+            margin-bottom: 20px;
+        }
+        .command-item {
+            background: #36393f;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #5865F2;
+        }
+        .command-name {
+            font-weight: bold;
+            color: #57F287;
+        }
+        .command-desc {
+            color: #b9bbbe;
+            margin-top: 5px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: #36393f;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .nav-item:hover {
+            background: #40444b;
+        }
+        .nav-item.active {
+            background: #5865F2;
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: #ed4245;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <!-- Боковая панель -->
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
+            </div>
+        </div>
+
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/about" class="nav-item">
+            <span class="nav-icon">📋</span>
+            Общие сведения
+        </a>
+        <a href="/transcripts" class="nav-item">
+            <span class="nav-icon">📄</span>
+            Транскрипты
+        </a>
+        <a href="/commands" class="nav-item active">
+            <span class="nav-icon">⚡</span>
+            Команды
+        </a>
+
+        <a href="/auth/logout" class="logout-btn">Выйти</a>
+    </div>
+
+    <!-- Основной контент -->
+    <div class="main-content">
+        <div style="margin-bottom: 30px;">
+            <h1>⚡ Команды бота</h1>
+            <p style="color: #b9bbbe;">Все доступные команды Haki Bot</p>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
+            
+            <div class="command-item">
+                <div class="command-name">!stat [никнейм/ID]</div>
+                <div class="command-desc">Показывает статистику игрока War Thunder через StatShark</div>
+            </div>
+
+            <div class="command-item">
+                <div class="command-name">!полк [название]</div>
+                <div class="command-desc">Информация о полке War Thunder</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">📄 Команды транскриптов</h2>
+            
+            <div class="command-item">
+                <div class="command-name">-transcript</div>
+                <div class="command-desc">Создает транскрипт текущего канала (требует права MANAGE_MESSAGES)</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🌐 Команды перевода</h2>
+            
+            <div class="command-item">
+                <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
+                <div class="command-desc">Добавьте реакцию 🇷🇺 для перевода на русский или 🇬🇧 для перевода на английский</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">⚙️ Утилиты</h2>
+            
+            <div class="command-item">
+                <div class="command-name">-help</div>
+                <div class="command-desc">Показывает список всех команд</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function createServerPage(guild, user, baseUrl) {
+    const memberCount = guild.memberCount;
+    const createdAt = guild.createdAt.toLocaleDateString('ru-RU');
+    
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${guild.name} - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #2b2b2b;
+            padding: 20px;
+            border-right: 1px solid #40444b;
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .server-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #2b2b2b;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+        }
+        .server-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-right: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #2b2b2b;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 4px solid #5865F2;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: #36393f;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .nav-item:hover {
+            background: #40444b;
+        }
+        .nav-item.active {
+            background: #5865F2;
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: #ed4245;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+        .feature-card {
+            background: #2b2b2b;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+        }
+        .feature-card:hover {
+            border-color: #5865F2;
+        }
+    </style>
+</head>
+<body>
+    <!-- Боковая панель -->
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
+            </div>
+        </div>
+
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/about" class="nav-item">
+            <span class="nav-icon">📋</span>
+            Общие сведения
+        </a>
+        <a href="/transcripts" class="nav-item">
+            <span class="nav-icon">📄</span>
+            Транскрипты
+        </a>
+        <a href="/commands" class="nav-item">
+            <span class="nav-icon">⚡</span>
+            Команды
+        </a>
+
+        <a href="/auth/logout" class="logout-btn">Выйти</a>
+    </div>
+
+    <!-- Основной контент -->
+    <div class="main-content">
+        <div class="server-header">
+            ${guild.icon ? 
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png" alt="${guild.name}" class="server-icon">` :
+                `<div style="width: 80px; height: 80px; background: #5865F2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin-right: 20px;">🏰</div>`
             }
+            <div>
+                <h1>${guild.name}</h1>
+                <p style="color: #b9bbbe;">Управление сервером через Haki Bot</p>
+            </div>
+        </div>
 
-            function refreshTranscripts() {
-                loadTranscripts();
-                showNotification('Транскрипты обновлены', 'success');
-            }
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">${memberCount}</div>
+                <div style="color: #b9bbbe;">Участников</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${guild.channels.cache.size}</div>
+                <div style="color: #b9bbbe;">Каналов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${guild.roles.cache.size}</div>
+                <div style="color: #b9bbbe;">Ролей</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${createdAt}</div>
+                <div style="color: #b9bbbe;">Создан</div>
+            </div>
+        </div>
 
-            function copyTranscriptUrl(id) {
-                const url = window.location.origin + '/transcript/' + id;
-                navigator.clipboard.writeText(url).then(() => {
-                    showNotification('Ссылка скопирована в буфер обмена', 'success');
-                });
-            }
+        <h2 style="margin-bottom: 20px;">⚙️ Управление сервером</h2>
+        
+        <div class="feature-card" onclick="window.location.href='/transcripts'">
+            <h3 style="color: #57F287; margin-bottom: 10px;">📄 Транскрипты</h3>
+            <p style="color: #b9bbbe;">Создание и просмотр транскриптов бесед. Управление архивами сообщений.</p>
+        </div>
 
-            function showNotification(message, type = 'info') {
-                // Создание уведомления
-                const notification = document.createElement('div');
-                const backgroundColor = type === 'success' ? '#57F287' : '#5865F2';
-                const textColor = type === 'success' ? 'black' : 'white';
-                
-                notification.style.cssText = 
-                    'position: fixed;' +
-                    'top: 20px;' +
-                    'right: 20px;' +
-                    'background: ' + backgroundColor + ';' +
-                    'color: ' + textColor + ';' +
-                    'padding: 15px 20px;' +
-                    'border-radius: 8px;' +
-                    'box-shadow: 0 4px 12px rgba(0,0,0,0.15);' +
-                    'z-index: 1000;' +
-                    'animation: slideIn 0.3s ease;';
-                
-                notification.textContent = message;
-                
-                document.body.appendChild(notification);
-                
-                setTimeout(() => {
-                    notification.remove();
-                }, 3000);
-            }
+        <div class="feature-card">
+            <h3 style="color: #57F287; margin-bottom: 10px;">🔧 Настройки модерации</h3>
+            <p style="color: #b9bbbe;">Настройка автоматической модерации, фильтров и систем предупреждений.</p>
+        </div>
 
-            // Поиск транскриптов
-            document.getElementById('transcriptSearch')?.addEventListener('input', (e) => {
-                const searchTerm = e.target.value.toLowerCase();
-                const filtered = allTranscripts.filter(transcript => 
-                    transcript.id.toLowerCase().includes(searchTerm) ||
-                    (transcript.channelName && transcript.channelName.toLowerCase().includes(searchTerm)) ||
-                    (transcript.server && transcript.server.toLowerCase().includes(searchTerm))
-                );
-                displayTranscripts(filtered);
+        <div class="feature-card">
+            <h3 style="color: #57F287; margin-bottom: 10px;">📊 Статистика сервера</h3>
+            <p style="color: #b9bbbe;">Подробная статистика активности, сообщений и участников сервера.</p>
+        </div>
+
+        <div class="feature-card">
+            <h3 style="color: #57F287; margin-bottom: 10px;">🎮 Интеграция War Thunder</h3>
+            <p style="color: #b9bbbe;">Управление статистикой игроков и полков War Thunder.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function createTranscriptsPage(user, baseUrl) {
+    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
+        id,
+        channelName: data.ticketInfo?.channelName,
+        server: data.ticketInfo?.server,
+        messageCount: data.ticketInfo?.messageCount,
+        createdAt: new Date(data.createdAt).toLocaleDateString('ru-RU')
+    }));
+
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Транскрипты - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #2b2b2b;
+            padding: 20px;
+            border-right: 1px solid #40444b;
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .transcript-item {
+            background: #2b2b2b;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #40444b;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .transcript-info {
+            flex: 1;
+        }
+        .transcript-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            color: white;
+            font-size: 0.9rem;
+        }
+        .btn-primary {
+            background: #5865F2;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #40444b;
+            color: #b9bbbe;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: #36393f;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .nav-item:hover {
+            background: #40444b;
+        }
+        .nav-item.active {
+            background: #5865F2;
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: #ed4245;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #b9bbbe;
+        }
+    </style>
+</head>
+<body>
+    <!-- Боковая панель -->
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
+            </div>
+        </div>
+
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/about" class="nav-item">
+            <span class="nav-icon">📋</span>
+            Общие сведения
+        </a>
+        <a href="/transcripts" class="nav-item active">
+            <span class="nav-icon">📄</span>
+            Транскрипты
+        </a>
+        <a href="/commands" class="nav-item">
+            <span class="nav-icon">⚡</span>
+            Команды
+        </a>
+
+        <a href="/auth/logout" class="logout-btn">Выйти</a>
+    </div>
+
+    <!-- Основной контент -->
+    <div class="main-content">
+        <div style="margin-bottom: 30px;">
+            <h1>📄 Транскрипты</h1>
+            <p style="color: #b9bbbe;">Управление архивами бесед и сообщений</p>
+        </div>
+
+        ${transcripts.length === 0 ? `
+            <div class="empty-state">
+                <div style="font-size: 4rem; margin-bottom: 20px;">📝</div>
+                <h3>Транскрипты не найдены</h3>
+                <p>Создайте первый транскрипт командой -transcript в Discord</p>
+            </div>
+        ` : `
+            <div style="margin-bottom: 20px; color: #b9bbbe;">
+                Всего транскриптов: <strong>${transcripts.length}</strong>
+            </div>
+            
+            ${transcripts.map(transcript => `
+                <div class="transcript-item">
+                    <div class="transcript-info">
+                        <div style="font-weight: bold; margin-bottom: 5px;">
+                            📄 Транскрипт #${transcript.channelName || 'unknown'}
+                        </div>
+                        <div style="color: #b9bbbe; font-size: 0.9rem;">
+                            🏠 ${transcript.server || 'Unknown Server'} • 
+                            💬 ${transcript.messageCount || 0} сообщений • 
+                            📅 ${transcript.createdAt}
+                        </div>
+                    </div>
+                    <div class="transcript-actions">
+                        <a href="/transcript/${transcript.id}" class="btn btn-primary" target="_blank">
+                            👁️ Просмотр
+                        </a>
+                        <button class="btn btn-outline" onclick="copyTranscriptUrl('${transcript.id}')">
+                            📋 Ссылка
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        `}
+    </div>
+
+    <script>
+        function copyTranscriptUrl(id) {
+            const url = window.location.origin + '/transcript/' + id;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Ссылка скопирована в буфер обмена');
             });
-
-            // Загрузка данных при старте
-            loadBotStatus();
-            loadRecentActivity();
-            loadTranscripts();
-            setInterval(loadBotStatus, 30000); // Обновлять каждые 30 секунд
-            setInterval(loadRecentActivity, 60000); // Обновлять активность каждую минуту
-
-            // Добавляем стили для анимации уведомлений
-            const style = document.createElement('style');
-            style.textContent = 
-                '@keyframes slideIn {' +
-                'from { transform: translateX(100%); opacity: 0; }' +
-                'to { transform: translateX(0); opacity: 1; }' +
-                '}';
-            document.head.appendChild(style);
-        </script>
-    </body>
-    </html>
-    `;
+        }
+    </script>
+</body>
+</html>`;
+}
     
     res.send(html);
 });
