@@ -1997,22 +1997,17 @@ client.on('messageCreate', async message => {
 
 // Функция для получения базового URL
 function getBaseUrl() {
-    // Для Render.com
-    if (process.env.RENDER) {
-        return `https://haki.onrender.com`;
-    }
-    
-    // Для Railway (как fallback)
+    // Используем Railway URL автоматически
     if (process.env.RAILWAY_STATIC_URL) {
-        let railwayUrl = process.env.RAILWAY_STATIC_URL;
-        if (!railwayUrl.startsWith('http')) {
-            railwayUrl = 'https://' + railwayUrl;
+        let url = process.env.RAILWAY_STATIC_URL;
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = 'https://' + url;
         }
-        return railwayUrl;
+        return url;
     }
     
-    // Локальная разработка
-    return `http://localhost:${process.env.PORT || 3000}`;
+    // Fallback на конкретный URL
+    return 'https://haki-bot.up.railway.app';
 }
 // Запускаем сервер
 const server = app.listen(PORT, '0.0.0.0', () => {
