@@ -1824,6 +1824,303 @@ client.on('messageDelete', async (message) => {
     }
 });
 
+// ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ ДЛЯ КОНКРЕТНЫХ КАНАЛОВ ====================
+
+const autoDeleteSettings = new Map(); // Настройки для каждого сервера
+
+// Стандартные настройки
+const DEFAULT_SETTINGS = {
+    enabled: false,
+    delay: 10000, // 10 секунд
+    targetChannels: [], // Каналы где включено автоудаление (пусто = все каналы)
+    protectPings: true,
+    protectRoles: ['администратор', 'admin', 'moderator', 'модератор'],
+    protectChannels: ['important', 'важные', 'admin', 'команды'],
+    protectAttachments: true,
+    protectEmbeds: true,
+    protectBots: true
+};
+
+// Функция получения настроек для сервера
+function getSettings(guildId) {
+    if (!autoDeleteSettings.has(guildId)) {
+        autoDeleteSettings.set(guildId, { ...DEFAULT_SETTINGS });
+    }
+    return autoDeleteSettings.get(guildId);
+}
+
+// Функция проверки защиты сообщения
+function isMessageProtected(message, settings) {
+    const member = message.member;
+    
+    // Проверяем пинги
+    if (settings.protectPings) {
+        if (message.mentions.roles.size > 0) return true;
+        if (message.mentions.users.size > 0 && !message.mentions.users.has(message.author.id)) return true;
+        if (message.mentions.everyone) return true;
+    }
+    
+    // Проверяем роли
+    if (member && settings.protectRoles.length > 0) {
+        const hasProtectedRole = member.roles.cache.some(role =>
+            settings.protectRoles.some(protectedRole =>
+                role.name.toLowerCase().includes(protectedRole.toLowerCase())
+            )
+        );
+        if (hasProtectedRole) return true;
+    }
+    
+    // Проверяем защищенные каналы
+    if (settings.protectChannels.length > 0) {
+        const isProtectedChannel = settings.protectChannels.some(channelName =>
+            message.channel.name.toLowerCase().includes(channelName.toLowerCase())
+        );
+        if (isProtectedChannel) return true;
+    }
+    
+    // Проверяем вложения
+    if (settings.protectAttachments && message.attachments.size > 0) return true;
+    
+    // Проверяем эмбеды
+    if (settings.protectEmbeds && message.embeds.length > 0) return true;
+    
+    // Проверяем ботов
+    if (settings.protectBots && message.author.bot) return true;
+    
+    return false;
+}
+
+// Функция проверки, применяется ли автоудаление к этому каналу
+function shouldAutoDeleteInChannel(channel, settings) {
+    // Если не указаны целевые каналы - применяем ко всем
+    if (settings.targetChannels.length === 0) return true;
+    
+    // Проверяем, есть ли этот канал в списке целевых
+    return settings.targetChannels.some(targetChannel =>
+        channel.name.toLowerCase().includes(targetChannel.toLowerCase()) ||
+        channel.id === targetChannel
+    );
+}
+
+// Обработчик сообщений для автоматического удаления
+client.on('messageCreate', async (message) => {
+    if (message.system) return;
+    if (!message.guild) return; // Только серверные сообщения
+    
+    const settings = getSettings(message.guild.id);
+    if (!settings.enabled) return;
+    
+    // Проверяем, применяется ли автоудаление к этому каналу
+    if (!shouldAutoDeleteInChannel(message.channel, settings)) {
+        return;
+    }
+    
+    // Проверяем, защищено ли сообщение
+    if (isMessageProtected(message, settings)) {
+        return; // Не удаляем защищенные сообщения
+    }
+    
+    // Удаляем сообщение через указанную задержку
+    setTimeout(async () => {
+        try {
+            if (message.deletable) {
+                await message.delete();
+                console.log(`🗑️ [${message.guild.name}] #${message.channel.name} Удалено сообщение от ${message.author.tag}`);
+            }
+        } catch (error) {
+            console.error(`Ошибка удаления в ${message.guild.name}:`, error.message);
+        }
+    }, settings.delay);
+});
+
+// Команды управления автоматическим удалением
+client.on('messageCreate', async (message) => {
+    if (message.system) return;
+    if (!message.member.permissions.has('MANAGE_MESSAGES')) return;
+    
+    if (message.content.startsWith('-autodelete')) {
+        const args = message.content.split(' ');
+        const subcommand = args[1];
+        const settings = getSettings(message.guild.id);
+        
+        try {
+            switch(subcommand) {
+                case 'on':
+                    settings.enabled = true;
+                    await message.reply('✅ Автоматическое удаление включено');
+                    break;
+                    
+                case 'off':
+                    settings.enabled = false;
+                    await message.reply('❌ Автоматическое удаление выключено');
+                    break;
+                    
+                case 'delay':
+                    const delay = parseInt(args[2]);
+                    if (delay && delay >= 1000 && delay <= 60000) {
+                        settings.delay = delay;
+                        await message.reply(`⏰ Задержка установлена: ${delay}мс`);
+                    } else {
+                        await message.reply('❌ Укажите задержку от 1000 до 60000 мс');
+                    }
+                    break;
+                    
+                case 'addchannel':
+                    const channelToAdd = args.slice(2).join(' ');
+                    if (channelToAdd) {
+                        // Пробуем найти канал по упоминанию, ID или имени
+                        let targetChannel = message.mentions.channels.first();
+                        
+                        if (!targetChannel) {
+                            // Ищем по ID
+                            targetChannel = message.guild.channels.cache.get(channelToAdd);
+                        }
+                        
+                        if (!targetChannel) {
+                            // Ищем по имени
+                            targetChannel = message.guild.channels.cache.find(ch => 
+                                ch.name.toLowerCase().includes(channelToAdd.toLowerCase())
+                            );
+                        }
+                        
+                        if (targetChannel) {
+                            if (!settings.targetChannels.includes(targetChannel.id)) {
+                                settings.targetChannels.push(targetChannel.id);
+                                await message.reply(`✅ Добавлен канал для автоудаления: #${targetChannel.name}`);
+                            } else {
+                                await message.reply(`ℹ️ Канал #${targetChannel.name} уже в списке`);
+                            }
+                        } else {
+                            await message.reply('❌ Канал не найден. Укажите упоминание, ID или имя канала');
+                        }
+                    }
+                    break;
+                    
+                case 'removechannel':
+                    const channelToRemove = args.slice(2).join(' ');
+                    if (channelToRemove) {
+                        let targetChannel = message.mentions.channels.first();
+                        
+                        if (!targetChannel) {
+                            targetChannel = message.guild.channels.cache.get(channelToRemove);
+                        }
+                        
+                        if (!targetChannel) {
+                            targetChannel = message.guild.channels.cache.find(ch => 
+                                ch.name.toLowerCase().includes(channelToRemove.toLowerCase())
+                            );
+                        }
+                        
+                        if (targetChannel) {
+                            const index = settings.targetChannels.indexOf(targetChannel.id);
+                            if (index > -1) {
+                                settings.targetChannels.splice(index, 1);
+                                await message.reply(`✅ Удален канал из автоудаления: #${targetChannel.name}`);
+                            } else {
+                                await message.reply(`ℹ️ Канал #${targetChannel.name} не найден в списке`);
+                            }
+                        } else {
+                            await message.reply('❌ Канал не найден');
+                        }
+                    }
+                    break;
+                    
+                case 'listchannels':
+                    if (settings.targetChannels.length === 0) {
+                        await message.reply('📋 Список каналов для автоудаления пуст (применяется ко всем каналам)');
+                    } else {
+                        const channelList = settings.targetChannels.map(channelId => {
+                            const channel = message.guild.channels.cache.get(channelId);
+                            return channel ? `#${channel.name}` : `Неизвестный канал (${channelId})`;
+                        }).join('\n');
+                        
+                        await message.reply(`📋 Каналы с автоудалением:\n${channelList}`);
+                    }
+                    break;
+                    
+                case 'clearallchannels':
+                    settings.targetChannels = [];
+                    await message.reply('🗑️ Очищен список каналов. Автоудаление будет применяться ко всем каналам');
+                    break;
+                    
+                case 'addrole':
+                    const roleToAdd = args.slice(2).join(' ');
+                    if (roleToAdd) {
+                        settings.protectRoles.push(roleToAdd.toLowerCase());
+                        await message.reply(`✅ Добавлена защита для роли: ${roleToAdd}`);
+                    }
+                    break;
+                    
+                case 'addprotected':
+                    const protectedChannel = args.slice(2).join(' ');
+                    if (protectedChannel) {
+                        settings.protectChannels.push(protectedChannel.toLowerCase());
+                        await message.reply(`✅ Добавлена защита для канала: ${protectedChannel}`);
+                    }
+                    break;
+                    
+                case 'status':
+                    const status = settings.enabled ? '✅ ВКЛЮЧЕНО' : '❌ ВЫКЛЮЧЕНО';
+                    const targetChannelsInfo = settings.targetChannels.length === 0 ? 
+                        'Все каналы' : 
+                        settings.targetChannels.map(id => {
+                            const ch = message.guild.channels.cache.get(id);
+                            return ch ? `#${ch.name}` : id;
+                        }).join(', ');
+                    
+                    const configInfo = `
+**Настройки автоматического удаления:**
+${status}
+⏰ Задержка: ${settings.delay}мс
+🎯 Целевые каналы: ${targetChannelsInfo}
+
+**Защита:**
+🔒 Пинги: ${settings.protectPings ? '✅' : '❌'}
+🤖 Боты: ${settings.protectBots ? '✅' : '❌'}
+📎 Вложения: ${settings.protectAttachments ? '✅' : '❌'}
+🖼️ Эмбеды: ${settings.protectEmbeds ? '✅' : '❌'}
+
+**Защищенные роли:** ${settings.protectRoles.join(', ') || 'нет'}
+**Защищенные каналы:** ${settings.protectChannels.join(', ') || 'нет'}
+                    `;
+                    await message.reply(configInfo);
+                    break;
+                    
+                default:
+                    await message.reply(`
+**Команды автоматического удаления:**
+
+⚙️ **Основные команды:**
+\`-autodelete on\` - Включить
+\`-autodelete off\` - Выключить  
+\`-autodelete delay 5000\` - Установить задержку (мс)
+\`-autodelete status\` - Показать настройки
+
+🎯 **Управление каналами:**
+\`-autodelete addchannel #канал\` - Добавить канал для автоудаления
+\`-autodelete removechannel #канал\` - Удалить канал из автоудаления
+\`-autodelete listchannels\` - Показать список каналов
+\`-autodelete clearallchannels\` - Очистить список (применять ко всем)
+
+🛡️ **Защита:**
+\`-autodelete addrole роль\` - Добавить защищенную роль
+\`-autodelete addprotected канал\` - Добавить защищенный канал
+
+💡 **Пример:** \`-autodelete addchannel #чат\` - включить автоудаление только в канале #чат
+                    `);
+            }
+            
+            await message.delete().catch(() => {});
+            
+        } catch (error) {
+            console.error('Auto-delete command error:', error);
+            await message.reply('❌ Ошибка выполнения команды').then(msg => 
+                setTimeout(() => msg.delete(), 5000)
+            );
+        }
+    }
+});
+
 // Обработка команды -transcript
 client.on('messageCreate', async message => {
     if (message.system) return;
