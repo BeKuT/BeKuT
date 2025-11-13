@@ -1646,10 +1646,21 @@ function generateTranscriptId() {
 }
 // ==================== ИСПРАВЛЕННАЯ СИСТЕМА РАДИО С ПРАВИЛЬНОЙ ПРОВЕРКОЙ ====================
 const radioStations = {
-    'шансон': 'http://listen6.myradio24.com:9000/39978',
+    'шансон': 'http://radio.host1.best:8000/russkoe',
     'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3',
-    'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
-    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3'
+    'диффуз': 'http://stream.diffuz.com.ua:8000/diffuz',
+    'ретро': 'http://retro.hostingradio.ru:8014/retro-128.mp3',
+    'рок': 'http://rockradio.hostingradio.ru:8035/rock128.mp3',
+    'дорожное': 'http://dorognoe.hostingradio.ru:8000/radio',
+    'русское': 'http://radio.host1.best:8000/russkoe',
+    'наше': 'http://nashe1.hostingradio.ru:80/nashe-128.mp3',
+    'energy': 'http://ic7.101.ru:8000/v5_1',
+    'монте карло': 'http://montecarlo.hostingradio.ru:8040/montecarlo128.mp3',
+    'новое': 'http://ic6.101.ru:8000/v5_1',
+    'меломан': 'http://meloman.hostingradio.ru:8055/meloman128.mp3',
+    'джем': 'http://jfm1.hostingradio.ru:14536/jfm-128.mp3',
+    'релакс': 'http://relaxradio.hostingradio.ru:8055/relax128.mp3',
+    'юмор': 'http://humorfm.hostingradio.ru:8000/humor128.mp3'
 };
 
 const radioConnections = new Map();
