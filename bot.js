@@ -1644,169 +1644,139 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-// ==================== ПРОСТАЯ РАБОЧАЯ СИСТЕМА РАДИО ====================
-// Простые рабочие станции
+// ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
+
+const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
+
+// Проверенные рабочие радиостанции
 const radioStations = {
-    'шансон': 'http://radio.host1.best:8000/russkoe',
-    'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
-    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3',
     'нвс': 'http://icecast.nvc.ru:8000/nvc.mp3',
-    'диффуз': 'http://stream.diffuz.com.ua:8000/diffuz'
+    'шансон': 'http://radio.host1.best:8000/russkoe', 
+    'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
+    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3'
 };
 
-const radioConnections = new Map();
+const players = new Map();
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
 
     const args = message.content.split(' ');
-    const command = args[0].toLowerCase();
+    
+    // Команда пинг
+    if (message.content === '-ping') {
+        await message.reply('🏓 Понг! Бот работает.');
+        return;
+    }
 
-    if (command === '-радио') {
-        const action = args[1]?.toLowerCase();
+    // Включить радио
+    if (message.content.startsWith('-play')) {
+        const station = args[1] || 'нвс';
+        
+        if (!message.member?.voice?.channel) {
+            return message.reply('❌ Залетай в войс канал!');
+        }
 
+        const voiceChannel = message.member.voice.channel;
+        
         try {
-            switch(action) {
-                case 'play':
-                    const stationName = args.slice(2).join(' ').toLowerCase();
-                    
-                    if (!stationName) {
-                        return message.reply('🎧 **Укажите станцию:** шансон, ретро, рок, нвс, диффуз');
-                    }
-
-                    // Находим станцию
-                    const stationKey = Object.keys(radioStations).find(key => 
-                        key.toLowerCase().includes(stationName)
-                    );
-                    
-                    if (!stationKey) {
-                        return message.reply('❌ **Станция не найдена!** Используйте `-радио список`');
-                    }
-
-                    // Простая проверка голосового канала
-                    if (!message.member?.voice?.channel) {
-                        return message.reply('🎤 **Зайдите в голосовой канал!**');
-                    }
-
-                    const voiceChannel = message.member.voice.channel;
-
-                    // Останавливаем предыдущее радио
-                    if (radioConnections.has(message.guild.id)) {
-                        const oldData = radioConnections.get(message.guild.id);
-                        oldData.player.stop();
-                        oldData.connection.destroy();
-                    }
-
-                    try {
-                        console.log(`🔊 Пробуем подключиться к ${voiceChannel.name}`);
-
-                        // ПРОСТОЕ ПОДКЛЮЧЕНИЕ БЕЗ СЛОЖНЫХ ПРОВЕРОК
-                        const connection = joinVoiceChannel({
-                            channelId: voiceChannel.id,
-                            guildId: message.guild.id,
-                            adapterCreator: message.guild.voiceAdapterCreator,
-                        });
-
-                        const player = createAudioPlayer();
-                        const resource = createAudioResource(radioStations[stationKey], {
-                            inputType: StreamType.Arbitrary
-                        });
-
-                        // Простые обработчики
-                        player.on('stateChange', (oldState, newState) => {
-                            console.log(`🎵 Состояние: ${oldState.status} -> ${newState.status}`);
-                        });
-
-                        player.on('error', (error) => {
-                            console.log('❌ Ошибка воспроизведения:', error.message);
-                        });
-
-                        connection.on('error', (error) => {
-                            console.log('❌ Ошибка подключения:', error.message);
-                        });
-
-                        // Запускаем
-                        player.play(resource);
-                        connection.subscribe(player);
-
-                        // Сохраняем
-                        radioConnections.set(message.guild.id, {
-                            connection,
-                            player,
-                            station: stationKey
-                        });
-
-                        await message.reply(`🎶 **Радио "${stationKey}" запущено!**`);
-
-                    } catch (error) {
-                        console.error('Ошибка:', error);
-                        message.reply('❌ **Не удалось подключиться.** Проверьте права бота!');
-                    }
-                    break;
-
-                case 'стоп':
-                    if (radioConnections.has(message.guild.id)) {
-                        const data = radioConnections.get(message.guild.id);
-                        data.player.stop();
-                        data.connection.destroy();
-                        radioConnections.delete(message.guild.id);
-                        message.reply('⏹️ **Радио остановлено**');
-                    } else {
-                        message.reply('❌ **Радио не играет**');
-                    }
-                    break;
-
-                case 'список':
-                    const list = Object.keys(radioStations).map(s => `• **${s}**`).join('\n');
-                    message.reply(`📻 **Станции:**\n${list}`);
-                    break;
-
-                case 'debug':
-                    // Отладочная информация
-                    const debugInfo = {
-                        inVoice: !!message.member?.voice?.channel,
-                        voiceChannel: message.member?.voice?.channel?.name,
-                        hasConnection: radioConnections.has(message.guild.id),
-                        botInVoice: message.guild.members.me?.voice?.channel?.name
-                    };
-                    
-                    message.reply(`🔧 **Debug:**\nВ канале: ${debugInfo.inVoice}\nКанал: ${debugInfo.voiceChannel}\nБот в канале: ${debugInfo.botInVoice}\nСоединение: ${debugInfo.hasConnection}`);
-                    break;
-
-                default:
-                    message.reply(`📻 **Команды:**\n-радио play [станция]\n-радио стоп\n-радио список\n-радио debug`);
+            // Останавливаем предыдущее воспроизведение
+            if (players.has(message.guild.id)) {
+                players.get(message.guild.id).stop();
+                players.delete(message.guild.id);
             }
+
+            // Подключаемся к каналу
+            const connection = joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId: message.guild.id,
+                adapterCreator: message.guild.voiceAdapterCreator,
+            });
+
+            // Создаем плеер и ресурс
+            const player = createAudioPlayer();
+            const resource = createAudioResource(radioStations[station], {
+                inlineVolume: true
+            });
+
+            // Настраиваем громкость
+            resource.volume.setVolume(0.5);
+
+            // Запускаем воспроизведение
+            player.play(resource);
+            connection.subscribe(player);
+
+            // Сохраняем плеер
+            players.set(message.guild.id, player);
+
+            await message.reply(`🔊 Врубил **${station}** в канале ${voiceChannel.name}`);
+
+            // Логируем статус
+            player.on('stateChange', (oldState, newState) => {
+                console.log(`Радио: ${oldState.status} -> ${newState.status}`);
+            });
+
         } catch (error) {
             console.error('Ошибка:', error);
-            message.reply('❌ **Ошибка команды**');
+            await message.reply('❌ Чет не пашет радио...');
         }
+        return;
     }
-});
 
-// Тестовая команда
-client.on('messageCreate', async (message) => {
-    if (message.content === '-тестрадио') {
-        if (!message.member?.voice?.channel) {
-            return message.reply('❌ Сначала зайдите в голосовой канал!');
+    // Выключить радио
+    if (message.content === '-stop') {
+        if (players.has(message.guild.id)) {
+            players.get(message.guild.id).stop();
+            players.delete(message.guild.id);
+            await message.reply('⏹️ Вырубил радио');
+        } else {
+            await message.reply('❌ Радио и так не играет');
         }
-        
+        return;
+    }
+
+    // Список станций
+    if (message.content === '-stations') {
+        await message.reply(`📻 **Станции:** ${Object.keys(radioStations).join(', ')}`);
+        return;
+    }
+
+    // Тест подключения
+    if (message.content === '-testvoice') {
+        if (!message.member?.voice?.channel) {
+            return message.reply('❌ Зайди в войс!');
+        }
+
         try {
             const connection = joinVoiceChannel({
                 channelId: message.member.voice.channel.id,
                 guildId: message.guild.id,
                 adapterCreator: message.guild.voiceAdapterCreator,
             });
+
+            await message.reply('✅ Подключился к каналу!');
             
-            message.reply('✅ **Бот успешно подключился к каналу!**');
-            
-            // Отключаемся через 5 секунд
+            // Отключаемся через 3 секунды
             setTimeout(() => {
                 connection.destroy();
-            }, 5000);
-            
+            }, 3000);
+
         } catch (error) {
-            message.reply(`❌ **Ошибка подключения:** ${error.message}`);
+            await message.reply(`❌ Ошибка: ${error.message}`);
+        }
+    }
+});
+
+// Автоотключение при пустом канале
+client.on('voiceStateUpdate', (oldState, newState) => {
+    if (oldState.channel && !newState.channel) {
+        const userCount = oldState.channel.members.filter(m => !m.user.bot).size;
+        if (userCount === 0 && players.has(oldState.guild.id)) {
+            setTimeout(() => {
+                players.get(oldState.guild.id).stop();
+                players.delete(oldState.guild.id);
+            }, 10000);
         }
     }
 });
