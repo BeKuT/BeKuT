@@ -1644,17 +1644,27 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-// ==================== ПРОСТАЯ И НАДЕЖНАЯ СИСТЕМА РАДИО ====================
+// ==================== СИСТЕМА РАДИО С РЕАЛЬНЫМИ ДАННЫМИ ====================
 
 const radioStations = {
     'шансон': 'http://listen6.myradio24.com:9000/39978',
     'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3',
     'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
-    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3',
-    'нвс': 'http://icecast.nvc.ru:8000/nvc.mp3'
+    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3'
 };
 
 const radioConnections = new Map();
+
+// Функция для получения РЕАЛЬНОГО состояния голосового канала
+function getRealVoiceState(guild, userId) {
+    // Используем голосовые состояния сервера - они обновляются в реальном времени
+    const voiceState = guild.voiceStates.cache.get(userId);
+    return {
+        inChannel: !!voiceState?.channel,
+        channel: voiceState?.channel,
+        channelName: voiceState?.channel?.name || 'Не в канале'
+    };
+}
 
 client.on('messageCreate', async (message) => {
     if (message.system) return;
@@ -1675,20 +1685,22 @@ client.on('messageCreate', async (message) => {
                         return await message.reply('❌ Укажите станцию! `-радио play шансон`');
                     }
                     
-                    // ПРОСТАЯ ПРОВЕРКА - используем голосовое состояние из сообщения
-                    if (!message.member?.voice?.channel) {
+                    // ПОЛУЧАЕМ РЕАЛЬНЫЕ ДАННЫЕ из voiceStates
+                    const realVoiceState = getRealVoiceState(message.guild, message.author.id);
+                    
+                    if (!realVoiceState.inChannel) {
                         return await message.reply({
                             embeds: [
                                 new EmbedBuilder()
                                     .setTitle('❌ ЗАЙДИТЕ В КАНАЛ')
                                     .setColor(0xED4245)
-                                    .setDescription('**Вы не в голосовом канале!**\n\nЧтобы радио работало:\n1. **Зайдите в любой голосовой канал**\n2. **Убедитесь что видите зеленый кружок рядом с ником**\n3. **Отправьте команду снова**')
+                                    .setDescription('**Вы не в голосовом канале!**\n\nЧтобы радио работало:\n1. **Зайдите в любой голосовой канал**\n2. **Подождите 3-5 секунд**\n3. **Отправьте команду снова**\n\n💡 *После входа в канал подождите пока появится зеленый кружок*')
                                     .setTimestamp()
                             ]
                         });
                     }
                     
-                    const voiceChannel = message.member.voice.channel;
+                    const voiceChannel = realVoiceState.channel;
                     const stationKey = Object.keys(radioStations).find(key => 
                         key.toLowerCase().includes(stationName)
                     );
@@ -1735,7 +1747,6 @@ client.on('messageCreate', async (message) => {
                         
                         player.on('error', error => {
                             console.error('❌ Ошибка плеера:', error);
-                            message.channel.send('❌ Ошибка радио. Попробуйте другую станцию.').catch(() => {});
                         });
                         
                         player.play(resource);
@@ -1753,7 +1764,7 @@ client.on('messageCreate', async (message) => {
                                 new EmbedBuilder()
                                     .setTitle('🎶 РАДИО ЗАПУЩЕНО')
                                     .setColor(0x57F287)
-                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nЕсли музыка не играет через 10 секунд, попробуйте другую станцию.`)
+                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nНаслаждайтесь прослушиванием! 🎵`)
                                     .setTimestamp()
                             ]
                         });
@@ -1774,7 +1785,7 @@ client.on('messageCreate', async (message) => {
                             new EmbedBuilder()
                                 .setTitle('📻 ДОСТУПНЫЕ СТАНЦИИ')
                                 .setColor(0x5865F2)
-                                .setDescription(stationsList + '\n\n**💡 Совет:** Если одна станция не работает, попробуйте другую!')
+                                .setDescription(stationsList)
                                 .setTimestamp()
                         ]
                     });
@@ -1793,35 +1804,28 @@ client.on('messageCreate', async (message) => {
                     await message.reply('⏹️ Радио остановлено!');
                     break;
                     
-                case 'проверка':
-                    // Простая проверка состояния
-                    const simpleCheck = {
-                        userInVoice: !!message.member?.voice?.channel,
-                        userChannel: message.member?.voice?.channel?.name || 'Нет',
-                        botInVoice: message.guild.members.me?.voice?.channel?.name || 'Нет',
-                        radioPlaying: radioConnections.has(message.guild.id)
-                    };
+                case 'реальнаяпроверка':
+                    // РЕАЛЬНАЯ проверка состояния
+                    const userRealState = getRealVoiceState(message.guild, message.author.id);
+                    const botRealState = getRealVoiceState(message.guild, client.user.id);
                     
                     await message.reply({
                         embeds: [
                             new EmbedBuilder()
-                                .setTitle('🔍 ПРОВЕРКА СОСТОЯНИЯ')
+                                .setTitle('🔍 РЕАЛЬНАЯ ПРОВЕРКА')
                                 .setColor(0x5865F2)
                                 .setDescription(`
-**Ваше состояние:**
-• В голосовом канале: ${simpleCheck.userInVoice ? '✅ Да' : '❌ Нет'}
-• Канал: ${simpleCheck.userChannel}
+**Ваше РЕАЛЬНОЕ состояние:**
+• В голосовом канале: ${userRealState.inChannel ? '✅ Да' : '❌ Нет'}
+• Канал: ${userRealState.channelName}
 
 **Состояние бота:**
-• В голосовом канале: ${simpleCheck.botInVoice !== 'Нет' ? '✅ Да' : '❌ Нет'} 
-• Канал: ${simpleCheck.botInVoice}
+• В голосовом канале: ${botRealState.inChannel ? '✅ Да' : '❌ Нет'} 
+• Канал: ${botRealState.channelName}
 
-**Радио:** ${simpleCheck.radioPlaying ? '✅ Играет' : '❌ Не играет'}
+**Радио:** ${radioConnections.has(message.guild.id) ? '✅ Играет' : '❌ Не играет'}
 
-**💡 Если бот не видит вас:**
-1. Убедитесь что зашли в канал
-2. Видите зеленый кружок у своего ника
-3. Попробуйте выйти/зайти в канал
+**💡 Эта проверка использует реальные данные Discord**
                                 `)
                                 .setTimestamp()
                         ]
@@ -1838,17 +1842,15 @@ client.on('messageCreate', async (message) => {
 **-радио play [станция]** - Включить радио
 **-радио стоп** - Выключить радио  
 **-радио список** - Все станции
-**-радио проверка** - Простая диагностика
+**-радио реальнаяпроверка** - Реальная диагностика
 
 **💡 Как использовать:**
 1. **Зайдите в голосовой канал**
-2. **Убедитесь что видите зеленый кружок**
-3. **Напишите \`-радио play ретро\`**
+2. **Подождите 5 секунд**
+3. **Напишите \`-радио реальнаяпроверка\`** чтобы убедиться
+4. **Напишите \`-радио play ретро\`**
 
-**Примеры:**
-\`-радио play шансон\`
-\`-радио play ретро\`
-\`-радио play рок\`
+**Пример:** \`-радио play ретро\`
                                 `)
                                 .setTimestamp()
                         ]
@@ -1861,11 +1863,11 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Простой обработчик для теста
+// ТЕСТ С РЕАЛЬНЫМИ ДАННЫМИ
 client.on('messageCreate', async (message) => {
-    if (message.content === '-тест') {
-        const inVoice = !!message.member?.voice?.channel;
-        await message.reply(`✅ Бот работает! Вы в голосовом канале: ${inVoice ? 'ДА' : 'НЕТ'}`);
+    if (message.content === '-реальныйтест') {
+        const realState = getRealVoiceState(message.guild, message.author.id);
+        await message.reply(`🔍 РЕАЛЬНЫЕ ДАННЫЕ: Вы в голосовом канале: ${realState.inChannel ? '✅ ДА' : '❌ НЕТ'} (Канал: ${realState.channelName})`);
     }
 });
 // ==================== СИСТЕМА ПЕРЕВОДА ====================
