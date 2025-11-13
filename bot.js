@@ -1824,24 +1824,22 @@ client.on('messageDelete', async (message) => {
     }
 });
 
-// ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ ТОЛЬКО ПИНГОВ ====================
+// ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ С ИСКЛЮЧЕНИЕМ РОЛИ ====================
 
 const autoDeleteSettings = new Map();
 
-// Стандартные настройки - теперь удаляем ВСЁ кроме пингов
+// Стандартные настройки
 const DEFAULT_SETTINGS = {
     enabled: false,
     delay: 5000, // 5 секунд
     targetChannels: [], // Каналы где включено автоудаление
-    // Убрали все защиты кроме пингов
-    protectPings: true, // Единственное что сохраняем - пинги
-    protectRoles: [], // Больше не защищаем роли
-    protectChannels: [], // Больше не защищаем каналы
-    protectAttachments: false, // Удаляем картинки, гифки, файлы
-    protectEmbeds: false, // Удаляем эмбеды
-    protectBots: false, // Удаляем сообщения ботов
-    protectStickers: false, // Удаляем стикеры
-    protectEmojis: false // Удаляем эмодзи
+    protectPings: true, // Сохраняем пинги
+    exemptRoles: [], // Роли которые ИСКЛЮЧАЮТСЯ из автоудаления (их сообщения не удаляются)
+    protectAttachments: false,
+    protectEmbeds: false,
+    protectBots: false,
+    protectStickers: false,
+    protectEmojis: false
 };
 
 // Функция получения настроек для сервера
@@ -1852,28 +1850,32 @@ function getSettings(guildId) {
     return autoDeleteSettings.get(guildId);
 }
 
-// Функция проверки защиты сообщения - теперь ТОЛЬКО пинги
+// Функция проверки защиты сообщения
 function isMessageProtected(message, settings) {
-    // Сохраняем ТОЛЬКО сообщения с пингами
+    const member = message.member;
+    
+    // 1. Проверяем пинги - сохраняем
     if (settings.protectPings) {
-        // Пинги ролей
         if (message.mentions.roles.size > 0) return true;
-        
-        // Пинги пользователей (кроме автора)
         if (message.mentions.users.size > 0 && !message.mentions.users.has(message.author.id)) return true;
-        
-        // Пинг @everyone или @here
         if (message.mentions.everyone) return true;
     }
     
-    // ВСЁ остальное удаляем:
-    // - Сообщения с картинками, гифками, файлами
-    // - Сообщения со стикерами
-    // - Сообщения с эмодзи
-    // - Сообщения от ботов
-    // - Сообщения с эмбедами
-    // - Сообщения от любых ролей
+    // 2. Проверяем исключенные роли - сохраняем ВСЁ от этих ролей
+    if (member && settings.exemptRoles.length > 0) {
+        const hasExemptRole = member.roles.cache.some(role =>
+            settings.exemptRoles.some(exemptRole =>
+                role.name.toLowerCase().includes(exemptRole.toLowerCase()) ||
+                role.id === exemptRole
+            )
+        );
+        if (hasExemptRole) {
+            console.log(`🛡️ [${message.guild.name}] Сообщение защищено (исключенная роль): ${message.author.tag}`);
+            return true;
+        }
+    }
     
+    // 3. ВСЁ остальное удаляем
     return false;
 }
 
@@ -1899,9 +1901,8 @@ client.on('messageCreate', async (message) => {
         return;
     }
     
-    // Проверяем, защищено ли сообщение (ТОЛЬКО пинги)
+    // Проверяем, защищено ли сообщение (пинги или исключенные роли)
     if (isMessageProtected(message, settings)) {
-        console.log(`🔒 [${message.guild.name}] #${message.channel.name} Сохранено (пинг): ${message.author.tag}`);
         return;
     }
     
@@ -1909,9 +1910,8 @@ client.on('messageCreate', async (message) => {
     const contentPreview = message.content ? message.content.substring(0, 50) + '...' : 'пустое сообщение';
     const attachmentsInfo = message.attachments.size > 0 ? ` [${message.attachments.size} вложений]` : '';
     const stickersInfo = message.stickers.size > 0 ? ` [${message.stickers.size} стикеров]` : '';
-    const embedsInfo = message.embeds.length > 0 ? ` [${message.embeds.length} эмбедов]` : '';
     
-    console.log(`🗑️ [${message.guild.name}] #${message.channel.name} Удаляем: ${message.author.tag} - ${contentPreview}${attachmentsInfo}${stickersInfo}${embedsInfo}`);
+    console.log(`🗑️ [${message.guild.name}] #${message.channel.name} Удаляем: ${message.author.tag} - ${contentPreview}${attachmentsInfo}${stickersInfo}`);
     
     // Удаляем сообщение через указанную задержку
     setTimeout(async () => {
@@ -1925,7 +1925,7 @@ client.on('messageCreate', async (message) => {
     }, settings.delay);
 });
 
-// Команды управления автоматическим удалением (упрощенная версия)
+// Команды управления автоматическим удалением
 client.on('messageCreate', async (message) => {
     if (message.system) return;
     if (!message.member.permissions.has('MANAGE_MESSAGES')) return;
@@ -1939,21 +1939,68 @@ client.on('messageCreate', async (message) => {
             switch(subcommand) {
                 case 'on':
                     settings.enabled = true;
-                    await message.reply('✅ Автоматическое удаление ВКЛЮЧЕНО\n🗑️ Будут удаляться: все сообщения, стикеры, эмодзи, картинки, гифки\n🔒 Сохраняются: только пинги (@упоминания)');
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('✅ АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ ВКЛЮЧЕНО')
+                                .setColor(0x57F287)
+                                .setDescription(`
+**🗑️ Теперь удаляются:**
+• Все обычные сообщения
+• Стикеры, эмодзи, картинки
+• Гифки, файлы, эмбеды
+• Сообщения ботов
+
+**🔒 Сохраняются:**
+• Сообщения с пингами (@упоминания)
+• Сообщения от исключенных ролей
+
+**💡 Используйте команды:**
+\`-autodelete addchannel #канал\` - выбрать каналы
+\`-autodelete addrole @роль\` - добавить исключения
+\`-autodelete status\` - проверить настройки
+                                `)
+                                .setTimestamp()
+                        ]
+                    });
                     break;
                     
                 case 'off':
                     settings.enabled = false;
-                    await message.reply('❌ Автоматическое удаление ВЫКЛЮЧЕНО');
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('❌ АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ ВЫКЛЮЧЕНО')
+                                .setColor(0xED4245)
+                                .setDescription('Система автоматического удаления сообщений отключена.')
+                                .setTimestamp()
+                        ]
+                    });
                     break;
                     
                 case 'delay':
                     const delay = parseInt(args[2]);
                     if (delay && delay >= 1000 && delay <= 30000) {
                         settings.delay = delay;
-                        await message.reply(`⏰ Задержка установлена: ${delay}мс`);
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('⏰ ЗАДЕРЖКА УСТАНОВЛЕНА')
+                                    .setColor(0x5865F2)
+                                    .setDescription(`Сообщения будут удаляться через **${delay}мс** после отправки.`)
+                                    .setTimestamp()
+                            ]
+                        });
                     } else {
-                        await message.reply('❌ Укажите задержку от 1000 до 30000 мс');
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('❌ ОШИБКА')
+                                    .setColor(0xED4245)
+                                    .setDescription('Укажите задержку от **1000** до **30000** мс.')
+                                    .setTimestamp()
+                            ]
+                        });
                     }
                     break;
                     
@@ -1975,12 +2022,36 @@ client.on('messageCreate', async (message) => {
                         if (targetChannel) {
                             if (!settings.targetChannels.includes(targetChannel.id)) {
                                 settings.targetChannels.push(targetChannel.id);
-                                await message.reply(`✅ Добавлен канал для автоудаления: #${targetChannel.name}`);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('✅ КАНАЛ ДОБАВЛЕН')
+                                            .setColor(0x57F287)
+                                            .setDescription(`Автоудаление включено для канала: **#${targetChannel.name}**`)
+                                            .setTimestamp()
+                                    ]
+                                });
                             } else {
-                                await message.reply(`ℹ️ Канал #${targetChannel.name} уже в списке`);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('ℹ️ КАНАЛ УЖЕ В СПИСКЕ')
+                                            .setColor(0xFEE75C)
+                                            .setDescription(`Канал **#${targetChannel.name}** уже в списке автоудаления.`)
+                                            .setTimestamp()
+                                    ]
+                                });
                             }
                         } else {
-                            await message.reply('❌ Канал не найден. Укажите упоминание, ID или имя канала');
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('❌ КАНАЛ НЕ НАЙДЕН')
+                                        .setColor(0xED4245)
+                                        .setDescription('Укажите упоминание канала, его ID или имя.')
+                                        .setTimestamp()
+                                ]
+                            });
                         }
                     }
                     break;
@@ -2004,43 +2075,246 @@ client.on('messageCreate', async (message) => {
                             const index = settings.targetChannels.indexOf(targetChannel.id);
                             if (index > -1) {
                                 settings.targetChannels.splice(index, 1);
-                                await message.reply(`✅ Удален канал из автоудаления: #${targetChannel.name}`);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('✅ КАНАЛ УДАЛЕН')
+                                            .setColor(0x57F287)
+                                            .setDescription(`Канал **#${targetChannel.name}** удален из списка автоудаления.`)
+                                            .setTimestamp()
+                                    ]
+                                });
                             } else {
-                                await message.reply(`ℹ️ Канал #${targetChannel.name} не найден в списке`);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('ℹ️ КАНАЛ НЕ НАЙДЕН')
+                                            .setColor(0xFEE75C)
+                                            .setDescription(`Канал **#${targetChannel.name}** не найден в списке автоудаления.`)
+                                            .setTimestamp()
+                                    ]
+                                });
                             }
                         } else {
-                            await message.reply('❌ Канал не найден');
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('❌ КАНАЛ НЕ НАЙДЕН')
+                                        .setColor(0xED4245)
+                                        .setDescription('Канал не найден.')
+                                        .setTimestamp()
+                                ]
+                            });
                         }
                     }
                     break;
                     
                 case 'listchannels':
                     if (settings.targetChannels.length === 0) {
-                        await message.reply('📋 Список каналов для автоудаления пуст (применяется ко всем каналам)');
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('📋 СПИСОК КАНАЛОВ')
+                                    .setColor(0x5865F2)
+                                    .setDescription('Список каналов для автоудаления пуст.\nАвтоудаление применяется ко **всем каналам**.')
+                                    .setTimestamp()
+                            ]
+                        });
                     } else {
                         const channelList = settings.targetChannels.map(channelId => {
                             const channel = message.guild.channels.cache.get(channelId);
-                            return channel ? `#${channel.name}` : `Неизвестный канал (${channelId})`;
+                            return channel ? `• #${channel.name}` : `• Неизвестный канал (${channelId})`;
                         }).join('\n');
                         
-                        await message.reply(`📋 Каналы с автоудалением:\n${channelList}`);
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('📋 КАНАЛЫ С АВТОУДАЛЕНИЕМ')
+                                    .setColor(0x5865F2)
+                                    .setDescription(channelList)
+                                    .setTimestamp()
+                            ]
+                        });
                     }
                     break;
                     
                 case 'clearallchannels':
                     settings.targetChannels = [];
-                    await message.reply('🗑️ Очищен список каналов. Автоудаление будет применяться ко всем каналам');
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('🗑️ СПИСОК ОЧИЩЕН')
+                                .setColor(0x57F287)
+                                .setDescription('Очищен список каналов.\nАвтоудаление будет применяться ко **всем каналам**.')
+                                .setTimestamp()
+                        ]
+                    });
+                    break;
+                    
+                // КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ РОЛЯМИ
+                case 'addrole':
+                    const roleToAdd = args.slice(2).join(' ');
+                    if (roleToAdd) {
+                        let targetRole = message.mentions.roles.first();
+                        
+                        if (!targetRole) {
+                            targetRole = message.guild.roles.cache.get(roleToAdd);
+                        }
+                        
+                        if (!targetRole) {
+                            targetRole = message.guild.roles.cache.find(role => 
+                                role.name.toLowerCase().includes(roleToAdd.toLowerCase())
+                            );
+                        }
+                        
+                        if (targetRole) {
+                            if (!settings.exemptRoles.includes(targetRole.id)) {
+                                settings.exemptRoles.push(targetRole.id);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('🛡️ РОЛЬ ДОБАВЛЕНА')
+                                            .setColor(0x57F287)
+                                            .setDescription(`Добавлена исключенная роль: **${targetRole.name}**\n\n💡 Сообщения от этой роли **НЕ будут удаляться**.`)
+                                            .setTimestamp()
+                                    ]
+                                });
+                            } else {
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('ℹ️ РОЛЬ УЖЕ В СПИСКЕ')
+                                            .setColor(0xFEE75C)
+                                            .setDescription(`Роль **${targetRole.name}** уже в списке исключений.`)
+                                            .setTimestamp()
+                                    ]
+                                });
+                            }
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('❌ РОЛЬ НЕ НАЙДЕНА')
+                                        .setColor(0xED4245)
+                                        .setDescription('Укажите упоминание роли, её ID или имя.')
+                                        .setTimestamp()
+                                ]
+                            });
+                        }
+                    }
+                    break;
+                    
+                case 'removerole':
+                    const roleToRemove = args.slice(2).join(' ');
+                    if (roleToRemove) {
+                        let targetRole = message.mentions.roles.first();
+                        
+                        if (!targetRole) {
+                            targetRole = message.guild.roles.cache.get(roleToRemove);
+                        }
+                        
+                        if (!targetRole) {
+                            targetRole = message.guild.roles.cache.find(role => 
+                                role.name.toLowerCase().includes(roleToRemove.toLowerCase())
+                            );
+                        }
+                        
+                        if (targetRole) {
+                            const index = settings.exemptRoles.indexOf(targetRole.id);
+                            if (index > -1) {
+                                settings.exemptRoles.splice(index, 1);
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('✅ РОЛЬ УДАЛЕНА')
+                                            .setColor(0x57F287)
+                                            .setDescription(`Удалена исключенная роль: **${targetRole.name}**\n\n💡 Сообщения от этой роли теперь **будут удаляться**.`)
+                                            .setTimestamp()
+                                    ]
+                                });
+                            } else {
+                                await message.reply({
+                                    embeds: [
+                                        new EmbedBuilder()
+                                            .setTitle('ℹ️ РОЛЬ НЕ НАЙДЕНА')
+                                            .setColor(0xFEE75C)
+                                            .setDescription(`Роль **${targetRole.name}** не найдена в списке исключений.`)
+                                            .setTimestamp()
+                                    ]
+                                });
+                            }
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('❌ РОЛЬ НЕ НАЙДЕНА')
+                                        .setColor(0xED4245)
+                                        .setDescription('Роль не найдена.')
+                                        .setTimestamp()
+                                ]
+                            });
+                        }
+                    }
+                    break;
+                    
+                case 'listroles':
+                    if (settings.exemptRoles.length === 0) {
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('🛡️ ИСКЛЮЧЕННЫЕ РОЛИ')
+                                    .setColor(0x5865F2)
+                                    .setDescription('Список исключенных ролей пуст.')
+                                    .setTimestamp()
+                            ]
+                        });
+                    } else {
+                        const roleList = settings.exemptRoles.map(roleId => {
+                            const role = message.guild.roles.cache.get(roleId);
+                            return role ? `• ${role.name}` : `• Неизвестная роль (${roleId})`;
+                        }).join('\n');
+                        
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('🛡️ ИСКЛЮЧЕННЫЕ РОЛИ')
+                                    .setColor(0x5865F2)
+                                    .setDescription(`Роли, чьи сообщения **НЕ удаляются**:\n\n${roleList}`)
+                                    .setTimestamp()
+                            ]
+                        });
+                    }
+                    break;
+                    
+                case 'clearroles':
+                    settings.exemptRoles = [];
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('🗑️ СПИСОК РОЛЕЙ ОЧИЩЕН')
+                                .setColor(0x57F287)
+                                .setDescription('Очищен список исключенных ролей.')
+                                .setTimestamp()
+                        ]
+                    });
                     break;
                     
                 case 'test':
-                    // Тестовая команда для проверки
                     const testMessage = await message.channel.send('🧪 Тестовое сообщение для проверки автоудаления');
                     setTimeout(async () => {
                         if (testMessage.deletable) {
                             await testMessage.delete();
                         }
                     }, 3000);
-                    await message.reply('🧪 Тест запущен. Сообщение удалится через 3 секунды если автоудаление работает');
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('🧪 ТЕСТ ЗАПУЩЕН')
+                                .setColor(0x5865F2)
+                                .setDescription('Тестовое сообщение удалится через 3 секунды если автоудаление работает.')
+                                .setTimestamp()
+                        ]
+                    });
                     break;
                     
                 case 'status':
@@ -2052,44 +2326,51 @@ client.on('messageCreate', async (message) => {
                             return ch ? `#${ch.name}` : id;
                         }).join(', ');
                     
-                    const configInfo = `
-**Настройки автоматического удаления:**
-${status}
-⏰ Задержка: ${settings.delay}мс
-🎯 Каналы: ${targetChannelsInfo}
+                    const exemptRolesInfo = settings.exemptRoles.length === 0 ? 
+                        'Нет' : 
+                        settings.exemptRoles.map(id => {
+                            const role = message.guild.roles.cache.get(id);
+                            return role ? role.name : id;
+                        }).join(', ');
+                    
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('⚡ СТАТУС АВТОМАТИЧЕСКОГО УДАЛЕНИЯ')
+                                .setColor(settings.enabled ? 0x57F287 : 0xED4245)
+                                .setDescription(`
+**${status}**
+⏰ **Задержка:** ${settings.delay}мс
+🎯 **Каналы:** ${targetChannelsInfo}
 
-**🗑️ УДАЛЯЕТСЯ ВСЁ:**
-• Обычные сообщения
-• Стикеры 📎
-• Эмодзи 😀  
-• Картинки 🖼️
-• Гифки 🎬
-• Файлы 📁
-• Сообщения ботов 🤖
-• Эмбеды
+**🗑️ УДАЛЯЕТСЯ ВСЁ КРОМЕ:**
+• Сообщений с пингами (@упоминания)
+• Сообщений от исключенных ролей
 
-**🔒 СОХРАНЯЕТСЯ ТОЛЬКО:**
-• Сообщения с пингами (@упоминания)
-• @everyone и @here
-                    `;
-                    await message.reply(configInfo);
+**🛡️ ИСКЛЮЧЕННЫЕ РОЛИ:**
+${exemptRolesInfo}
+
+**💡 Примечание:**
+Пользователи с исключенными ролями могут свободно общаться - их сообщения не удаляются.
+                                `)
+                                .setFooter({ text: `Запрошено: ${message.author.tag}` })
+                                .setTimestamp()
+                        ]
+                    });
                     break;
                     
                 default:
-                    await message.reply(`
-**⚡ АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ СООБЩЕНИЙ**
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('⚡ АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ СООБЩЕНИЙ')
+                                .setColor(0x5865F2)
+                                .setDescription(`
+**🗑️ Удаляет ВСЁ кроме:**
+• Пингов (@упоминания)
+• Сообщений от исключенных ролей
 
-🗑️ **Удаляет ВСЁ кроме пингов:**
-• Сообщения, стикеры, эмодзи
-• Картинки, гифки, файлы  
-• Сообщения ботов, эмбеды
-
-🔒 **Сохраняет ТОЛЬКО:**
-• @упоминания пользователей
-• @упоминания ролей
-• @everyone и @here
-
-**📋 КОМАНДЫ:**
+**📋 ОСНОВНЫЕ КОМАНДЫ:**
 \`-autodelete on\` - Включить
 \`-autodelete off\` - Выключить  
 \`-autodelete delay 5000\` - Задержка (мс)
@@ -2099,20 +2380,38 @@ ${status}
 \`-autodelete addchannel #канал\` - Добавить канал
 \`-autodelete removechannel #канал\` - Удалить канал  
 \`-autodelete listchannels\` - Список каналов
-\`-autodelete clearallchannels\` - Очистить список
 
-**🧪 Тест:**
-\`-autodelete test\` - Проверить работу
-                    `);
+**🛡️ Управление ролями:**
+\`-autodelete addrole @роль\` - Добавить исключенную роль
+\`-autodelete removerole @роль\` - Удалить исключенную роль
+\`-autodelete listroles\` - Список исключенных ролей
+\`-autodelete clearroles\` - Очистить список ролей
+
+**💡 Пример использования:**
+1. \`-autodelete on\` - включить
+2. \`-autodelete addchannel #флуд\` - выбрать канал
+3. \`-autodelete addrole @Модератор\` - исключить роль
+4. \`-autodelete status\` - проверить настройки
+                                `)
+                                .setFooter({ text: 'Система автоматической модерации чата' })
+                                .setTimestamp()
+                        ]
+                    });
             }
             
             await message.delete().catch(() => {});
             
         } catch (error) {
             console.error('Auto-delete command error:', error);
-            await message.reply('❌ Ошибка выполнения команды').then(msg => 
-                setTimeout(() => msg.delete(), 5000)
-            );
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('❌ ОШИБКА')
+                        .setColor(0xED4245)
+                        .setDescription('Произошла ошибка при выполнении команды.')
+                        .setTimestamp()
+                ]
+            }).then(msg => setTimeout(() => msg.delete(), 5000));
         }
     }
 });
