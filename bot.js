@@ -1824,21 +1824,24 @@ client.on('messageDelete', async (message) => {
     }
 });
 
-// ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ ДЛЯ КОНКРЕТНЫХ КАНАЛОВ ====================
+// ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ ТОЛЬКО ПИНГОВ ====================
 
-const autoDeleteSettings = new Map(); // Настройки для каждого сервера
+const autoDeleteSettings = new Map();
 
-// Стандартные настройки
+// Стандартные настройки - теперь удаляем ВСЁ кроме пингов
 const DEFAULT_SETTINGS = {
     enabled: false,
-    delay: 10000, // 10 секунд
-    targetChannels: [], // Каналы где включено автоудаление (пусто = все каналы)
-    protectPings: true,
-    protectRoles: ['администратор', 'admin', 'moderator', 'модератор'],
-    protectChannels: ['important', 'важные', 'admin', 'команды'],
-    protectAttachments: true,
-    protectEmbeds: true,
-    protectBots: true
+    delay: 5000, // 5 секунд
+    targetChannels: [], // Каналы где включено автоудаление
+    // Убрали все защиты кроме пингов
+    protectPings: true, // Единственное что сохраняем - пинги
+    protectRoles: [], // Больше не защищаем роли
+    protectChannels: [], // Больше не защищаем каналы
+    protectAttachments: false, // Удаляем картинки, гифки, файлы
+    protectEmbeds: false, // Удаляем эмбеды
+    protectBots: false, // Удаляем сообщения ботов
+    protectStickers: false, // Удаляем стикеры
+    protectEmojis: false // Удаляем эмодзи
 };
 
 // Функция получения настроек для сервера
@@ -1849,53 +1852,34 @@ function getSettings(guildId) {
     return autoDeleteSettings.get(guildId);
 }
 
-// Функция проверки защиты сообщения
+// Функция проверки защиты сообщения - теперь ТОЛЬКО пинги
 function isMessageProtected(message, settings) {
-    const member = message.member;
-    
-    // Проверяем пинги
+    // Сохраняем ТОЛЬКО сообщения с пингами
     if (settings.protectPings) {
+        // Пинги ролей
         if (message.mentions.roles.size > 0) return true;
+        
+        // Пинги пользователей (кроме автора)
         if (message.mentions.users.size > 0 && !message.mentions.users.has(message.author.id)) return true;
+        
+        // Пинг @everyone или @here
         if (message.mentions.everyone) return true;
     }
     
-    // Проверяем роли
-    if (member && settings.protectRoles.length > 0) {
-        const hasProtectedRole = member.roles.cache.some(role =>
-            settings.protectRoles.some(protectedRole =>
-                role.name.toLowerCase().includes(protectedRole.toLowerCase())
-            )
-        );
-        if (hasProtectedRole) return true;
-    }
-    
-    // Проверяем защищенные каналы
-    if (settings.protectChannels.length > 0) {
-        const isProtectedChannel = settings.protectChannels.some(channelName =>
-            message.channel.name.toLowerCase().includes(channelName.toLowerCase())
-        );
-        if (isProtectedChannel) return true;
-    }
-    
-    // Проверяем вложения
-    if (settings.protectAttachments && message.attachments.size > 0) return true;
-    
-    // Проверяем эмбеды
-    if (settings.protectEmbeds && message.embeds.length > 0) return true;
-    
-    // Проверяем ботов
-    if (settings.protectBots && message.author.bot) return true;
+    // ВСЁ остальное удаляем:
+    // - Сообщения с картинками, гифками, файлами
+    // - Сообщения со стикерами
+    // - Сообщения с эмодзи
+    // - Сообщения от ботов
+    // - Сообщения с эмбедами
+    // - Сообщения от любых ролей
     
     return false;
 }
 
 // Функция проверки, применяется ли автоудаление к этому каналу
 function shouldAutoDeleteInChannel(channel, settings) {
-    // Если не указаны целевые каналы - применяем ко всем
     if (settings.targetChannels.length === 0) return true;
-    
-    // Проверяем, есть ли этот канал в списке целевых
     return settings.targetChannels.some(targetChannel =>
         channel.name.toLowerCase().includes(targetChannel.toLowerCase()) ||
         channel.id === targetChannel
@@ -1905,7 +1889,7 @@ function shouldAutoDeleteInChannel(channel, settings) {
 // Обработчик сообщений для автоматического удаления
 client.on('messageCreate', async (message) => {
     if (message.system) return;
-    if (!message.guild) return; // Только серверные сообщения
+    if (!message.guild) return;
     
     const settings = getSettings(message.guild.id);
     if (!settings.enabled) return;
@@ -1915,17 +1899,25 @@ client.on('messageCreate', async (message) => {
         return;
     }
     
-    // Проверяем, защищено ли сообщение
+    // Проверяем, защищено ли сообщение (ТОЛЬКО пинги)
     if (isMessageProtected(message, settings)) {
-        return; // Не удаляем защищенные сообщения
+        console.log(`🔒 [${message.guild.name}] #${message.channel.name} Сохранено (пинг): ${message.author.tag}`);
+        return;
     }
+    
+    // Логируем что удаляем
+    const contentPreview = message.content ? message.content.substring(0, 50) + '...' : 'пустое сообщение';
+    const attachmentsInfo = message.attachments.size > 0 ? ` [${message.attachments.size} вложений]` : '';
+    const stickersInfo = message.stickers.size > 0 ? ` [${message.stickers.size} стикеров]` : '';
+    const embedsInfo = message.embeds.length > 0 ? ` [${message.embeds.length} эмбедов]` : '';
+    
+    console.log(`🗑️ [${message.guild.name}] #${message.channel.name} Удаляем: ${message.author.tag} - ${contentPreview}${attachmentsInfo}${stickersInfo}${embedsInfo}`);
     
     // Удаляем сообщение через указанную задержку
     setTimeout(async () => {
         try {
             if (message.deletable) {
                 await message.delete();
-                console.log(`🗑️ [${message.guild.name}] #${message.channel.name} Удалено сообщение от ${message.author.tag}`);
             }
         } catch (error) {
             console.error(`Ошибка удаления в ${message.guild.name}:`, error.message);
@@ -1933,7 +1925,7 @@ client.on('messageCreate', async (message) => {
     }, settings.delay);
 });
 
-// Команды управления автоматическим удалением
+// Команды управления автоматическим удалением (упрощенная версия)
 client.on('messageCreate', async (message) => {
     if (message.system) return;
     if (!message.member.permissions.has('MANAGE_MESSAGES')) return;
@@ -1947,37 +1939,34 @@ client.on('messageCreate', async (message) => {
             switch(subcommand) {
                 case 'on':
                     settings.enabled = true;
-                    await message.reply('✅ Автоматическое удаление включено');
+                    await message.reply('✅ Автоматическое удаление ВКЛЮЧЕНО\n🗑️ Будут удаляться: все сообщения, стикеры, эмодзи, картинки, гифки\n🔒 Сохраняются: только пинги (@упоминания)');
                     break;
                     
                 case 'off':
                     settings.enabled = false;
-                    await message.reply('❌ Автоматическое удаление выключено');
+                    await message.reply('❌ Автоматическое удаление ВЫКЛЮЧЕНО');
                     break;
                     
                 case 'delay':
                     const delay = parseInt(args[2]);
-                    if (delay && delay >= 1000 && delay <= 60000) {
+                    if (delay && delay >= 1000 && delay <= 30000) {
                         settings.delay = delay;
                         await message.reply(`⏰ Задержка установлена: ${delay}мс`);
                     } else {
-                        await message.reply('❌ Укажите задержку от 1000 до 60000 мс');
+                        await message.reply('❌ Укажите задержку от 1000 до 30000 мс');
                     }
                     break;
                     
                 case 'addchannel':
                     const channelToAdd = args.slice(2).join(' ');
                     if (channelToAdd) {
-                        // Пробуем найти канал по упоминанию, ID или имени
                         let targetChannel = message.mentions.channels.first();
                         
                         if (!targetChannel) {
-                            // Ищем по ID
                             targetChannel = message.guild.channels.cache.get(channelToAdd);
                         }
                         
                         if (!targetChannel) {
-                            // Ищем по имени
                             targetChannel = message.guild.channels.cache.find(ch => 
                                 ch.name.toLowerCase().includes(channelToAdd.toLowerCase())
                             );
@@ -2043,20 +2032,15 @@ client.on('messageCreate', async (message) => {
                     await message.reply('🗑️ Очищен список каналов. Автоудаление будет применяться ко всем каналам');
                     break;
                     
-                case 'addrole':
-                    const roleToAdd = args.slice(2).join(' ');
-                    if (roleToAdd) {
-                        settings.protectRoles.push(roleToAdd.toLowerCase());
-                        await message.reply(`✅ Добавлена защита для роли: ${roleToAdd}`);
-                    }
-                    break;
-                    
-                case 'addprotected':
-                    const protectedChannel = args.slice(2).join(' ');
-                    if (protectedChannel) {
-                        settings.protectChannels.push(protectedChannel.toLowerCase());
-                        await message.reply(`✅ Добавлена защита для канала: ${protectedChannel}`);
-                    }
+                case 'test':
+                    // Тестовая команда для проверки
+                    const testMessage = await message.channel.send('🧪 Тестовое сообщение для проверки автоудаления');
+                    setTimeout(async () => {
+                        if (testMessage.deletable) {
+                            await testMessage.delete();
+                        }
+                    }, 3000);
+                    await message.reply('🧪 Тест запущен. Сообщение удалится через 3 секунды если автоудаление работает');
                     break;
                     
                 case 'status':
@@ -2072,41 +2056,53 @@ client.on('messageCreate', async (message) => {
 **Настройки автоматического удаления:**
 ${status}
 ⏰ Задержка: ${settings.delay}мс
-🎯 Целевые каналы: ${targetChannelsInfo}
+🎯 Каналы: ${targetChannelsInfo}
 
-**Защита:**
-🔒 Пинги: ${settings.protectPings ? '✅' : '❌'}
-🤖 Боты: ${settings.protectBots ? '✅' : '❌'}
-📎 Вложения: ${settings.protectAttachments ? '✅' : '❌'}
-🖼️ Эмбеды: ${settings.protectEmbeds ? '✅' : '❌'}
+**🗑️ УДАЛЯЕТСЯ ВСЁ:**
+• Обычные сообщения
+• Стикеры 📎
+• Эмодзи 😀  
+• Картинки 🖼️
+• Гифки 🎬
+• Файлы 📁
+• Сообщения ботов 🤖
+• Эмбеды
 
-**Защищенные роли:** ${settings.protectRoles.join(', ') || 'нет'}
-**Защищенные каналы:** ${settings.protectChannels.join(', ') || 'нет'}
+**🔒 СОХРАНЯЕТСЯ ТОЛЬКО:**
+• Сообщения с пингами (@упоминания)
+• @everyone и @here
                     `;
                     await message.reply(configInfo);
                     break;
                     
                 default:
                     await message.reply(`
-**Команды автоматического удаления:**
+**⚡ АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ СООБЩЕНИЙ**
 
-⚙️ **Основные команды:**
+🗑️ **Удаляет ВСЁ кроме пингов:**
+• Сообщения, стикеры, эмодзи
+• Картинки, гифки, файлы  
+• Сообщения ботов, эмбеды
+
+🔒 **Сохраняет ТОЛЬКО:**
+• @упоминания пользователей
+• @упоминания ролей
+• @everyone и @here
+
+**📋 КОМАНДЫ:**
 \`-autodelete on\` - Включить
 \`-autodelete off\` - Выключить  
-\`-autodelete delay 5000\` - Установить задержку (мс)
-\`-autodelete status\` - Показать настройки
+\`-autodelete delay 5000\` - Задержка (мс)
+\`-autodelete status\` - Настройки
 
-🎯 **Управление каналами:**
-\`-autodelete addchannel #канал\` - Добавить канал для автоудаления
-\`-autodelete removechannel #канал\` - Удалить канал из автоудаления
-\`-autodelete listchannels\` - Показать список каналов
-\`-autodelete clearallchannels\` - Очистить список (применять ко всем)
+**🎯 Управление каналами:**
+\`-autodelete addchannel #канал\` - Добавить канал
+\`-autodelete removechannel #канал\` - Удалить канал  
+\`-autodelete listchannels\` - Список каналов
+\`-autodelete clearallchannels\` - Очистить список
 
-🛡️ **Защита:**
-\`-autodelete addrole роль\` - Добавить защищенную роль
-\`-autodelete addprotected канал\` - Добавить защищенный канал
-
-💡 **Пример:** \`-autodelete addchannel #чат\` - включить автоудаление только в канале #чат
+**🧪 Тест:**
+\`-autodelete test\` - Проверить работу
                     `);
             }
             
