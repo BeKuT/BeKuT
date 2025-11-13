@@ -1645,9 +1645,6 @@ function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 // ==================== РАБОЧАЯ СИСТЕМА РАДИО ====================
-
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
-
 // ПРОВЕРЕННЫЕ РАБОЧИЕ СТАНЦИИ
 const radioStations = {
     'шансон': 'https://radio.host1.best:8443/russkoe',
