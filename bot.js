@@ -1644,189 +1644,66 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-// ==================== ПРОСТАЯ СИСТЕМА РАДИО БЕЗ ПРОВЕРОК ====================
+// ==================== СУПЕР ПРОСТОЕ РАДИО ====================
 
-const radioStations = {
+const stations = {
     'шансон': 'http://listen6.myradio24.com:9000/39978',
-    'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3', 
     'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
-    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3',
-    'нвс': 'http://icecast.nvc.ru:8000/nvc.mp3'
+    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3'
 };
 
-const radioConnections = new Map();
-
 client.on('messageCreate', async (message) => {
-    if (message.system) return;
     if (!message.guild) return;
     
-    const args = message.content.split(' ');
-    const command = args[0].toLowerCase();
-
-    if (command === '-радио') {
-        const subcommand = args[1]?.toLowerCase();
+    // ЗАПУСК РАДИО
+    if (message.content.startsWith('-play')) {
+        const station = message.content.split(' ')[1];
+        const url = stations[station];
+        
+        if (!url) return message.reply('Доступно: шансон, ретро, рок');
         
         try {
-            switch(subcommand) {
-                case 'play':
-                    const stationName = args.slice(2).join(' ').toLowerCase();
-                    
-                    if (!stationName) {
-                        return await message.reply('❌ Укажите станцию! `-радио play шансон`');
-                    }
-                    
-                    const stationKey = Object.keys(radioStations).find(key => 
-                        key.toLowerCase().includes(stationName)
-                    );
-                    
-                    if (!stationKey) {
-                        return await message.reply('❌ Станция не найдена! Используйте `-радио список`');
-                    }
-                    
-                    // ПРОСТО ПРОБУЕМ ПОДКЛЮЧИТЬСЯ К КАНАЛУ АВТОРА
-                    try {
-                        // Получаем все голосовые каналы сервера
-                        const voiceChannels = message.guild.channels.cache.filter(ch => 
-                            ch.isVoiceBased() && ch.members.has(message.author.id)
-                        );
-                        
-                        if (voiceChannels.size === 0) {
-                            return await message.reply('❌ Я не вижу вас в голосовых каналах! Зайдите в любой голосовой канал.');
-                        }
-                        
-                        const voiceChannel = voiceChannels.first();
-                        console.log(`🎵 Подключаемся к ${voiceChannel.name} для пользователя ${message.author.tag}`);
-                        
-                        // Очистка предыдущего соединения
-                        const existingConnection = getVoiceConnection(message.guild.id);
-                        if (existingConnection) {
-                            existingConnection.destroy();
-                        }
-                        radioConnections.delete(message.guild.id);
-                        
-                        // Подключаемся
-                        const connection = joinVoiceChannel({
-                            channelId: voiceChannel.id,
-                            guildId: message.guild.id,
-                            adapterCreator: message.guild.voiceAdapterCreator,
-                        });
-                        
-                        const player = createAudioPlayer();
-                        const resource = createAudioResource(radioStations[stationKey]);
-                        
-                        player.play(resource);
-                        connection.subscribe(player);
-                        
-                        radioConnections.set(message.guild.id, {
-                            connection,
-                            player,
-                            station: stationKey,
-                            channel: voiceChannel.name
-                        });
-                        
-                        await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('🎶 РАДИО ЗАПУЩЕНО')
-                                    .setColor(0x57F287)
-                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nНаслаждайтесь! 🎵`)
-                                    .setTimestamp()
-                            ]
-                        });
-                        
-                    } catch (error) {
-                        console.error('Ошибка подключения:', error);
-                        await message.reply('❌ Не удалось подключиться. Убедитесь что вы в голосовом канале!');
-                    }
-                    break;
-                    
-                case 'список':
-                    const stationsList = Object.keys(radioStations)
-                        .map(station => `• **${station}**`)
-                        .join('\n');
-                    
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('📻 ДОСТУПНЫЕ СТАНЦИИ')
-                                .setColor(0x5865F2)
-                                .setDescription(stationsList)
-                                .setTimestamp()
-                        ]
-                    });
-                    break;
-                    
-                case 'стоп':
-                    const radioData = radioConnections.get(message.guild.id);
-                    if (radioData) {
-                        radioData.player.stop();
-                        radioData.connection.destroy();
-                        radioConnections.delete(message.guild.id);
-                        await message.reply('⏹️ Радио остановлено!');
-                    } else {
-                        await message.reply('❌ Радио не играет!');
-                    }
-                    break;
-                    
-                case 'каналы':
-                    // Показывает в каких каналах есть пользователи
-                    const voiceChannelsList = message.guild.channels.cache
-                        .filter(ch => ch.isVoiceBased() && ch.members.size > 0)
-                        .map(ch => `• **${ch.name}** (${ch.members.size} пользователей)`)
-                        .join('\n') || '• Нет активных голосовых каналов';
-                    
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('🔊 АКТИВНЫЕ КАНАЛЫ')
-                                .setColor(0x5865F2)
-                                .setDescription(voiceChannelsList)
-                                .setTimestamp()
-                        ]
-                    });
-                    break;
-                    
-                default:
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('📻 ПРОСТЫЕ КОМАНДЫ РАДИО')
-                                .setColor(0x5865F2)
-                                .setDescription(`
-**-радио play [станция]** - Включить радио
-**-радио стоп** - Выключить радио  
-**-радио список** - Все станции
-**-радио каналы** - Показать активные каналы
-
-**💡 Просто зайдите в голосовой канал и напишите:**
-\`-радио play ретро\`
-
-Бот сам найдет вас в канале!
-                                `)
-                                .setTimestamp()
-                        ]
-                    });
-            }
+            // Подключаемся к любому каналу
+            const voiceChannel = message.member?.voice?.channel || 
+                               message.guild.channels.cache.find(ch => ch.isVoiceBased());
+            
+            if (!voiceChannel) return message.reply('Нет голосовых каналов');
+            
+            const connection = joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId: message.guild.id,
+                adapterCreator: message.guild.voiceAdapterCreator,
+            });
+            
+            const player = createAudioPlayer();
+            const resource = createAudioResource(url);
+            
+            player.play(resource);
+            connection.subscribe(player);
+            
+            // Сохраняем только connection для остановки
+            radioConnections.set(message.guild.id, connection);
+            
+            await message.reply(`🎵 Играет ${station}`);
+            
         } catch (error) {
-            console.error('Ошибка:', error);
-            await message.reply('❌ Ошибка выполнения команды');
+            await message.reply('❌ Ошибка');
         }
     }
-});
-
-// Простая проверка
-client.on('messageCreate', async (message) => {
-    if (message.content === '-гдея') {
-        const userChannels = message.guild.channels.cache.filter(ch => 
-            ch.isVoiceBased() && ch.members.has(message.author.id)
-        );
-        
-        if (userChannels.size > 0) {
-            const channelNames = userChannels.map(ch => ch.name).join(', ');
-            await message.reply(`✅ Я вижу вас в канале: **${channelNames}**`);
-        } else {
-            await message.reply('❌ Я не вижу вас в голосовых каналах!');
+    
+    // ОСТАНОВКА РАДИО
+    if (message.content === '-stop') {
+        const connection = radioConnections.get(message.guild.id);
+        if (connection) {
+            connection.destroy();
+            radioConnections.delete(message.guild.id);
+            await message.reply('⏹️ Остановлено');
         }
+    }
+    
+    // СПИСОК СТАНЦИЙ
+    if (message.content === '-stations') {
+        await message.reply('📻 Станции: шансон, ретро, рок');
     }
 });
 // ==================== СИСТЕМА ПЕРЕВОДА ====================
