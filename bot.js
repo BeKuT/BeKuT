@@ -1644,29 +1644,19 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-// ==================== СИСТЕМА РАДИО ДЛЯ ГОЛОСОВЫХ КАНАЛОВ ====================
+// ==================== ИСПРАВЛЕННАЯ СИСТЕМА РАДИО ====================
 
 const radioStations = {
     'шансон': 'http://radio.host1.best:8000/russkoe',
     'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3',
-    'диффуз': 'http://stream.diffuz.com.ua:8000/diffuz',
     'ретро': 'http://retro.hostingradio.ru:8014/retro-128.mp3',
     'рок': 'http://rockradio.hostingradio.ru:8035/rock128.mp3',
     'дорожное': 'http://dorognoe.hostingradio.ru:8000/radio',
-    'русское': 'http://radio.host1.best:8000/russkoe',
-    'наше': 'http://nashe1.hostingradio.ru:80/nashe-128.mp3',
-    'energy': 'http://ic7.101.ru:8000/v5_1',
-    'монте карло': 'http://montecarlo.hostingradio.ru:8040/montecarlo128.mp3',
-    'новое': 'http://ic6.101.ru:8000/v5_1',
-    'меломан': 'http://meloman.hostingradio.ru:8055/meloman128.mp3',
-    'джем': 'http://jfm1.hostingradio.ru:14536/jfm-128.mp3',
-    'релакс': 'http://relaxradio.hostingradio.ru:8055/relax128.mp3',
-    'юмор': 'http://humorfm.hostingradio.ru:8000/humor128.mp3'
+    'русское': 'http://radio.host1.best:8000/russkoe'
 };
 
 const radioConnections = new Map();
 
-// Команды радио
 client.on('messageCreate', async (message) => {
     if (message.system) return;
     if (!message.guild) return;
@@ -1680,8 +1670,6 @@ client.on('messageCreate', async (message) => {
         try {
             switch(subcommand) {
                 case 'список':
-                case 'list':
-                case 'stations':
                     const stationsList = Object.keys(radioStations)
                         .map(station => `• **${station}**`)
                         .join('\n');
@@ -1692,7 +1680,6 @@ client.on('messageCreate', async (message) => {
                                 .setTitle('📻 ДОСТУПНЫЕ РАДИОСТАНЦИИ')
                                 .setColor(0x5865F2)
                                 .setDescription(stationsList)
-                                .setFooter({ text: 'Используйте: -радио play [название]' })
                                 .setTimestamp()
                         ]
                     });
@@ -1700,7 +1687,6 @@ client.on('messageCreate', async (message) => {
                     
                 case 'play':
                 case 'включить':
-                case 'старт':
                     const stationName = args.slice(2).join(' ').toLowerCase();
                     
                     if (!stationName) {
@@ -1710,6 +1696,31 @@ client.on('messageCreate', async (message) => {
                                     .setTitle('❌ ОШИБКА')
                                     .setColor(0xED4245)
                                     .setDescription('Укажите название радиостанции!\nПример: `-радио play шансон`')
+                                    .setTimestamp()
+                            ]
+                        });
+                    }
+                    
+                    // ДЕБАГ: Проверим информацию о пользователе
+                    console.log('🔍 DEBUG User:', message.author.tag);
+                    console.log('🔍 DEBUG Member:', message.member ? 'Exists' : 'No member');
+                    console.log('🔍 DEBUG Voice channel:', message.member?.voice.channel ? message.member.voice.channel.name : 'No channel');
+                    
+                    const voiceChannel = message.member?.voice.channel;
+                    if (!voiceChannel) {
+                        // Детальная информация для отладки
+                        console.log('🔍 DEBUG Voice state:', message.member?.voice);
+                        console.log('🔍 DEBUG All voice states:', message.guild.voiceStates.cache.map(vs => ({
+                            user: vs.member?.user.tag,
+                            channel: vs.channel?.name
+                        })));
+                        
+                        return await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('❌ ОШИБКА')
+                                    .setColor(0xED4245)
+                                    .setDescription(`**Вы не находитесь в голосовом канале!**\n\nПожалуйста, зайдите в любой голосовой канал и попробуйте снова.`)
                                     .setTimestamp()
                             ]
                         });
@@ -1732,21 +1743,24 @@ client.on('messageCreate', async (message) => {
                         });
                     }
                     
-                    const voiceChannel = message.member.voice.channel;
-                    if (!voiceChannel) {
+                    // Проверяем права бота
+                    const permissions = voiceChannel.permissionsFor(client.user);
+                    if (!permissions.has('Connect') || !permissions.has('Speak')) {
                         return await message.reply({
                             embeds: [
                                 new EmbedBuilder()
-                                    .setTitle('❌ ОШИБКА')
+                                    .setTitle('❌ НЕТ ДОСТУПА')
                                     .setColor(0xED4245)
-                                    .setDescription('Вам нужно находиться в голосовом канале!')
+                                    .setDescription(`У бота нет прав для подключения к каналу **${voiceChannel.name}**!\n\nТребуемые права:\n• Подключаться\n• Говорить`)
                                     .setTimestamp()
                             ]
                         });
                     }
                     
-                    // Подключаемся к каналу
                     try {
+                        console.log(`🎵 Подключаемся к каналу: ${voiceChannel.name}`);
+                        
+                        // Подключаемся к голосовому каналу
                         const connection = joinVoiceChannel({
                             channelId: voiceChannel.id,
                             guildId: message.guild.id,
@@ -1778,25 +1792,26 @@ client.on('messageCreate', async (message) => {
                             channel: voiceChannel.name
                         });
                         
+                        console.log(`✅ Радио включено: ${stationKey} в ${voiceChannel.name}`);
+                        
                         await message.reply({
                             embeds: [
                                 new EmbedBuilder()
                                     .setTitle('🎶 РАДИО ВКЛЮЧЕНО')
                                     .setColor(0x57F287)
-                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nТеперь играет радио! 🎵`)
-                                    .setThumbnail('https://cdn-icons-png.flaticon.com/512/4474/4474920.png')
+                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nНаслаждайтесь прослушиванием! 🎵`)
                                     .setTimestamp()
                             ]
                         });
                         
                     } catch (error) {
-                        console.error('Radio connection error:', error);
+                        console.error('❌ Ошибка подключения радио:', error);
                         await message.reply({
                             embeds: [
                                 new EmbedBuilder()
                                     .setTitle('❌ ОШИБКА ПОДКЛЮЧЕНИЯ')
                                     .setColor(0xED4245)
-                                    .setDescription('Не удалось подключиться к голосовому каналу.')
+                                    .setDescription(`Не удалось подключиться к каналу **${voiceChannel.name}**\n\nОшибка: ${error.message}`)
                                     .setTimestamp()
                             ]
                         });
@@ -1805,7 +1820,6 @@ client.on('messageCreate', async (message) => {
                     
                 case 'stop':
                 case 'стоп':
-                case 'выключить':
                     const currentConnection = radioConnections.get(message.guild.id);
                     
                     if (!currentConnection) {
@@ -1836,140 +1850,32 @@ client.on('messageCreate', async (message) => {
                     });
                     break;
                     
-                case 'status':
-                case 'статус':
-                case 'info':
-                    const radioInfo = radioConnections.get(message.guild.id);
+                case 'debug':
+                case 'отладка':
+                    // Команда для отладки
+                    const voiceState = message.member?.voice;
+                    const debugInfo = {
+                        user: message.author.tag,
+                        inVoiceChannel: !!voiceState?.channel,
+                        voiceChannel: voiceState?.channel?.name,
+                        guildVoiceStates: message.guild.voiceStates.cache.size,
+                        botInVoice: message.guild.members.me.voice.channel?.name
+                    };
                     
-                    if (!radioInfo) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('📻 СТАТУС РАДИО')
-                                    .setColor(0xFEE75C)
-                                    .setDescription('Радио в настоящее время **не играет**.')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
+                    console.log('🔍 DEBUG INFO:', debugInfo);
                     
                     await message.reply({
                         embeds: [
                             new EmbedBuilder()
-                                .setTitle('📻 ИГРАЕТ СЕЙЧАС')
-                                .setColor(0x57F287)
-                                .setDescription(`**Станция:** ${radioInfo.station}\n**Канал:** ${radioInfo.channel}\n**Статус:** 🎵 Воспроизводится`)
-                                .setTimestamp()
-                        ]
-                    });
-                    break;
-                    
-                case 'volume':
-                case 'громкость':
-                    const volume = parseInt(args[2]);
-                    const radioVol = radioConnections.get(message.guild.id);
-                    
-                    if (!radioVol) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ РАДИО НЕ ИГРАЕТ')
-                                    .setColor(0xED4245)
-                                    .setDescription('Сначала включите радио!')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    if (volume && volume >= 1 && volume <= 200) {
-                        // Устанавливаем громкость
-                        if (radioVol.player.state.resource?.volume) {
-                            radioVol.player.state.resource.volume.setVolume(volume / 100);
-                        }
-                        
-                        await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('🔊 ГРОМКОСТЬ ИЗМЕНЕНА')
-                                    .setColor(0x5865F2)
-                                    .setDescription(`Громкость установлена на **${volume}%**`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    } else {
-                        await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ НЕВЕРНАЯ ГРОМКОСТЬ')
-                                    .setColor(0xED4245)
-                                    .setDescription('Укажите громкость от **1** до **200**%')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    break;
-                    
-                case 'сменить':
-                case 'change':
-                    const newStationName = args.slice(2).join(' ').toLowerCase();
-                    
-                    if (!newStationName) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ ОШИБКА')
-                                    .setColor(0xED4245)
-                                    .setDescription('Укажите название новой радиостанции!')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    const currentRadio = radioConnections.get(message.guild.id);
-                    if (!currentRadio) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ РАДИО НЕ ИГРАЕТ')
-                                    .setColor(0xED4245)
-                                    .setDescription('Сначала включите радио!')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    // Находим новую станцию
-                    const newStationKey = Object.keys(radioStations).find(key => 
-                        key.toLowerCase().includes(newStationName)
-                    );
-                    
-                    if (!newStationKey) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ СТАНЦИЯ НЕ НАЙДЕНА')
-                                    .setColor(0xED4245)
-                                    .setDescription(`Радиостанция "${newStationName}" не найдена.`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    // Меняем станцию
-                    const newResource = createAudioResource(radioStations[newStationKey], {
-                        inputType: StreamType.Arbitrary,
-                        inlineVolume: true
-                    });
-                    
-                    currentRadio.player.play(newResource);
-                    currentRadio.station = newStationKey;
-                    
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('🔄 СМЕНА СТАНЦИИ')
+                                .setTitle('🔍 ОТЛАДОЧНАЯ ИНФОРМАЦИЯ')
                                 .setColor(0x5865F2)
-                                .setDescription(`Теперь играет: **${newStationKey}**`)
+                                .setDescription(`
+**Пользователь:** ${debugInfo.user}
+**В голосовом канале:** ${debugInfo.inVoiceChannel ? '✅ Да' : '❌ Нет'}
+**Канал:** ${debugInfo.voiceChannel || 'Не подключен'}
+**Всего подключений на сервере:** ${debugInfo.guildVoiceStates}
+**Бот в канале:** ${debugInfo.botInVoice || 'Не подключен'}
+                                `)
                                 .setTimestamp()
                         ]
                     });
@@ -1982,36 +1888,32 @@ client.on('messageCreate', async (message) => {
                                 .setTitle('📻 СИСТЕМА РАДИО')
                                 .setColor(0x5865F2)
                                 .setDescription(`
-**🎵 КОМАНДЫ РАДИО:**
+**🎵 КОМАНДЫ:**
 
-\`-радио список\` - Показать все станции
+\`-радио список\` - Все станции
 \`-радио play [станция]\` - Включить радио
 \`-радио стоп\` - Выключить радио
-\`-радио статус\` - Текущая станция
-\`-радио громкость [1-200]\` - Изменить громкость
-\`-радио сменить [станция]\` - Сменить станцию
+\`-радио отладка\` - Информация для диагностики
 
-**📻 ПОПУЛЯРНЫЕ СТАНЦИИ:**
-• шансон • европа плюс • ретро • рок
-• дорожное • русское • наше • energy
+**📻 СТАНЦИИ:**
+• шансон • европа плюс • ретро • рок • дорожное
 
 **💡 Пример:**
-\`-радио play шансон\` - включит радио Шансон
+\`-радио play шансон\`
                                 `)
-                                .setFooter({ text: 'Присоединяйтесь к голосовому каналу!' })
                                 .setTimestamp()
                         ]
                     });
             }
             
         } catch (error) {
-            console.error('Radio command error:', error);
+            console.error('❌ Ошибка команды радио:', error);
             await message.reply({
                 embeds: [
                     new EmbedBuilder()
                         .setTitle('❌ ОШИБКА')
                         .setColor(0xED4245)
-                        .setDescription('Произошла ошибка при выполнении команды.')
+                        .setDescription(`Произошла ошибка: ${error.message}`)
                         .setTimestamp()
                 ]
             });
@@ -2019,27 +1921,28 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Автоматическое отключение при выходе из канала
+// Автоотключение при пустом канале
 client.on('voiceStateUpdate', (oldState, newState) => {
-    // Если бот остался один в канале
-    if (oldState.channel && oldState.channel.members.size === 1 && 
-        oldState.channel.members.has(client.user.id)) {
+    setTimeout(() => {
+        const guildId = oldState.guild.id;
+        const radioData = radioConnections.get(guildId);
         
-        const radioConnection = radioConnections.get(oldState.guild.id);
-        if (radioConnection) {
-            radioConnection.player.stop();
-            radioConnection.connection.destroy();
-            radioConnections.delete(oldState.guild.id);
-            console.log(`📻 Автоотключение радио в ${oldState.guild.name}`);
+        if (!radioData) return;
+        
+        const channelId = radioData.connection.joinConfig.channelId;
+        const channel = oldState.guild.channels.cache.get(channelId);
+        
+        if (channel) {
+            const realUsers = channel.members.filter(member => !member.user.bot);
+            if (realUsers.size === 0) {
+                console.log(`📻 Автоотключение в ${oldState.guild.name} - канал пуст`);
+                radioData.player.stop();
+                radioData.connection.destroy();
+                radioConnections.delete(guildId);
+            }
         }
-    }
+    }, 5000);
 });
-
-// Обработка ошибок воспроизведения
-client.on('error', (error) => {
-    console.error('Radio player error:', error);
-});
-
 // ==================== СИСТЕМА ПЕРЕВОДА ====================
 
 const translationDict = {
