@@ -1645,9 +1645,6 @@ function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 // ==================== ИСПРАВЛЕННАЯ СИСТЕМА РАДИО С ПРАВИЛЬНОЙ ПРОВЕРКОЙ ====================
-
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, NoSubscriberBehavior, getVoiceConnection } = require('@discordjs/voice');
-
 const radioStations = {
     'шансон': 'http://listen6.myradio24.com:9000/39978',
     'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3',
