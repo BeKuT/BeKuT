@@ -1645,9 +1645,6 @@ function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 // ==================== ПРОСТОЙ И РАБОЧИЙ КОД РАДИО ====================
-
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
-
 // Список радиостанций
 const radioStations = {
     'шансон': 'http://listen6.myradio24.com:9000/39978',
