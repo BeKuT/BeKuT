@@ -1928,7 +1928,9 @@ client.on('messageCreate', async (message) => {
 // Команды управления автоматическим удалением
 client.on('messageCreate', async (message) => {
     if (message.system) return;
-    if (!message.member.permissions.has('MANAGE_MESSAGES')) return;
+    
+    // ИСПРАВЛЕННАЯ СТРОКА: используем новые названия пермишенов
+    if (!message.member.permissions.has('ManageMessages')) return;
     
     if (message.content.startsWith('-autodelete')) {
         const args = message.content.split(' ');
@@ -2415,7 +2417,6 @@ ${exemptRolesInfo}
         }
     }
 });
-
 // Обработка команды -transcript
 client.on('messageCreate', async message => {
     if (message.system) return;
