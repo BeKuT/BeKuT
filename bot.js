@@ -1644,19 +1644,20 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
-// ==================== ИСПРАВЛЕННАЯ СИСТЕМА РАДИО ====================
+// ==================== ИСПРАВЛЕННАЯ СИСТЕМА РАДИО С ПРАВИЛЬНОЙ ПРОВЕРКОЙ ====================
+
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, NoSubscriberBehavior, getVoiceConnection } = require('@discordjs/voice');
 
 const radioStations = {
-    'шансон': 'http://radio.host1.best:8000/russkoe',
+    'шансон': 'http://listen6.myradio24.com:9000/39978',
     'европа плюс': 'http://ep256.hostingradio.ru:8052/europaplus256.mp3',
-    'ретро': 'http://retro.hostingradio.ru:8014/retro-128.mp3',
-    'рок': 'http://rockradio.hostingradio.ru:8035/rock128.mp3',
-    'дорожное': 'http://dorognoe.hostingradio.ru:8000/radio',
-    'русское': 'http://radio.host1.best:8000/russkoe'
+    'ретро': 'http://retro.streamr.ru:8043/retro-256.mp3',
+    'рок': 'http://rock-radio.streamr.ru:8060/rock-256.mp3'
 };
 
 const radioConnections = new Map();
 
+// Команда отладки с АКТУАЛЬНЫМИ данными
 client.on('messageCreate', async (message) => {
     if (message.system) return;
     if (!message.guild) return;
@@ -1669,6 +1670,143 @@ client.on('messageCreate', async (message) => {
         
         try {
             switch(subcommand) {
+                case 'отладка':
+                case 'debug':
+                    // ПОЛУЧАЕМ АКТУАЛЬНЫЕ ДАННЫЕ
+                    const member = await message.guild.members.fetch(message.author.id);
+                    const voiceState = member.voice;
+                    
+                    const debugInfo = {
+                        user: message.author.tag,
+                        inVoiceChannel: !!voiceState?.channel,
+                        voiceChannel: voiceState?.channel?.name || 'Не в канале',
+                        channelId: voiceState?.channel?.id,
+                        // Актуальные голосовые состояния сервера
+                        serverVoiceStates: message.guild.voiceStates.cache.size,
+                        // Актуальное состояние бота
+                        botVoiceChannel: message.guild.members.me.voice.channel?.name || 'Не в канале',
+                        // Активное радио соединение
+                        hasRadioConnection: radioConnections.has(message.guild.id),
+                        radioStation: radioConnections.get(message.guild.id)?.station
+                    };
+                    
+                    console.log('🔍 АКТУАЛЬНАЯ ОТЛАДКА:', debugInfo);
+                    
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('🔍 АКТУАЛЬНАЯ ОТЛАДКА')
+                                .setColor(0x5865F2)
+                                .setDescription(`
+**Пользователь ${debugInfo.user}:**
+• В голосовом канале: ${debugInfo.inVoiceChannel ? '✅ Да' : '❌ Нет'}
+• Канал: ${debugInfo.voiceChannel}
+• ID канала: ${debugInfo.channelId || 'Нет'}
+
+**Состояние сервера:**
+• Всего подключений: ${debugInfo.serverVoiceStates}
+• Бот в канале: ${debugInfo.botVoiceChannel}
+
+**Радио:**
+• Активное соединение: ${debugInfo.hasRadioConnection ? '✅ Да' : '❌ Нет'}
+• Станция: ${debugInfo.radioStation || 'Нет'}
+                                `)
+                                .setTimestamp()
+                        ]
+                    });
+                    break;
+                    
+                case 'play':
+                    const stationName = args.slice(2).join(' ').toLowerCase();
+                    
+                    if (!stationName) {
+                        return await message.reply('❌ Укажите станцию! `-радио play шансон`');
+                    }
+                    
+                    // ПОЛУЧАЕМ АКТУАЛЬНЫЕ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ
+                    const currentMember = await message.guild.members.fetch(message.author.id);
+                    const voiceChannel = currentMember.voice.channel;
+                    
+                    if (!voiceChannel) {
+                        return await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('❌ ОШИБКА')
+                                    .setColor(0xED4245)
+                                    .setDescription('**Вы не в голосовом канале!**\n\nПожалуйста:\n1. Зайдите в голосовой канал\n2. Убедитесь, что бот видит вас (используйте `-радио отладка`)\n3. Попробуйте снова')
+                                    .setTimestamp()
+                            ]
+                        });
+                    }
+                    
+                    const stationKey = Object.keys(radioStations).find(key => 
+                        key.toLowerCase().includes(stationName)
+                    );
+                    
+                    if (!stationKey) {
+                        return await message.reply('❌ Станция не найдена! Используйте `-радио список`');
+                    }
+                    
+                    try {
+                        console.log(`🎵 Пользователь ${message.author.tag} запускает радио в канале ${voiceChannel.name}`);
+                        
+                        // Подключаемся к каналу
+                        const connection = joinVoiceChannel({
+                            channelId: voiceChannel.id,
+                            guildId: message.guild.id,
+                            adapterCreator: message.guild.voiceAdapterCreator,
+                            selfDeaf: false
+                        });
+                        
+                        const player = createAudioPlayer({
+                            behaviors: {
+                                noSubscriber: NoSubscriberBehavior.Play,
+                            },
+                        });
+                        
+                        const resource = createAudioResource(radioStations[stationKey], {
+                            inputType: StreamType.Arbitrary,
+                            inlineVolume: true
+                        });
+                        
+                        player.on('stateChange', (oldState, newState) => {
+                            console.log(`🎵 Состояние плеера: ${oldState.status} -> ${newState.status}`);
+                        });
+                        
+                        player.on('error', error => {
+                            console.error('❌ Ошибка плеера:', error);
+                        });
+                        
+                        connection.on('error', error => {
+                            console.error('❌ Ошибка подключения:', error);
+                        });
+                        
+                        player.play(resource);
+                        connection.subscribe(player);
+                        
+                        radioConnections.set(message.guild.id, {
+                            connection,
+                            player,
+                            station: stationKey,
+                            channel: voiceChannel.name
+                        });
+                        
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('🎶 РАДИО ЗАПУЩЕНО')
+                                    .setColor(0x57F287)
+                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nЕсли музыка не играет, используйте \`-радио отладка\` для диагностики`)
+                                    .setTimestamp()
+                            ]
+                        });
+                        
+                    } catch (error) {
+                        console.error('❌ Ошибка радио:', error);
+                        await message.reply('❌ Ошибка подключения к радио');
+                    }
+                    break;
+                    
                 case 'список':
                     const stationsList = Object.keys(radioStations)
                         .map(station => `• **${station}**`)
@@ -1677,7 +1815,7 @@ client.on('messageCreate', async (message) => {
                     await message.reply({
                         embeds: [
                             new EmbedBuilder()
-                                .setTitle('📻 ДОСТУПНЫЕ РАДИОСТАНЦИИ')
+                                .setTitle('📻 ДОСТУПНЫЕ СТАНЦИИ')
                                 .setColor(0x5865F2)
                                 .setDescription(stationsList)
                                 .setTimestamp()
@@ -1685,263 +1823,87 @@ client.on('messageCreate', async (message) => {
                     });
                     break;
                     
-                case 'play':
-                case 'включить':
-                    const stationName = args.slice(2).join(' ').toLowerCase();
-                    
-                    if (!stationName) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ ОШИБКА')
-                                    .setColor(0xED4245)
-                                    .setDescription('Укажите название радиостанции!\nПример: `-радио play шансон`')
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    // ДЕБАГ: Проверим информацию о пользователе
-                    console.log('🔍 DEBUG User:', message.author.tag);
-                    console.log('🔍 DEBUG Member:', message.member ? 'Exists' : 'No member');
-                    console.log('🔍 DEBUG Voice channel:', message.member?.voice.channel ? message.member.voice.channel.name : 'No channel');
-                    
-                    const voiceChannel = message.member?.voice.channel;
-                    if (!voiceChannel) {
-                        // Детальная информация для отладки
-                        console.log('🔍 DEBUG Voice state:', message.member?.voice);
-                        console.log('🔍 DEBUG All voice states:', message.guild.voiceStates.cache.map(vs => ({
-                            user: vs.member?.user.tag,
-                            channel: vs.channel?.name
-                        })));
-                        
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ ОШИБКА')
-                                    .setColor(0xED4245)
-                                    .setDescription(`**Вы не находитесь в голосовом канале!**\n\nПожалуйста, зайдите в любой голосовой канал и попробуйте снова.`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    // Находим радиостанцию
-                    const stationKey = Object.keys(radioStations).find(key => 
-                        key.toLowerCase().includes(stationName)
-                    );
-                    
-                    if (!stationKey) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ СТАНЦИЯ НЕ НАЙДЕНА')
-                                    .setColor(0xED4245)
-                                    .setDescription(`Радиостанция "${stationName}" не найдена.\nИспользуйте \`-радио список\` для просмотра всех станций.`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    // Проверяем права бота
-                    const permissions = voiceChannel.permissionsFor(client.user);
-                    if (!permissions.has('Connect') || !permissions.has('Speak')) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ НЕТ ДОСТУПА')
-                                    .setColor(0xED4245)
-                                    .setDescription(`У бота нет прав для подключения к каналу **${voiceChannel.name}**!\n\nТребуемые права:\n• Подключаться\n• Говорить`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    
-                    try {
-                        console.log(`🎵 Подключаемся к каналу: ${voiceChannel.name}`);
-                        
-                        // Подключаемся к голосовому каналу
-                        const connection = joinVoiceChannel({
-                            channelId: voiceChannel.id,
-                            guildId: message.guild.id,
-                            adapterCreator: message.guild.voiceAdapterCreator,
-                        });
-                        
-                        // Создаем аудиоплеер
-                        const player = createAudioPlayer({
-                            behaviors: {
-                                noSubscriber: NoSubscriberBehavior.Play,
-                            },
-                        });
-                        
-                        // Создаем ресурс для радио
-                        const resource = createAudioResource(radioStations[stationKey], {
-                            inputType: StreamType.Arbitrary,
-                            inlineVolume: true
-                        });
-                        
-                        // Воспроизводим
-                        player.play(resource);
-                        connection.subscribe(player);
-                        
-                        // Сохраняем соединение
-                        radioConnections.set(message.guild.id, {
-                            connection,
-                            player,
-                            station: stationKey,
-                            channel: voiceChannel.name
-                        });
-                        
-                        console.log(`✅ Радио включено: ${stationKey} в ${voiceChannel.name}`);
-                        
-                        await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('🎶 РАДИО ВКЛЮЧЕНО')
-                                    .setColor(0x57F287)
-                                    .setDescription(`**Станция:** ${stationKey}\n**Канал:** ${voiceChannel.name}\n\nНаслаждайтесь прослушиванием! 🎵`)
-                                    .setTimestamp()
-                            ]
-                        });
-                        
-                    } catch (error) {
-                        console.error('❌ Ошибка подключения радио:', error);
-                        await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ ОШИБКА ПОДКЛЮЧЕНИЯ')
-                                    .setColor(0xED4245)
-                                    .setDescription(`Не удалось подключиться к каналу **${voiceChannel.name}**\n\nОшибка: ${error.message}`)
-                                    .setTimestamp()
-                            ]
-                        });
-                    }
-                    break;
-                    
-                case 'stop':
                 case 'стоп':
-                    const currentConnection = radioConnections.get(message.guild.id);
-                    
-                    if (!currentConnection) {
-                        return await message.reply({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('❌ РАДИО НЕ ИГРАЕТ')
-                                    .setColor(0xED4245)
-                                    .setDescription('В этом сервере радио не включено.')
-                                    .setTimestamp()
-                            ]
-                        });
+                    const radioData = radioConnections.get(message.guild.id);
+                    if (!radioData) {
+                        return await message.reply('❌ Радио не играет!');
                     }
                     
-                    // Останавливаем и отключаемся
-                    currentConnection.player.stop();
-                    currentConnection.connection.destroy();
+                    radioData.player.stop();
+                    radioData.connection.destroy();
                     radioConnections.delete(message.guild.id);
                     
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('⏹️ РАДИО ВЫКЛЮЧЕНО')
-                                .setColor(0xFEE75C)
-                                .setDescription('Воспроизведение радио остановлено.')
-                                .setTimestamp()
-                        ]
-                    });
-                    break;
-                    
-                case 'debug':
-                case 'отладка':
-                    // Команда для отладки
-                    const voiceState = message.member?.voice;
-                    const debugInfo = {
-                        user: message.author.tag,
-                        inVoiceChannel: !!voiceState?.channel,
-                        voiceChannel: voiceState?.channel?.name,
-                        guildVoiceStates: message.guild.voiceStates.cache.size,
-                        botInVoice: message.guild.members.me.voice.channel?.name
-                    };
-                    
-                    console.log('🔍 DEBUG INFO:', debugInfo);
-                    
-                    await message.reply({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('🔍 ОТЛАДОЧНАЯ ИНФОРМАЦИЯ')
-                                .setColor(0x5865F2)
-                                .setDescription(`
-**Пользователь:** ${debugInfo.user}
-**В голосовом канале:** ${debugInfo.inVoiceChannel ? '✅ Да' : '❌ Нет'}
-**Канал:** ${debugInfo.voiceChannel || 'Не подключен'}
-**Всего подключений на сервере:** ${debugInfo.guildVoiceStates}
-**Бот в канале:** ${debugInfo.botInVoice || 'Не подключен'}
-                                `)
-                                .setTimestamp()
-                        ]
-                    });
+                    await message.reply('⏹️ Радио остановлено!');
                     break;
                     
                 default:
                     await message.reply({
                         embeds: [
                             new EmbedBuilder()
-                                .setTitle('📻 СИСТЕМА РАДИО')
+                                .setTitle('📻 КОМАНДЫ РАДИО')
                                 .setColor(0x5865F2)
                                 .setDescription(`
-**🎵 КОМАНДЫ:**
+**-радио play [станция]** - Включить радио
+**-радио стоп** - Выключить радио  
+**-радио список** - Все станции
+**-радио отладка** - Актуальная диагностика
 
-\`-радио список\` - Все станции
-\`-радио play [станция]\` - Включить радио
-\`-радио стоп\` - Выключить радио
-\`-радио отладка\` - Информация для диагностики
-
-**📻 СТАНЦИИ:**
-• шансон • европа плюс • ретро • рок • дорожное
-
-**💡 Пример:**
-\`-радио play шансон\`
+**💡 Если бот не видит вас в канале:**
+1. Выйдите и зайдите в канал
+2. Используйте \`-радио отладка\`
+3. Перезапустите Discord (Ctrl+R)
                                 `)
                                 .setTimestamp()
                         ]
                     });
             }
-            
         } catch (error) {
-            console.error('❌ Ошибка команды радио:', error);
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle('❌ ОШИБКА')
-                        .setColor(0xED4245)
-                        .setDescription(`Произошла ошибка: ${error.message}`)
-                        .setTimestamp()
-                ]
-            });
+            console.error('Ошибка команды радио:', error);
         }
     }
 });
 
-// Автоотключение при пустом канале
-client.on('voiceStateUpdate', (oldState, newState) => {
-    setTimeout(() => {
+// УЛУЧШЕННЫЙ обработчик голосовых состояний
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    // Ждем немного для обновления кэша
+    setTimeout(async () => {
         const guildId = oldState.guild.id;
         const radioData = radioConnections.get(guildId);
         
         if (!radioData) return;
         
-        const channelId = radioData.connection.joinConfig.channelId;
+        // ПОЛУЧАЕМ АКТУАЛЬНЫЕ ДАННЫЕ КАНАЛА
+        const connection = getVoiceConnection(guildId);
+        if (!connection) {
+            radioConnections.delete(guildId);
+            return;
+        }
+        
+        const channelId = connection.joinConfig.channelId;
         const channel = oldState.guild.channels.cache.get(channelId);
         
         if (channel) {
+            // Считаем только реальных пользователей (не ботов)
             const realUsers = channel.members.filter(member => !member.user.bot);
+            
+            console.log(`🔍 Проверка канала ${channel.name}: ${realUsers.size} пользователей`);
+            
             if (realUsers.size === 0) {
                 console.log(`📻 Автоотключение в ${oldState.guild.name} - канал пуст`);
                 radioData.player.stop();
                 radioData.connection.destroy();
                 radioConnections.delete(guildId);
+                
+                // Сообщаем в текстовый канал
+                const textChannel = oldState.guild.channels.cache.find(ch => 
+                    ch.isTextBased() && ch.permissionsFor(client.user).has('SendMessages')
+                );
+                if (textChannel) {
+                    textChannel.send('📻 Радио автоматически отключено (канал пуст)').catch(() => {});
+                }
             }
         }
-    }, 5000);
+    }, 2000);
 });
 // ==================== СИСТЕМА ПЕРЕВОДА ====================
 
