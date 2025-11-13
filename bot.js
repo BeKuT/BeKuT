@@ -12,13 +12,8 @@ const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const { 
-    joinVoiceChannel, 
-    createAudioPlayer, 
-    createAudioResource, 
-    StreamType,
-    NoSubscriberBehavior 
-} = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
+
 
 // Проверка наличия токена
 if (!token) {
