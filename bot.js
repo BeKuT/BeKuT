@@ -1646,8 +1646,6 @@ function generateTranscriptId() {
 }
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
-const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
-
 // Проверенные рабочие радиостанции
 const radioStations = {
     'нвс': 'http://icecast.nvc.ru:8000/nvc.mp3',
