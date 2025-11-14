@@ -13,7 +13,7 @@ const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
-const { Client, GatewayIntentBits, Partials, PermissionsBitField, ChannelType, ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder, Events } from "discord.js";
+import { Client, GatewayIntentBits, Partials, PermissionsBitField, ChannelType, ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder, Events } from "discord.js";
 
 
 // Проверка наличия токена
