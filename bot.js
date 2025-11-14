@@ -13,6 +13,7 @@ const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
+const { Client, GatewayIntentBits, Partials, PermissionsBitField, ChannelType, ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder, Events } from "discord.js";
 
 
 // Проверка наличия токена
@@ -1638,6 +1639,201 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
+}
+// ==================== Тикеты ====================
+
+/** @CustomParams
+{
+    "discord_token": {
+        "type": "string",
+        "title": "Discord Bot Token",
+        "description": "Токен вашего Discord-бота"
+    },
+    "guild_id": {
+        "type": "string",
+        "title": "Discord Guild ID",
+        "description": "ID вашего Discord-сервера"
+    },
+    "category_id": {
+        "type": "string",
+        "title": "Ticket Category ID",
+        "description": "ID категории для тикетов"
+    },
+    "moderator_role_ids": {
+        "type": "string",
+        "title": "Moderator Role IDs",
+        "description": "ID ролей модераторов через запятую (например: 123,456,789)"
+    },
+    "ticket_channel_name_template": {
+        "type": "string",
+        "title": "Ticket Channel Name Template",
+        "description": "Шаблон названия канала, например: ticket-{username}"
+    }
+}
+*/
+
+export default async function run({execution_id, input, data, store, db}) {
+    const token = data.discord_token;
+    const guildId = data.guild_id;
+    const categoryId = data.category_id;
+    const modRoleIds = data.moderator_role_ids.split(',').map(id => id.trim());
+    const channelNameTemplate = data.ticket_channel_name_template || "ticket-{username}";
+
+    const client = new Client({
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.GuildMembers
+        ],
+        partials: [Partials.Channel]
+    });
+
+    let ticketSettings = {
+        ticketsCategoryId: categoryId,
+        moderatorRoles: modRoleIds,
+        ticketChannelName: channelNameTemplate
+    };
+
+    client.once('ready', async () => {
+        console.log(`✅ Бот авторизован как ${client.user.tag}`);
+        
+        // Кнопка тикета - ТОЧНО как в требовании
+        const button = new ButtonBuilder()
+            .setCustomId("create_regiment_request")
+            .setLabel("Создать заявку в полк")
+            .setStyle(ButtonStyle.Primary); // Голубой цвет
+
+        const row = new ActionRowBuilder().addComponents(button);
+
+        // Embed сообщение с правильными цветами и текстом
+        const embed = new EmbedBuilder()
+            .setTitle("Заявка в полк | Application to the regiment")
+            .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\n\nTo create a request, click the button below.")
+            .setColor(3447003) // Голубой цвет точно как в требовании
+            .setTimestamp();
+
+        // Найдите канал для отправки стартового сообщения
+        const guild = await client.guilds.fetch(guildId);
+        const category = await guild.channels.fetch(categoryId);
+
+        // Найти первый текстовый канал в категории
+        const channels = await guild.channels.fetch();
+        let targetChannel = null;
+        for (let [id, ch] of channels) {
+            if (ch.parentId === categoryId && ch.type === ChannelType.GuildText) {
+                targetChannel = ch;
+                break;
+            }
+        }
+        
+        // Если нет текстового канала, создайте его
+        if (!targetChannel) {
+            targetChannel = await guild.channels.create({
+                name: 'ticket-here',
+                type: ChannelType.GuildText,
+                parent: categoryId
+            });
+        }
+
+        // Отправляем embed сообщение с кнопкой
+        await targetChannel.send({
+            embeds: [embed],
+            components: [row]
+        });
+        
+        console.log(`✅ Стартовое сообщение отправлено в канал #${targetChannel.name}`);
+    });
+
+    client.on(Events.InteractionCreate, async interaction => {
+        if (interaction.isButton() && interaction.customId === "create_regiment_request") {
+            const user = interaction.user;
+            const ticketChannelName = ticketSettings.ticketChannelName.replace("{username}", user.username.toLowerCase());
+
+            // Проверка на существование тикета
+            const existing = interaction.guild.channels.cache.find(
+                c => c.name === ticketChannelName && c.parentId === ticketSettings.ticketsCategoryId
+            );
+            if (existing) {
+                await interaction.reply({ content: "У вас уже есть открытая заявка!", ephemeral: true });
+                return;
+            }
+
+            // Создаем канал тикета
+            const channel = await interaction.guild.channels.create({
+                name: ticketChannelName,
+                type: ChannelType.GuildText,
+                parent: ticketSettings.ticketsCategoryId,
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.roles.everyone,
+                        deny: [PermissionsBitField.Flags.ViewChannel],
+                    },
+                    {
+                        id: user.id,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                    },
+                    ...ticketSettings.moderatorRoles.map(roleId => ({
+                        id: roleId,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                    })),
+                ]
+            });
+
+            // Embed RU
+            const embedRU = new EmbedBuilder()
+                .setColor('#727070')
+                .setTitle(':flag_ru: - RU Blank')
+                .setDescription(
+                    "Заполните бланк вопросов, и ждите ответа офицеров.\n\n" +
+                    "1. Ваш никнейм? - \n" +
+                    "2. Ваше имя? - \n" +
+                    "3. Ваш прайм-тайм? (От МСК) -\n" +
+                    "4. Сколько вам лет? - \n" +
+                    "5. Ваш макс БР наземной техники? -\n" +
+                    "6. Ваш макс БР летной техники? -\n" +
+                    "7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? -\n" +
+                    "8. Какой у вас К/Д за последний месяц? -"
+                );
+
+            // Embed EN
+            const embedEN = new EmbedBuilder()
+                .setColor('#727070')
+                .setTitle(':flag_gb: - EN Blank')
+                .setDescription(
+                    "Fill out the question form and wait for the officers to respond.\n\n" +
+                    "1. Your IGN(In Game Name)? - \n" +
+                    "2. Your real name(or how we should call you)? - \n" +
+                    "3. Your time zone? - \n" +
+                    "4. How old are you? - \n" +
+                    "5. Your max. tier of ground vehicles? - \n" +
+                    "6. Your max. tier of flight vehicles? -\n" +
+                    "7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - \n" +
+                    "8. What is your schedule for the last month? - \n" +
+                    "**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**"
+                );
+
+            await channel.send({ 
+                content: `Здравствуйте, <@${user.id}>! Опишите вашу заявку, модераторы скоро ответят.`,
+                embeds: [embedRU, embedEN] 
+            });
+
+            await interaction.reply({ 
+                content: `✅ Заявка создана: <#${channel.id}>`, 
+                ephemeral: true 
+            });
+        }
+    });
+
+    await client.login(token);
+
+    return { 
+        result: "✅ Бот запущен! Стартовое сообщение с кнопкой отправлено в указанную категорию.",
+        details: {
+            guild_id: guildId,
+            category_id: categoryId,
+            moderator_roles_count: modRoleIds.length
+        }
+    };
 }
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
