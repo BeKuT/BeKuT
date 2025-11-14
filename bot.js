@@ -1824,17 +1824,6 @@ export default async function run({execution_id, input, data, store, db}) {
         }
     });
 
-    await client.login(token);
-
-    return { 
-        result: "✅ Бот запущен! Стартовое сообщение с кнопкой отправлено в указанную категорию.",
-        details: {
-            guild_id: guildId,
-            category_id: categoryId,
-            moderator_roles_count: modRoleIds.length
-        }
-    };
-}
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
 // Проверенные рабочие радиостанции
