@@ -1,4 +1,5 @@
-const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,Partials,PermissionsBitField, ChannelType,Events
+} = require('discord.js');
 const fs = require('fs').promises;
 const axios = require('axios');
 const express = require('express');
@@ -13,7 +14,6 @@ const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType } = require('@discordjs/voice');
-import { Client, GatewayIntentBits, Partials, PermissionsBitField, ChannelType, ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder, Events } from "discord.js";
 
 
 // Проверка наличия токена
@@ -32,10 +32,12 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions
-    ]
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers, // Добавьте это
+        GatewayIntentBits.GuildVoiceStates // Добавьте это для радио
+    ],
+    partials: [Partials.Channel] // Добавьте это
 });
-
 // Хранилища
 const transcriptsStorage = new Map();
 const translationMessages = new Map();
