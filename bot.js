@@ -1674,7 +1674,7 @@ function generateTranscriptId() {
 }
 */
 
-export default async function run({execution_id, input, data, store, db}) {
+ async function ({execution_id, input, data, store, db}) {
     const token = data.discord_token;
     const guildId = data.guild_id;
     const categoryId = data.category_id;
