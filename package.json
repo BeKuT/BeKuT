@@ -1,6 +1,5 @@
 {
   "name": "haki-bot",
-  "type": "module",
   "version": "1.0.0",
   "description": "Discord bot with web dashboard for regiment ticket system",
   "main": "bot.js",
@@ -25,4 +24,5 @@
     "node": ">=18.0.0"
   }
 }
+
 
