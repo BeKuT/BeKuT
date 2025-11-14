@@ -1,7 +1,8 @@
 {
   "name": "haki-bot",
+  "type": "module",
   "version": "1.0.0",
-  "description": "Discord bot with web dashboard",
+  "description": "Discord bot with web dashboard for regiment ticket system",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
@@ -16,6 +17,9 @@
     "libsodium-wrappers": "^0.7.13",
     "opusscript": "^0.0.8",
     "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
