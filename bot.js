@@ -2124,7 +2124,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const channel = interaction.channel;
     
     // Проверяем, что это тикет-канал
-    if (!channel.name.startsWith('ticket-')) {
+    if (!channel.name.startsWith('ticket│')) {
         await interaction.reply({ content: '❌ Эта кнопка работает только в тикет-каналах!', ephemeral: true });
         return;
     }
@@ -2132,7 +2132,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const user = interaction.user;
 
     // Проверяем права (создатель тикета или модератор)
-    const isOwner = channel.name === `ticket-${user.username.toLowerCase()}`;
+    const isOwner = channel.name === `ticket│${user.username.toLowerCase()}`;
     const isModerator = interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages);
 
     if (!isOwner && !isModerator) {
