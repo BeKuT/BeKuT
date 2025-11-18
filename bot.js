@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,Partials,PermissionsBitField, ChannelType,Events
-} = require('discord.js');
+} = from('discord.js');
 import fs = require('fs').promises;
 import axios = require('axios');
 import express = require('express');
