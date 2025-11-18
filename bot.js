@@ -40,14 +40,18 @@ console.log('✅ Token loaded successfully');
 
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.GuildMembers, // Добавьте это
-        GatewayIntentBits.GuildVoiceStates // Добавьте это для радио
+        GatewayIntentBits.Guilds, // ОБЯЗАТЕЛЬНО для работы с серверами
+        GatewayIntentBits.GuildMessages, // ОБЯЗАТЕЛЬНО для чтения сообщений
+        GatewayIntentBits.MessageContent, // Для чтения содержимого сообщений
+        GatewayIntentBits.GuildMessageReactions, // Для реакций
+        GatewayIntentBits.GuildMembers, // Для работы с участниками
+        GatewayIntentBits.GuildVoiceStates // Для голосовых каналов
     ],
-    partials: [Partials.Channel] // Добавьте это
+    partials: [
+        Partials.Channel,
+        Partials.Message,
+        Partials.Reaction // Добавьте это для реакций
+    ]
 });
 // Хранилища
 const transcriptsStorage = new Map();
