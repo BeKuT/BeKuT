@@ -2020,7 +2020,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     const user = interaction.user;
-    const ticketChannelName = `ticket-${user.username.toLowerCase()}`;
+    const ticketChannelName = `ticket│${user.username.toLowerCase()}`;
 
     // Проверка на существующий тикет
     const existing = interaction.guild.channels.cache.find(
