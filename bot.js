@@ -1846,71 +1846,185 @@ async function translateWithAPI(text, targetLang) {
 
 // ==================== СИСТЕМА ТИКЕТОВ ====================
 
-async function initializeTicketSystem() {
-    if (!TICKET_CATEGORY_ID) {
-        console.log('❌ Ticket system disabled - TICKET_CATEGORY_ID not set');
-        return;
-    }
+// Хранилище настроек тикетов
+const ticketSettings = new Map();
 
-    try {
-        const guild = client.guilds.cache.first(); // Использует первый сервер где есть бот
-        if (!guild) {
-            console.log('❌ Ticket system - no guild found');
-            return;
-        }
+// Команда настройки тикетов
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-        const category = await guild.channels.fetch(TICKET_CATEGORY_ID);
-        if (!category) {
-            console.log('❌ Ticket category not found');
-            return;
-        }
-
-        // Найти канал для отправки сообщения с кнопкой
-        let targetChannel = guild.channels.cache.find(ch => 
-            ch.parentId === TICKET_CATEGORY_ID && 
-            ch.type === ChannelType.GuildText
-        );
+    if (message.content.startsWith('!ticket')) {
+        const args = message.content.split(' ');
         
-        if (!targetChannel) {
-            targetChannel = await guild.channels.create({
-                name: 'create-ticket-here',
-                type: ChannelType.GuildText,
-                parent: TICKET_CATEGORY_ID
+        if (args.length < 4) {
+            const helpEmbed = new EmbedBuilder()
+                .setColor('#727070')
+                .setTitle(':gear: Настройка системы заявок в полк')
+                .setDescription(`
+**Использование:**
+\`!ticket <ID_канала> <ID_категории> <ID_ролей через запятую>\`
+
+**Пример:**
+\`!ticket 123456789 987654321 111111111,222222222\`
+
+**Как получить ID:**
+• Включите режим разработчика в Discord
+• ПКМ по каналу/роли → "Копировать ID"
+                `);
+            
+            await message.reply({ embeds: [helpEmbed] });
+            return;
+        }
+
+        const channelId = args[1];
+        const categoryId = args[2];
+        const roleIds = args[3].split(',').map(id => id.trim());
+
+        try {
+            const guild = message.guild;
+            const targetChannel = await guild.channels.fetch(channelId);
+            const category = await guild.channels.fetch(categoryId);
+            
+            if (!targetChannel || !category) {
+                await message.reply('❌ Канал или категория не найдены! Проверьте ID.');
+                return;
+            }
+
+            // Проверяем роли
+            const validRoles = [];
+            for (const roleId of roleIds) {
+                try {
+                    const role = await guild.roles.fetch(roleId);
+                    if (role) validRoles.push(roleId);
+                } catch (error) {
+                    console.log(`Роль ${roleId} не найдена`);
+                }
+            }
+
+            if (validRoles.length === 0) {
+                await message.reply('❌ Не найдено ни одной валидной роли!');
+                return;
+            }
+
+            // Сохраняем настройки
+            ticketSettings.set(guild.id, {
+                channelId,
+                categoryId,
+                roleIds: validRoles,
+                guildId: guild.id
             });
+
+            // Создаем сообщение с кнопкой (в вашем стиле)
+            const button = new ButtonBuilder()
+                .setCustomId("create_regiment_request")
+                .setLabel("Создать заявку в полк")
+                .setStyle(ButtonStyle.Primary);
+
+            const row = new ActionRowBuilder().addComponents(button);
+
+            const embed = new EmbedBuilder()
+                .setTitle("Заявка в полк | Application to the regiment")
+                .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\n\nTo create a request, click the button below.")
+                .setColor(3447003)
+                .setTimestamp();
+
+            await targetChannel.send({ embeds: [embed], components: [row] });
+
+            // Сообщение об успешной настройке
+            const successEmbed = new EmbedBuilder()
+                .setColor('#727070')
+                .setTitle(':white_check_mark: Система заявок настроена')
+                .setDescription(`
+**Канал с кнопкой:** <#${channelId}>
+**Категория заявок:** <#${categoryId}>
+**Роли офицеров:** ${validRoles.length} ролей
+
+Теперь пользователи могут создавать заявки в полк!
+                `);
+
+            await message.reply({ embeds: [successEmbed] });
+            console.log(`✅ Ticket system configured for guild: ${guild.name}`);
+
+        } catch (error) {
+            console.error('Ticket setup error:', error);
+            await message.reply('❌ Ошибка при настройке! Проверьте ID и права бота.');
         }
+    }
+});
 
-        // Создаем кнопку для тикетов
-        const button = new ButtonBuilder()
-            .setCustomId("create_regiment_request")
-            .setLabel("Создать заявку в полк")
-            .setStyle(ButtonStyle.Primary);
+// Функция инициализации тикет системы (аналогично вашей)
+async function initializeTicketSystem() {
+    // Используем настройки из команды !ticket
+    for (const [guildId, settings] of ticketSettings) {
+        try {
+            const guild = client.guilds.cache.get(guildId);
+            if (!guild) continue;
 
-        const row = new ActionRowBuilder().addComponents(button);
+            const category = await guild.channels.fetch(settings.categoryId);
+            if (!category) {
+                console.log(`❌ Ticket category not found for guild: ${guild.name}`);
+                continue;
+            }
 
-        const embed = new EmbedBuilder()
-            .setTitle("Заявка в полк | Application to the regiment")
-            .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\n\nTo create a request, click the button below.")
-            .setColor(3447003)
-            .setTimestamp();
+            // Найти канал для отправки сообщения с кнопкой
+            let targetChannel = guild.channels.cache.find(ch => 
+                ch.parentId === settings.categoryId && 
+                ch.type === ChannelType.GuildText
+            );
+            
+            if (!targetChannel) {
+                targetChannel = await guild.channels.create({
+                    name: 'create-ticket-here',
+                    type: ChannelType.GuildText,
+                    parent: settings.categoryId
+                });
+            }
 
-        await targetChannel.send({ embeds: [embed], components: [row] });
-        console.log(`✅ Ticket system initialized in #${targetChannel.name}`);
-        
-    } catch (error) {
-        console.error('❌ Ticket system initialization failed:', error);
+            // Создаем кнопку для тикетов (в вашем стиле)
+            const button = new ButtonBuilder()
+                .setCustomId("create_regiment_request")
+                .setLabel("Создать заявку в полк")
+                .setStyle(ButtonStyle.Primary);
+
+            const row = new ActionRowBuilder().addComponents(button);
+
+            const embed = new EmbedBuilder()
+                .setTitle("Заявка в полк | Application to the regiment")
+                .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\n\nTo create a request, click the button below.")
+                .setColor(3447003)
+                .setTimestamp();
+
+            await targetChannel.send({ embeds: [embed], components: [row] });
+            console.log(`✅ Ticket system initialized in #${targetChannel.name} for guild: ${guild.name}`);
+            
+        } catch (error) {
+            console.error(`❌ Ticket system initialization failed for guild ${guildId}:`, error);
+        }
     }
 }
 
-// Обработчик кнопки тикета
+// Обработчик кнопки тикета (сохранен ваш оригинальный стиль)
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "create_regiment_request") return;
 
+    const guildId = interaction.guild.id;
+    const settings = ticketSettings.get(guildId);
+
+    if (!settings) {
+        await interaction.reply({ 
+            content: '❌ Система заявок не настроена на этом сервере! Обратитесь к администратору.', 
+            ephemeral: true 
+        });
+        return;
+    }
+
     const user = interaction.user;
-    const ticketChannelName = TICKET_CHANNEL_NAME_TEMPLATE.replace("{username}", user.username.toLowerCase());
+    const ticketChannelName = `ticket-${user.username.toLowerCase()}`;
 
     // Проверка на существующий тикет
     const existing = interaction.guild.channels.cache.find(
-        c => c.name === ticketChannelName && c.parentId === TICKET_CATEGORY_ID
+        c => c.name === ticketChannelName && c.parentId === settings.categoryId
     );
     
     if (existing) {
@@ -1922,7 +2036,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const channel = await interaction.guild.channels.create({
         name: ticketChannelName,
         type: ChannelType.GuildText,
-        parent: TICKET_CATEGORY_ID,
+        parent: settings.categoryId,
         permissionOverwrites: [
             {
                 id: interaction.guild.roles.everyone,
@@ -1932,14 +2046,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 id: user.id,
                 allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
             },
-            ...MODERATOR_ROLE_IDS.map(roleId => ({
+            ...settings.roleIds.map(roleId => ({
                 id: roleId,
                 allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
             })),
         ]
     });
 
-    // Embeds для тикета
+    // Embeds для тикета (ваши оригинальные)
     const embedRU = new EmbedBuilder()
         .setColor('#727070')
         .setTitle(':flag_ru: - RU Blank')
@@ -1980,6 +2094,39 @@ client.on(Events.InteractionCreate, async interaction => {
         content: `✅ Заявка создана: <#${channel.id}>`, 
         ephemeral: true 
     });
+});
+
+// Команда просмотра настроек
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    if (message.content === '!ticket-settings') {
+        const settings = ticketSettings.get(message.guild.id);
+
+        if (!settings) {
+            await message.reply('❌ Система заявок не настроена на этом сервере! Используйте `!ticket` для настройки.');
+            return;
+        }
+
+        const settingsEmbed = new EmbedBuilder()
+            .setColor('#727070')
+            .setTitle(':gear: Настройки системы заявок')
+            .addFields(
+                { name: '📋 Канал с кнопкой', value: `<#${settings.channelId}>`, inline: true },
+                { name: '📁 Категория заявок', value: `<#${settings.categoryId}>`, inline: true },
+                { name: '👥 Роли офицеров', value: settings.roleIds.map(id => `<@&${id}>`).join(', ') || 'Не указаны' }
+            )
+            .setFooter({ text: `Настроено для: ${message.guild.name}` });
+
+        await message.reply({ embeds: [settingsEmbed] });
+    }
+});
+
+// Инициализируем тикет систему при готовности бота
+client.once('ready', () => {
+    console.log(`✅ Bot has logged in as ${client.user.tag}`);
+    initializeTicketSystem();
 });
 
 // ==================== ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
