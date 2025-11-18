@@ -2086,10 +2086,14 @@ client.on(Events.InteractionCreate, async interaction => {
         );
 
     await channel.send({ 
-        content: `Здравствуйте, <@${user.id}>! Опишите вашу заявку, модераторы скоро ответят.`,
+        content: `Здравствуйте, <@${user.id}>! заполните ниже бланк для заявки в полк. ┇ Hello, <@${user.id}>! fill out the application form for the regiment below. `,
         embeds: [embedRU, embedEN] 
     });
-
+  
+ await channel.send({ 
+        content: `<@$1424069201143926838>`,
+        embeds: [embedRU, embedEN] 
+    });
     await interaction.reply({ 
         content: `✅ Заявка создана: <#${channel.id}>`, 
         ephemeral: true 
