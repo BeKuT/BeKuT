@@ -1,10 +1,23 @@
-import { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,Partials,PermissionsBitField, ChannelType,Events
-} = from('discord.js');
-import fs = require('fs').promises;
-import axios = require('axios');
-import express = require('express');
-import path = require('path');
-import session = require('express-session');
+import {
+  Client,
+  GatewayIntentBits,
+  Collection,
+  ActivityType,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Partials,
+  PermissionsBitField,
+  ChannelType,
+  Events
+} from 'discord.js';
+
+import fs from 'fs/promises';
+import axios from 'axios';
+import express from 'express';
+import path from 'path';
+import session from 'express-session';
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
