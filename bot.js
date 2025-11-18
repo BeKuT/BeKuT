@@ -2852,4 +2852,3 @@ client.login(token).catch(error => {
 });
 
 console.log('🚀 Bot starting with enhanced web dashboard...');
-}
