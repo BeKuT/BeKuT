@@ -2004,7 +2004,7 @@ async function initializeTicketSystem() {
     }
 }
 
-// Обработчик кнопки тикета (сохранен ваш оригинальный стиль)
+// Обработчик кнопки тикета
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "create_regiment_request") return;
 
@@ -2053,6 +2053,15 @@ client.on(Events.InteractionCreate, async interaction => {
         ]
     });
 
+    // Создаем кнопку закрытия
+    const closeButton = new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Закрыть")
+        .setStyle(ButtonStyle.Danger) // Красный цвет
+        .setEmoji("🔒"); // Смайлик закрытого замка
+
+    const closeRow = new ActionRowBuilder().addComponents(closeButton);
+
     // Embeds для тикета (ваши оригинальные)
     const embedRU = new EmbedBuilder()
         .setColor('#727070')
@@ -2085,52 +2094,98 @@ client.on(Events.InteractionCreate, async interaction => {
             "**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**"
         );
 
+    // Отправляем приветственное сообщение
     await channel.send({ 
-        content: `Здравствуйте, <@${user.id}>! заполните ниже бланк для заявки в полк. ┇ Hello, <@${user.id}>! fill out the application form for the regiment below. `,
-        embeds: [embedRU, embedEN] 
+        content: `<@&1424069201143926838> `
     });
+    await channel.send({ 
+        content: `Здравствуйте, <@${user.id}>! пожалуйста заполните ниже бланк вопросов. `
+    }); 
   
- await channel.send({ 
-        content: `<@$1424069201143926838>`,
-        embeds: [embedRU, embedEN] 
+    // Отправляем русскую анкету
+    await channel.send({ embeds: [embedRU] });
+
+    // Отправляем английскую анкету с кнопкой закрытия
+    await channel.send({ 
+        embeds: [embedEN],
+        components: [closeRow] 
     });
+
     await interaction.reply({ 
         content: `✅ Заявка создана: <#${channel.id}>`, 
         ephemeral: true 
     });
 });
 
-// Команда просмотра настроек
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+// Обработчик кнопки закрытия тикета (с созданием транскрипта и удалением канала)
+client.on(Events.InteractionCreate, async interaction => {
+    if (!interaction.isButton() || interaction.customId !== "close_ticket") return;
 
-    if (message.content === '!ticket-settings') {
-        const settings = ticketSettings.get(message.guild.id);
-
-        if (!settings) {
-            await message.reply('❌ Система заявок не настроена на этом сервере! Используйте `!ticket` для настройки.');
-            return;
-        }
-
-        const settingsEmbed = new EmbedBuilder()
-            .setColor('#727070')
-            .setTitle(':gear: Настройки системы заявок')
-            .addFields(
-                { name: '📋 Канал с кнопкой', value: `<#${settings.channelId}>`, inline: true },
-                { name: '📁 Категория заявок', value: `<#${settings.categoryId}>`, inline: true },
-                { name: '👥 Роли офицеров', value: settings.roleIds.map(id => `<@&${id}>`).join(', ') || 'Не указаны' }
-            )
-            .setFooter({ text: `Настроено для: ${message.guild.name}` });
-
-        await message.reply({ embeds: [settingsEmbed] });
+    const channel = interaction.channel;
+    
+    // Проверяем, что это тикет-канал
+    if (!channel.name.startsWith('ticket-')) {
+        await interaction.reply({ content: '❌ Эта кнопка работает только в тикет-каналах!', ephemeral: true });
+        return;
     }
-});
 
-// Инициализируем тикет систему при готовности бота
-client.once('ready', () => {
-    console.log(`✅ Bot has logged in as ${client.user.tag}`);
-    initializeTicketSystem();
+    const user = interaction.user;
+
+    // Проверяем права (создатель тикета или модератор)
+    const isOwner = channel.name === `ticket-${user.username.toLowerCase()}`;
+    const isModerator = interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages);
+
+    if (!isOwner && !isModerator) {
+        await interaction.reply({ 
+            content: '❌ Только создатель заявки или модератор может закрыть тикет!', 
+            ephemeral: true 
+        });
+        return;
+    }
+
+    try {
+        // Сразу удаляем кнопку чтобы предотвратить повторное нажатие
+        await interaction.message.edit({ components: [] });
+        await interaction.reply({ content: '🔒 Создаю транскрипт и удаляю заявку...' });
+
+        // Создаем транскрипт
+        await channel.send('-transcript');
+
+        // Ждем 2 секунды чтобы команда транскрипта обработалась
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Создаем embed сообщение о удалении
+        const deleteEmbed = new EmbedBuilder()
+            .setColor('#ED4245')
+            .setTitle('🗑️ Заявка удалена')
+            .setDescription(`Заявка удалена пользователем ${user.tag}`)
+            .addFields(
+                { name: '👤 Удалил', value: `${user.tag}`, inline: true },
+                { name: '⏰ Время удаления', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
+                { name: '📄 Транскрипт', value: 'Транскрипт заявки был создан и сохранен', inline: false }
+            )
+            .setTimestamp();
+
+        // Отправляем сообщение о удалении
+        await channel.send({ embeds: [deleteEmbed] });
+
+        // Ждем 3 секунды чтобы пользователь увидел сообщение
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Удаляем канал
+        await channel.delete();
+
+        console.log(`✅ Ticket deleted by ${user.tag} in guild ${interaction.guild.name}, transcript created`);
+
+    } catch (error) {
+        console.error('Ticket delete error:', error);
+        
+        if (interaction.replied) {
+            await interaction.editReply({ content: '❌ Ошибка при удалении заявки!' });
+        } else {
+            await interaction.reply({ content: '❌ Ошибка при удалении заявки!', ephemeral: true });
+        }
+    }
 });
 
 // ==================== ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
