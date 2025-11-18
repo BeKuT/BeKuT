@@ -914,6 +914,23 @@ function createCommandsPage(user, baseUrl) {
             color: #b9bbbe;
             margin-top: 5px;
         }
+        .command-usage {
+            background: #2f3136;
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin: 8px 0;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+            border-left: 3px solid #57F287;
+        }
+        .permission-badge {
+            background: #ed4245;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }
         .nav-item {
             display: flex;
             align-items: center;
@@ -946,6 +963,20 @@ function createCommandsPage(user, baseUrl) {
             cursor: pointer;
             margin-top: 20px;
             width: 100%;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            background: #36393f;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
         }
     </style>
 </head>
@@ -987,22 +1018,38 @@ function createCommandsPage(user, baseUrl) {
         </div>
 
         <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
+            <h2 style="color: #5865F2; margin-bottom: 20px;">📄 Команды транскриптов</h2>
+            
             <div class="command-item">
-                <div class="command-name">!stat [никнейм/ID]</div>
-                <div class="command-desc">Показывает статистику игрока War Thunder через StatShark</div>
+                <div class="command-name">-transcript <span class="permission-badge">MANAGE_MESSAGES</span></div>
+                <div class="command-desc">Создает транскрипт текущего канала и отправляет его в настроенный канал</div>
+                <div class="command-usage">Использование: -transcript</div>
             </div>
+            
             <div class="command-item">
-                <div class="command-name">!полк [название]</div>
-                <div class="command-desc">Информация о полке War Thunder</div>
+                <div class="command-name">-settranscript <span class="permission-badge">ADMINISTRATOR</span></div>
+                <div class="command-desc">Настраивает канал для отправки транскриптов</div>
+                <div class="command-usage">Использование: -settranscript &lt;ID_канала&gt;<br>Пример: -settranscript 123456789012345678<br>Сброс: -settranscript reset</div>
+            </div>
+            
+            <div class="command-item">
+                <div class="command-name">-transcriptsettings</div>
+                <div class="command-desc">Показывает текущие настройки транскриптов для этого сервера</div>
+                <div class="command-usage">Использование: -transcriptsettings</div>
             </div>
         </div>
 
         <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">📄 Команды транскриптов</h2>
+            <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
             <div class="command-item">
-                <div class="command-name">-transcript</div>
-                <div class="command-desc">Создает транскрипт текущего канала (требует права MANAGE_MESSAGES)</div>
+                <div class="command-name">!stat [никнейм/ID]</div>
+                <div class="command-desc">Показывает статистику игрока War Thunder через StatShark</div>
+                <div class="command-usage">Пример: !stat PlayerName</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">!полк [название]</div>
+                <div class="command-desc">Информация о полке War Thunder</div>
+                <div class="command-usage">Пример: !полк НазваниеПолка</div>
             </div>
         </div>
 
@@ -1011,6 +1058,68 @@ function createCommandsPage(user, baseUrl) {
             <div class="command-item">
                 <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
                 <div class="command-desc">Добавьте реакцию 🇷🇺 для перевода на русский или 🇬🇧 для перевода на английский</div>
+                <div class="command-usage">Автоматически переводит сообщение при добавлении флаговой реакции</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🎵 Команды радио</h2>
+            <div class="command-item">
+                <div class="command-name">-play [станция]</div>
+                <div class="command-desc">Включает радиостанцию в голосовом канале</div>
+                <div class="command-usage">Пример: -play нвс<br>Доступные станции: нвс, шансон, ретро, рок</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-stop</div>
+                <div class="command-desc">Выключает радио</div>
+                <div class="command-usage">Использование: -stop</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-stations</div>
+                <div class="command-desc">Показывает список доступных радиостанций</div>
+                <div class="command-usage">Использование: -stations</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🗑️ Команды автоудаления</h2>
+            <div class="command-item">
+                <div class="command-name">-autodelete on/off <span class="permission-badge">MANAGE_MESSAGES</span></div>
+                <div class="command-desc">Включает/выключает автоматическое удаление сообщений</div>
+                <div class="command-usage">Пример: -autodelete on</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-autodelete delay [мс]</div>
+                <div class="command-desc">Устанавливает задержку перед удалением сообщений</div>
+                <div class="command-usage">Пример: -autodelete delay 5000</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-autodelete addchannel #канал</div>
+                <div class="command-desc">Добавляет канал в список автоудаления</div>
+                <div class="command-usage">Пример: -autodelete addchannel #флуд</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-autodelete addrole @роль</div>
+                <div class="command-desc">Добавляет исключенную роль (сообщения не удаляются)</div>
+                <div class="command-usage">Пример: -autodelete addrole @Модератор</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🎫 Команды тикетов</h2>
+            <div class="command-item">
+                <div class="command-name">!ticket</div>
+                <div class="command-desc">Настройка системы тикетов для заявок в полк</div>
+                <div class="command-usage">Использование: !ticket &lt;ID_канала&gt; &lt;ID_категории&gt; &lt;ID_ролей&gt;</div>
+            </div>
+        </div>
+
+        <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🔧 Сервисные команды</h2>
+            <div class="command-item">
+                <div class="command-name">-ping</div>
+                <div class="command-desc">Проверяет работоспособность бота</div>
+                <div class="command-usage">Использование: -ping</div>
             </div>
         </div>
     </div>
@@ -1448,6 +1557,29 @@ function createTranscriptsPage(user, baseUrl, adminGuilds) {
 </html>`;
 }
 
+// ==================== СИСТЕМА НАСТРОЕК ТРАНСКРИПТОВ ====================
+
+// Хранилище настроек для каждого сервера
+const serverSettings = new Map();
+
+// Функция для получения настроек сервера
+function getServerSettings(guildId) {
+    if (!serverSettings.has(guildId)) {
+        serverSettings.set(guildId, {
+            transcriptChannelId: TRANSCRIPT_CHANNEL_ID // значение по умолчанию
+        });
+    }
+    return serverSettings.get(guildId);
+}
+
+// Функция для сохранения настроек (для будущего использования с БД)
+function saveServerSettings(guildId, settings) {
+    serverSettings.set(guildId, settings);
+    // Здесь можно добавить сохранение в базу данных
+    console.log(`💾 Settings saved for guild ${guildId}:`, settings);
+}
+
+
 // ==================== ФУНКЦИИ ДЛЯ ТРАНСКРИПТОВ ====================
 
 async function collectTicketInfo(channel, messages) {
@@ -1662,6 +1794,128 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
+
+// ==================== КОМАНДЫ НАСТРОЙКИ ТРАНСКРИПТОВ ====================
+
+client.on('messageCreate', async message => {
+    if (message.system) return;
+    if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    // Команда для настройки канала транскриптов
+    if (message.content.startsWith('-settranscript')) {
+        const args = message.content.split(' ');
+        
+        if (args.length < 2) {
+            const helpEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('⚙️ Настройка канала для транскриптов')
+                .setDescription(`
+**Использование:**
+\`-settranscript <ID_канала>\`
+
+**Примеры:**
+\`-settranscript 123456789012345678\` - установить канал по ID
+\`-settranscript reset\` - сбросить к значению по умолчанию
+
+**Как получить ID канала:**
+1. Включите режим разработчика в Discord
+2. ПКМ по каналу → "Копировать ID"
+                `);
+            
+            await message.reply({ embeds: [helpEmbed] });
+            return;
+        }
+
+        const channelId = args[1];
+        
+        if (channelId === 'reset') {
+            const settings = getServerSettings(message.guild.id);
+            settings.transcriptChannelId = TRANSCRIPT_CHANNEL_ID;
+            saveServerSettings(message.guild.id, settings);
+            
+            const resetEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('✅ Настройки сброшены')
+                .setDescription(`Канал для транскриптов сброшен к значению по умолчанию: \`${TRANSCRIPT_CHANNEL_ID}\``);
+            
+            await message.reply({ embeds: [resetEmbed] });
+            return;
+        }
+
+        // Проверяем валидность ID канала
+        if (!/^\d{17,20}$/.test(channelId)) {
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Ошибка')
+                .setDescription('Укажите корректный ID канала (должен содержать 17-20 цифр)');
+            
+            await message.reply({ embeds: [errorEmbed] });
+            return;
+        }
+
+        try {
+            // Проверяем существование канала
+            const channel = await message.guild.channels.fetch(channelId);
+            if (!channel) {
+                throw new Error('Канал не найден');
+            }
+
+            // Проверяем права бота в канале
+            const botMember = message.guild.members.me;
+            if (!channel.permissionsFor(botMember).has([PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.EmbedLinks])) {
+                throw new Error('У бота нет прав для отправки сообщений в этот канал');
+            }
+
+            // Сохраняем настройки
+            const settings = getServerSettings(message.guild.id);
+            settings.transcriptChannelId = channelId;
+            saveServerSettings(message.guild.id, settings);
+
+            const successEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('✅ Настройки сохранены')
+                .setDescription(`Канал для транскриптов установлен: <#${channelId}>`)
+                .addFields(
+                    { name: 'ID канала', value: `\`${channelId}\``, inline: true },
+                    { name: 'Название', value: `\`${channel.name}\``, inline: true }
+                )
+                .setFooter({ text: 'Теперь все транскрипты будут отправляться в этот канал' });
+
+            await message.reply({ embeds: [successEmbed] });
+            
+        } catch (error) {
+            console.error('Error setting transcript channel:', error);
+            
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Ошибка')
+                .setDescription(`Не удалось установить канал: ${error.message}`);
+            
+            await message.reply({ embeds: [errorEmbed] });
+        }
+    }
+
+    // Команда для проверки текущих настроек
+    if (message.content === '-transcriptsettings') {
+        const settings = getServerSettings(message.guild.id);
+        
+        const statusEmbed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle('⚙️ Текущие настройки транскриптов')
+            .addFields(
+                { 
+                    name: '📁 Канал для транскриптов', 
+                    value: settings.transcriptChannelId === TRANSCRIPT_CHANNEL_ID ? 
+                        `По умолчанию: \`${TRANSCRIPT_CHANNEL_ID}\`` : 
+                        `<#${settings.transcriptChannelId}> (\`${settings.transcriptChannelId}\`)`, 
+                    inline: false 
+                }
+            )
+            .setFooter({ text: 'Используйте -settranscript для изменения настроек' });
+
+        await message.reply({ embeds: [statusEmbed] });
+    }
+});
 
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
