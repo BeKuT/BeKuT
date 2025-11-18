@@ -3184,6 +3184,12 @@ client.on('messageCreate', async message => {
         try {
             console.log('🚀 Starting transcript creation process...');
             
+            // Получаем настройки сервера
+            const settings = getServerSettings(message.guild.id);
+            const transcriptChannelId = settings.transcriptChannelId;
+            
+            console.log(`📝 Using transcript channel: ${transcriptChannelId}`);
+            
             let messageCollection = new Collection();
             let channelMessages = await message.channel.messages.fetch({ limit: 100 });
             messageCollection = messageCollection.concat(channelMessages);
@@ -3248,7 +3254,9 @@ client.on('messageCreate', async message => {
                 );
             
             const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
-            const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+            
+            // ИСПОЛЬЗУЕМ НАСТРОЕННЫЙ КАНАЛ ИЗ serverSettings
+            const transcriptChannel = client.channels.cache.get(transcriptChannelId);
             
             if (transcriptChannel && transcriptChannel.isTextBased()) {
                 await transcriptChannel.send({
@@ -3258,11 +3266,11 @@ client.on('messageCreate', async message => {
                 });
                 
                 await message.channel.send('✅ Transcript created! Click the "Open Transcript" button to view it online.');
-                console.log(`✅ Transcript message sent with URL: ${transcriptUrl}`);
+                console.log(`✅ Transcript message sent to channel ${transcriptChannelId}`);
                 console.log(`🎉 Transcript creation completed successfully!`);
                 
             } else {
-                throw new Error('Transcript channel not found or not accessible');
+                throw new Error(`Transcript channel not found or not accessible: ${transcriptChannelId}`);
             }
             
         } catch (error) {
