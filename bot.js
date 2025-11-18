@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,Partials,PermissionsBitField, ChannelType,Events
+import { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,Partials,PermissionsBitField, ChannelType,Events
 } = require('discord.js');
 const fs = require('fs').promises;
 const axios = require('axios');
@@ -1994,8 +1994,8 @@ async function translateWithAPI(text, targetLang) {
         if ((sourceLang === 'ru' && targetLang === 'ru') || (sourceLang === 'en' && targetLang === 'en')) {
             return text;
         }
-        const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`);
-        const data = await response.json();
+        const response = await axios.get(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`);
+        const data = response.data;
         if (data.responseStatus === 200) {
             return data.responseData.translatedText;
         } else {
