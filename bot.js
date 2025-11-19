@@ -3636,7 +3636,7 @@ client.on('messageCreate', async message => {
             await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
     }
-  // Обработка реакций для перевода
+// Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     // Проверяем, что реакция - это флаги перевода
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
@@ -3654,6 +3654,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             
             // Проверяем, не отключен ли перевод в этом канале
             if (settings.disabledTranslationChannels.includes(message.channel.id)) {
+                console.log(`🚫 Translation disabled in channel: ${message.channel.name}`);
                 return;
             }
             
@@ -3663,7 +3664,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 const hasProtectedRole = authorMember.roles.cache.some(role => 
                     settings.protectedRoles.includes(role.id)
                 );
-                if (hasProtectedRole) return;
+                if (hasProtectedRole) {
+                    console.log(`🛡️ Translation blocked for protected role: ${authorMember.user.tag}`);
+                    return;
+                }
             }
             
             // Проверяем кулдаун
@@ -3672,14 +3676,46 @@ client.on('messageReactionAdd', async (reaction, user) => {
             translationCooldown.add(cooldownKey);
             setTimeout(() => translationCooldown.delete(cooldownKey), TRANSLATION_COOLDOWN_TIME);
             
-            // ... остальной код перевода без изменений ...
+            // ОСНОВНОЙ КОД ПЕРЕВОДА
+            const originalText = message.content;
+            const detectedLang = detectLanguage(originalText);
+            let targetLang, flagEmoji, languageName;
+            
+            if (reaction.emoji.name === '🇷🇺') {
+                targetLang = 'ru'; flagEmoji = '🇷🇺'; languageName = 'Русский';
+            } else {
+                targetLang = 'en'; flagEmoji = '🇬🇧'; languageName = 'Английский';
+            }
+            
+            const sourceLang = detectedLang === 'ru' ? 'ru' : 'en';
+            if (sourceLang === targetLang) {
+                setTimeout(async () => {
+                    try { await reaction.users.remove(user.id); } catch (error) {}
+                }, 3000);
+                return;
+            }
+            
+            const translatedText = await translateWithAPI(originalText, targetLang);
+            const translationMessage = await message.reply({
+                content: `**${flagEmoji} Перевод на ${languageName}:**\n${translatedText}`,
+                allowedMentions: { repliedUser: false }
+            });
+            
+            translationMessages.set(message.id, translationMessage.id);
+            const deleteTimeout = setTimeout(async () => {
+                try {
+                    await translationMessage.delete();
+                    await reaction.users.remove(user.id);
+                    translationMessages.delete(message.id);
+                } catch (deleteError) {}
+            }, 10000);
+            translationMessages.set(`${message.id}_timeout`, deleteTimeout);
             
         } catch (error) {
             console.error('❌ Error processing flag reaction:', error);
         }
     }
 });
-
 // ==================== ЗАПУСК СЕРВЕРА ====================
 
 const server = app.listen(PORT, '0.0.0.0', () => {
