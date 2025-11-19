@@ -1040,6 +1040,45 @@ function createCommandsPage(user, baseUrl) {
         </div>
 
         <div class="command-category">
+            <h2 style="color: #5865F2; margin-bottom: 20px;">🌐 Команды перевода</h2>
+            <div class="command-item">
+                <div class="command-name">-translation on/off <span class="permission-badge">ADMINISTRATOR</span></div>
+                <div class="command-desc">Включает/выключает автоматический перевод по реакциям</div>
+                <div class="command-usage">Пример: -translation on</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-translation disablechannel #канал</div>
+                <div class="command-desc">Отключает авто-перевод в указанном канале</div>
+                <div class="command-usage">Пример: -translation disablechannel #важный</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-translation enablechannel #канал</div>
+                <div class="command-desc">Включает авто-перевод в указанном канале</div>
+                <div class="command-usage">Пример: -translation enablechannel #общение</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-translation clearchannels</div>
+                <div class="command-desc">Включает перевод во всех каналах (очищает исключения)</div>
+                <div class="command-usage">Использование: -translation clearchannels</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-translation addrole @роль</div>
+                <div class="command-desc">Добавляет защищенную роль (сообщения не переводятся)</div>
+                <div class="command-usage">Пример: -translation addrole @Модератор</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">-translation status</div>
+                <div class="command-desc">Показывает текущие настройки перевода</div>
+                <div class="command-usage">Использование: -translation status</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
+                <div class="command-desc">Автоматический перевод при добавлении флаговых реакций</div>
+                <div class="command-usage">🇷🇺 - перевод на русский<br>🇬🇧 - перевод на английский</div>
+            </div>
+        </div>
+
+        <div class="command-category">
             <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
             <div class="command-item">
                 <div class="command-name">!stat [никнейм/ID]</div>
@@ -1050,15 +1089,6 @@ function createCommandsPage(user, baseUrl) {
                 <div class="command-name">!полк [название]</div>
                 <div class="command-desc">Информация о полке War Thunder</div>
                 <div class="command-usage">Пример: !полк НазваниеПолка</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🌐 Команды перевода</h2>
-            <div class="command-item">
-                <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
-                <div class="command-desc">Добавьте реакцию 🇷🇺 для перевода на русский или 🇬🇧 для перевода на английский</div>
-                <div class="command-usage">Автоматически переводит сообщение при добавлении флаговой реакции</div>
             </div>
         </div>
 
@@ -1103,14 +1133,29 @@ function createCommandsPage(user, baseUrl) {
                 <div class="command-desc">Добавляет исключенную роль (сообщения не удаляются)</div>
                 <div class="command-usage">Пример: -autodelete addrole @Модератор</div>
             </div>
+            <div class="command-item">
+                <div class="command-name">-autodelete status</div>
+                <div class="command-desc">Показывает текущие настройки автоудаления</div>
+                <div class="command-usage">Использование: -autodelete status</div>
+            </div>
         </div>
 
         <div class="command-category">
             <h2 style="color: #5865F2; margin-bottom: 20px;">🎫 Команды тикетов</h2>
             <div class="command-item">
-                <div class="command-name">!ticket</div>
+                <div class="command-name">!ticket <span class="permission-badge">ADMINISTRATOR</span></div>
                 <div class="command-desc">Настройка системы тикетов для заявок в полк</div>
-                <div class="command-usage">Использование: !ticket &lt;ID_канала&gt; &lt;ID_категории&gt; &lt;ID_ролей&gt;</div>
+                <div class="command-usage">Использование: !ticket &lt;ID_канала&gt; &lt;ID_категории&gt; &lt;ID_ролей&gt;<br>Пример: !ticket 123456789 987654321 111111111,222222222</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">Кнопка "Создать заявку в полк"</div>
+                <div class="command-desc">Создает тикет для подачи заявки в полк</div>
+                <div class="command-usage">Нажмите на кнопку в настроенном канале тикетов</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">Кнопка "Закрыть" в тикете</div>
+                <div class="command-desc">Закрывает тикет и создает транскрипт</div>
+                <div class="command-usage">Нажмите на кнопку в канале тикета</div>
             </div>
         </div>
 
@@ -1121,6 +1166,22 @@ function createCommandsPage(user, baseUrl) {
                 <div class="command-desc">Проверяет работоспособность бота</div>
                 <div class="command-usage">Использование: -ping</div>
             </div>
+            <div class="command-item">
+                <div class="command-name">-testvoice</div>
+                <div class="command-desc">Тестирует подключение к голосовому каналу</div>
+                <div class="command-usage">Использование: -testvoice</div>
+            </div>
+        </div>
+
+        <div style="background: #2b2b2b; padding: 20px; border-radius: 10px; border-left: 4px solid #5865F2; margin-top: 30px;">
+            <h3 style="color: #57F287; margin-bottom: 10px;">💡 Примечания по использованию</h3>
+            <ul style="color: #b9bbbe; margin-left: 20px;">
+                <li>Команды с бейджем <span class="permission-badge">ADMINISTRATOR</span> требуют прав администратора</li>
+                <li>Команды с бейджем <span class="permission-badge">MANAGE_MESSAGES</span> требуют прав управления сообщениями</li>
+                <li>Для работы радио необходимо находиться в голосовом канале</li>
+                <li>Транскрипты сохраняются в постоянное хранилище и доступны по ссылке</li>
+                <li>Авто-перевод работает во всех каналах, кроме указанных в исключениях</li>
+            </ul>
         </div>
     </div>
 </body>
@@ -3570,6 +3631,48 @@ client.on('messageCreate', async message => {
         } catch (error) {
             console.error('❌ Error creating transcript:', error);
             await message.channel.send('❌ Error creating transcript: ' + error.message);
+        }
+    }
+  // Обработка реакций для перевода
+client.on('messageReactionAdd', async (reaction, user) => {
+    // Проверяем, что реакция - это флаги перевода
+    if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
+        try {
+            if (reaction.partial) await reaction.fetch();
+            const message = reaction.message;
+            if (message.system) return;
+            if (!message.guild) return;
+            
+            // Получаем настройки сервера
+            const settings = getServerSettings(message.guild.id);
+            
+            // Проверяем, включен ли авто-перевод
+            if (!settings.translationEnabled) return;
+            
+            // Проверяем, не отключен ли перевод в этом канале
+            if (settings.disabledTranslationChannels.includes(message.channel.id)) {
+                return;
+            }
+            
+            // Проверяем, защищена ли роль автора сообщения
+            const authorMember = await message.guild.members.fetch(message.author.id).catch(() => null);
+            if (authorMember) {
+                const hasProtectedRole = authorMember.roles.cache.some(role => 
+                    settings.protectedRoles.includes(role.id)
+                );
+                if (hasProtectedRole) return;
+            }
+            
+            // Проверяем кулдаун
+            const cooldownKey = `${user.id}-${message.id}`;
+            if (translationCooldown.has(cooldownKey)) return;
+            translationCooldown.add(cooldownKey);
+            setTimeout(() => translationCooldown.delete(cooldownKey), TRANSLATION_COOLDOWN_TIME);
+            
+            // ... остальной код перевода без изменений ...
+            
+        } catch (error) {
+            console.error('❌ Error processing flag reaction:', error);
         }
     }
 });
