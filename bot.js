@@ -1566,19 +1566,20 @@ const serverSettings = new Map();
 function getServerSettings(guildId) {
     if (!serverSettings.has(guildId)) {
         serverSettings.set(guildId, {
-            transcriptChannelId: TRANSCRIPT_CHANNEL_ID // значение по умолчанию
+            transcriptChannelId: TRANSCRIPT_CHANNEL_ID, // значение по умолчанию
+            translationEnabled: true, // авто-перевод включен по умолчанию
+            disabledTranslationChannels: [], // каналы где перевод ОТКЛЮЧЕН
+            protectedRoles: [] // роли, чьи сообщения не переводятся
         });
     }
     return serverSettings.get(guildId);
 }
 
-// Функция для сохранения настроек (для будущего использования с БД)
+// Функция для сохранения настроек
 function saveServerSettings(guildId, settings) {
     serverSettings.set(guildId, settings);
-    // Здесь можно добавить сохранение в базу данных
     console.log(`💾 Settings saved for guild ${guildId}:`, settings);
 }
-
 
 // ==================== ФУНКЦИИ ДЛЯ ТРАНСКРИПТОВ ====================
 
@@ -1915,6 +1916,299 @@ client.on('messageCreate', async message => {
 
         await message.reply({ embeds: [statusEmbed] });
     }
+  // Команды для настройки авто-перевода
+if (message.content.startsWith('-translation')) {
+    const args = message.content.split(' ');
+    const subcommand = args[1];
+    const settings = getServerSettings(message.guild.id);
+    
+    try {
+        switch(subcommand) {
+            case 'on':
+                settings.translationEnabled = true;
+                saveServerSettings(message.guild.id, settings);
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('✅ АВТО-ПЕРЕВОД ВКЛЮЧЕН')
+                            .setColor(0x57F287)
+                            .setDescription('Система автоматического перевода по реакциям теперь активна во всех каналах, кроме исключенных.')
+                            .addFields(
+                                { name: '🇷🇺 Русский', value: 'Добавьте реакцию 🇷🇺 для перевода на русский', inline: true },
+                                { name: '🇬🇧 Английский', value: 'Добавьте реакцию 🇬🇧 для перевода на английский', inline: true }
+                            )
+                    ]
+                });
+                break;
+                
+            case 'off':
+                settings.translationEnabled = false;
+                saveServerSettings(message.guild.id, settings);
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('❌ АВТО-ПЕРЕВОД ВЫКЛЮЧЕН')
+                            .setColor(0xED4245)
+                            .setDescription('Система автоматического перевода по реакциям отключена во всех каналах.')
+                    ]
+                });
+                break;
+                
+            case 'disablechannel':
+                const channelToDisable = args.slice(2).join(' ');
+                if (channelToDisable) {
+                    let targetChannel = message.mentions.channels.first();
+                    if (!targetChannel) {
+                        targetChannel = message.guild.channels.cache.get(channelToDisable);
+                    }
+                    if (!targetChannel) {
+                        targetChannel = message.guild.channels.cache.find(ch => 
+                            ch.name.toLowerCase().includes(channelToDisable.toLowerCase())
+                        );
+                    }
+                    
+                    if (targetChannel && targetChannel.isTextBased()) {
+                        if (!settings.disabledTranslationChannels.includes(targetChannel.id)) {
+                            settings.disabledTranslationChannels.push(targetChannel.id);
+                            saveServerSettings(message.guild.id, settings);
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('🚫 ПЕРЕВОД ОТКЛЮЧЕН')
+                                        .setColor(0xFEE75C)
+                                        .setDescription(`Авто-перевод отключен для канала: **#${targetChannel.name}**`)
+                                        .setFooter({ text: 'В остальных каналах перевод продолжит работать' })
+                                ]
+                            });
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('ℹ️ КАНАЛ УЖЕ В СПИСКЕ')
+                                        .setColor(0xFEE75C)
+                                        .setDescription(`Канал **#${targetChannel.name}** уже в списке отключенных.`)
+                                ]
+                            });
+                        }
+                    } else {
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle('❌ КАНАЛ НЕ НАЙДЕН')
+                                    .setColor(0xED4245)
+                                    .setDescription('Укажите текстовый канал.')
+                            ]
+                        });
+                    }
+                }
+                break;
+                
+            case 'enablechannel':
+                const channelToEnable = args.slice(2).join(' ');
+                if (channelToEnable) {
+                    let targetChannel = message.mentions.channels.first();
+                    if (!targetChannel) {
+                        targetChannel = message.guild.channels.cache.get(channelToEnable);
+                    }
+                    if (!targetChannel) {
+                        targetChannel = message.guild.channels.cache.find(ch => 
+                            ch.name.toLowerCase().includes(channelToEnable.toLowerCase())
+                        );
+                    }
+                    
+                    if (targetChannel) {
+                        const index = settings.disabledTranslationChannels.indexOf(targetChannel.id);
+                        if (index > -1) {
+                            settings.disabledTranslationChannels.splice(index, 1);
+                            saveServerSettings(message.guild.id, settings);
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('✅ ПЕРЕВОД ВКЛЮЧЕН')
+                                        .setColor(0x57F287)
+                                        .setDescription(`Авто-перевод включен для канала: **#${targetChannel.name}**`)
+                                ]
+                            });
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('ℹ️ КАНАЛ НЕ НАЙДЕН')
+                                        .setColor(0xFEE75C)
+                                        .setDescription(`Канал **#${targetChannel.name}** не найден в списке отключенных.`)
+                                ]
+                            });
+                        }
+                    }
+                }
+                break;
+                
+            case 'addrole':
+                const roleToAdd = args.slice(2).join(' ');
+                if (roleToAdd) {
+                    let targetRole = message.mentions.roles.first();
+                    if (!targetRole) {
+                        targetRole = message.guild.roles.cache.get(roleToAdd);
+                    }
+                    if (!targetRole) {
+                        targetRole = message.guild.roles.cache.find(role => 
+                            role.name.toLowerCase().includes(roleToAdd.toLowerCase())
+                        );
+                    }
+                    
+                    if (targetRole) {
+                        if (!settings.protectedRoles.includes(targetRole.id)) {
+                            settings.protectedRoles.push(targetRole.id);
+                            saveServerSettings(message.guild.id, settings);
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('🛡️ РОЛЬ ДОБАВЛЕНА')
+                                        .setColor(0x57F287)
+                                        .setDescription(`Роль **${targetRole.name}** добавлена в защищенные.\n\n💡 Сообщения от этой роли **НЕ будут переводиться**.`)
+                                ]
+                            });
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('ℹ️ РОЛЬ УЖЕ В СПИСКЕ')
+                                        .setColor(0xFEE75C)
+                                        .setDescription(`Роль **${targetRole.name}** уже в списке защищенных.`)
+                                ]
+                            });
+                        }
+                    }
+                }
+                break;
+                
+            case 'removerole':
+                const roleToRemove = args.slice(2).join(' ');
+                if (roleToRemove) {
+                    let targetRole = message.mentions.roles.first();
+                    if (!targetRole) {
+                        targetRole = message.guild.roles.cache.get(roleToRemove);
+                    }
+                    if (!targetRole) {
+                        targetRole = message.guild.roles.cache.find(role => 
+                            role.name.toLowerCase().includes(roleToRemove.toLowerCase())
+                        );
+                    }
+                    
+                    if (targetRole) {
+                        const index = settings.protectedRoles.indexOf(targetRole.id);
+                        if (index > -1) {
+                            settings.protectedRoles.splice(index, 1);
+                            saveServerSettings(message.guild.id, settings);
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('✅ РОЛЬ УДАЛЕНА')
+                                        .setColor(0x57F287)
+                                        .setDescription(`Роль **${targetRole.name}** удалена из защищенных.\n\n💡 Сообщения от этой роли теперь **будут переводиться**.`)
+                                ]
+                            });
+                        } else {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setTitle('ℹ️ РОЛЬ НЕ НАЙДЕНА')
+                                        .setColor(0xFEE75C)
+                                        .setDescription(`Роль **${targetRole.name}** не найдена в списке защищенных.`)
+                                ]
+                            });
+                        }
+                    }
+                }
+                break;
+                
+            case 'status':
+                const status = settings.translationEnabled ? '✅ ВКЛЮЧЕН' : '❌ ВЫКЛЮЧЕН';
+                const disabledChannelsInfo = settings.disabledTranslationChannels.length === 0 ? 
+                    'Нет' : 
+                    settings.disabledTranslationChannels.map(id => {
+                        const ch = message.guild.channels.cache.get(id);
+                        return ch ? `#${ch.name}` : id;
+                    }).join(', ');
+                
+                const rolesInfo = settings.protectedRoles.length === 0 ? 
+                    'Нет' : 
+                    settings.protectedRoles.map(id => {
+                        const role = message.guild.roles.cache.get(id);
+                        return role ? role.name : id;
+                    }).join(', ');
+                
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('🌐 СТАТУС АВТО-ПЕРЕВОДА')
+                            .setColor(settings.translationEnabled ? 0x57F287 : 0xED4245)
+                            .setDescription(`
+**Общий статус:** ${status}
+🚫 **Отключен в каналах:** ${disabledChannelsInfo}
+🛡️ **Защищенные роли:** ${rolesInfo}
+
+**🇷🇺 Реакции:**
+• 🇷🇺 - перевод на русский
+• 🇬🇧 - перевод на английский
+
+**💡 Логика работы:**
+Перевод работает во всех каналах, кроме указанных в списке отключенных.
+                            `)
+                    ]
+                });
+                break;
+                
+            case 'clearchannels':
+                settings.disabledTranslationChannels = [];
+                saveServerSettings(message.guild.id, settings);
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('🗑️ СПИСОК ОЧИЩЕН')
+                            .setColor(0x57F287)
+                            .setDescription('Очищен список каналов с отключенным переводом.\n\n💡 Перевод теперь работает во **всех каналах**.')
+                    ]
+                });
+                break;
+                
+            default:
+                await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('🌐 НАСТРОЙКА АВТО-ПЕРЕВОДА')
+                            .setColor(0x5865F2)
+                            .setDescription(`
+**Основные команды:**
+\`-translation on\` - Включить авто-перевод
+\`-translation off\` - Выключить авто-перевод
+\`-translation status\` - Статус настроек
+
+**Управление каналами:**
+\`-translation disablechannel #канал\` - Отключить перевод в канале
+\`-translation enablechannel #канал\` - Включить перевод в канале
+\`-translation clearchannels\` - Включить перевод во всех каналах
+
+**Защищенные роли:**
+\`-translation addrole @роль\` - Добавить защищенную роль
+\`-translation removerole @роль\` - Удалить защищенную роль
+
+**💡 Логика работы:**
+• По умолчанию перевод работает во всех каналах
+• Добавляйте каналы в исключения где перевод не нужен
+• Сообщения от защищенных ролей не переводятся
+                            `)
+                    ]
+                });
+        }
+        
+        await message.delete().catch(() => {});
+        
+    } catch (error) {
+        console.error('Translation command error:', error);
+        await message.reply('❌ Ошибка при выполнении команды.');
+    }
+}
 });
 
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
