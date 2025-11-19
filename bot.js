@@ -3636,19 +3636,28 @@ client.on('messageCreate', async message => {
   });
 // Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
-    // Проверяем, что реакция - это флаги перевода
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
+        const cooldownKey = `${user.id}-${reaction.message.id}`;
+        if (translationCooldown.has(cooldownKey)) return;
+        translationCooldown.add(cooldownKey);
+        setTimeout(() => translationCooldown.delete(cooldownKey), TRANSLATION_COOLDOWN_TIME);
+        
         try {
             if (reaction.partial) await reaction.fetch();
             const message = reaction.message;
             if (message.system) return;
+            
+            // ДОБАВЬТЕ ЭТУ ПРОВЕРКУ НАСТРОЕК:
             if (!message.guild) return;
             
             // Получаем настройки сервера
             const settings = getServerSettings(message.guild.id);
             
             // Проверяем, включен ли авто-перевод
-            if (!settings.translationEnabled) return;
+            if (!settings.translationEnabled) {
+                console.log(`🚫 Translation disabled globally in guild: ${message.guild.name}`);
+                return;
+            }
             
             // Проверяем, не отключен ли перевод в этом канале
             if (settings.disabledTranslationChannels.includes(message.channel.id)) {
@@ -3668,13 +3677,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 }
             }
             
-            // Проверяем кулдаун
-            const cooldownKey = `${user.id}-${message.id}`;
-            if (translationCooldown.has(cooldownKey)) return;
-            translationCooldown.add(cooldownKey);
-            setTimeout(() => translationCooldown.delete(cooldownKey), TRANSLATION_COOLDOWN_TIME);
-            
-            // ОСНОВНОЙ КОД ПЕРЕВОДА
+            // ... остальной существующий код перевода
             const originalText = message.content;
             const detectedLang = detectLanguage(originalText);
             let targetLang, flagEmoji, languageName;
