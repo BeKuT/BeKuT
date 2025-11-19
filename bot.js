@@ -3683,13 +3683,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
             
             console.log(`✅ Translation allowed for message in channel: ${message.channel.name}`);
             // ... остальной код перевода ...
-            
-        } catch (error) {
-            console.error('❌ Error processing flag reaction:', error);
-        }
-    }
-            
-            // ... остальной существующий код перевода
             const originalText = message.content;
             const detectedLang = detectLanguage(originalText);
             let targetLang, flagEmoji, languageName;
