@@ -3636,6 +3636,7 @@ client.on('messageCreate', async message => {
             await message.channel.send('❌ Error creating transcript: ' + error.message);
         }
     }
+  });
 // Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     // Проверяем, что реакция - это флаги перевода
