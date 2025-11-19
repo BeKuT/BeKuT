@@ -3669,7 +3669,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 return;
             }
             
-               // Проверяем, защищена ли роль автора сообщения
+            // Проверяем, защищена ли роль автора сообщения
             const authorMember = await message.guild.members.fetch(message.author.id).catch(() => null);
             if (authorMember) {
                 const hasProtectedRole = authorMember.roles.cache.some(role => 
@@ -3682,7 +3682,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
             }
             
             console.log(`✅ Translation allowed for message in channel: ${message.channel.name}`);
-            
             // ... остальной код перевода ...
             
         } catch (error) {
