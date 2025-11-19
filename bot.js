@@ -1977,8 +1977,7 @@ client.on('messageCreate', async message => {
 
         await message.reply({ embeds: [statusEmbed] });
     }
-  // Команды для настройки авто-перевода
-client.on('messageCreate', async (message) => {
+ // Команды для настройки авто-перевода
 if (message.content.startsWith('-translation')) {
     const args = message.content.split(' ');
     const subcommand = args[1];
@@ -2033,6 +2032,10 @@ if (message.content.startsWith('-translation')) {
                         if (!settings.disabledTranslationChannels.includes(targetChannel.id)) {
                             settings.disabledTranslationChannels.push(targetChannel.id);
                             saveServerSettings(message.guild.id, settings);
+                            
+                            // ДОБАВЬТЕ ОТЛАДОЧНОЕ СООБЩЕНИЕ
+                            console.log(`🚫 Translation disabled for channel: ${targetChannel.name} (${targetChannel.id}) in guild: ${message.guild.name}`);
+                            
                             await message.reply({
                                 embeds: [
                                     new EmbedBuilder()
@@ -2104,58 +2107,7 @@ if (message.content.startsWith('-translation')) {
                     }
                 }
                 break;
-              case 'disablechannel':
-    const channelToDisable = args.slice(2).join(' ');
-    if (channelToDisable) {
-        let targetChannel = message.mentions.channels.first();
-        if (!targetChannel) {
-            targetChannel = message.guild.channels.cache.get(channelToDisable);
-        }
-        if (!targetChannel) {
-            targetChannel = message.guild.channels.cache.find(ch => 
-                ch.name.toLowerCase().includes(channelToDisable.toLowerCase())
-            );
-        }
-        
-        if (targetChannel && targetChannel.isTextBased()) {
-            if (!settings.disabledTranslationChannels.includes(targetChannel.id)) {
-                settings.disabledTranslationChannels.push(targetChannel.id);
-                saveServerSettings(message.guild.id, settings);
                 
-                // ДОБАВЬТЕ ОТЛАДОЧНОЕ СООБЩЕНИЕ
-                console.log(`🚫 Translation disabled for channel: ${targetChannel.name} (${targetChannel.id}) in guild: ${message.guild.name}`);
-                
-                await message.reply({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setTitle('🚫 ПЕРЕВОД ОТКЛЮЧЕН')
-                            .setColor(0xFEE75C)
-                            .setDescription(`Авто-перевод отключен для канала: **#${targetChannel.name}**`)
-                            .setFooter({ text: 'В остальных каналах перевод продолжит работать' })
-                    ]
-                });
-            } else {
-                await message.reply({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setTitle('ℹ️ КАНАЛ УЖЕ В СПИСКЕ')
-                            .setColor(0xFEE75C)
-                            .setDescription(`Канал **#${targetChannel.name}** уже в списке отключенных.`)
-                    ]
-                });
-            }
-        } else {
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle('❌ КАНАЛ НЕ НАЙДЕН')
-                        .setColor(0xED4245)
-                        .setDescription('Укажите текстовый канал.')
-                ]
-            });
-        }
-    }
-    break;
             case 'addrole':
                 const roleToAdd = args.slice(2).join(' ');
                 if (roleToAdd) {
