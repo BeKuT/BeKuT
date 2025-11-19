@@ -10,7 +10,10 @@ import {
   Partials,
   PermissionsBitField,
   ChannelType,
-  Events
+  Events,
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource
 } from 'discord.js';
 
 import fs from 'fs/promises';
