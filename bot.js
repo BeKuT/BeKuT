@@ -2717,10 +2717,10 @@ const roleMentions = settings.roleIds && settings.roleIds.length > 0
     ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
     : '';
 
-// ОДНО сообщение ТОЛЬКО с упоминаниями ролей
+// ОДНО сообщение со всеми embed'ами и упоминаниями
 await channel.send({ 
-    content: roleMentions || ' ',
-    embeds: [combinedEmbed],
+    content: roleMentions,
+    embeds: [embedRU, embedEN],
     components: [closeRow] 
 });
 
