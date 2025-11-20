@@ -2538,7 +2538,7 @@ client.on('messageCreate', async (message) => {
 
             const embed = new EmbedBuilder()
                 .setTitle("Заявка в полк | Application to the regiment")
-                .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\n\nTo create a request, click the button below.")
+                .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\nTo create a request, click the button below.")
                 .setColor(3447003)
                 .setTimestamp();
 
