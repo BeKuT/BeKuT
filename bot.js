@@ -2605,7 +2605,7 @@ async function initializeTicketSystem() {
             const embed = new EmbedBuilder()
                 .setTitle("Заявка в полк | Application to the regiment")
                 .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\nTo create a request, click the button below.")
-                .setColor(353434)
+                .setColor('#414141')
                 .setTimestamp();
 
             await targetChannel.send({ embeds: [embed], components: [row] });
@@ -2667,60 +2667,44 @@ client.on(Events.InteractionCreate, async interaction => {
     });
 
     // Создаем кнопку закрытия
-    const closeButton = new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Закрыть")
-        .setStyle(ButtonStyle.Danger) // Красный цвет
-        .setEmoji("🔒"); // Смайлик закрытого замка
+   const embedRU = new EmbedBuilder()
+    .setColor('#727070')
+    .setTitle(':flag_ru: - RU Blank')
+    .setDescription(`
+Заполните бланк вопросов, и ждите ответа офицеров.
 
-    const closeRow = new ActionRowBuilder().addComponents(closeButton);
+1. Ваш никнейм? - 
+2. Ваше имя? - 
+3. Ваш прайм-тайм? (От МСК) -
+4. Сколько вам лет? - 
+5. Ваш макс БР наземной техники? - 
+6. Ваш макс БР летной техники? -
+7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? - 
+8. Какой у вас К/Д за последний месяц? -
+    `);
 
-    // Embeds для тикета (ваши оригинальные)
-    const embedRU = new EmbedBuilder()
-        .setColor('#727070')
-        .setTitle(':flag_ru: - RU Blank')
-        .setDescription(
-            "Заполните бланк вопросов, и ждите ответа офицеров.\n\n" +
-            "1. Ваш никнейм? - \n" +
-            "2. Ваше имя? - \n" +
-            "3. Ваш прайм-тайм? (От МСК) -\n" +
-            "4. Сколько вам лет? - \n" +
-            "5. Ваш макс БР наземной техники? -\n" +
-            "6. Ваш макс БР летной техники? -\n" +
-            "7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? -\n" +
-            "8. Какой у вас К/Д за последний месяц? -"
-        );
+const embedEN = new EmbedBuilder()
+    .setColor('#727070')
+    .setTitle(':flag_gb: - EN Blank')
+    .setDescription(`
+Fill out the question form and wait for the officers to respond.
 
-    const embedEN = new EmbedBuilder()
-        .setColor('#727070')
-        .setTitle(':flag_gb: - EN Blank')
-        .setDescription(
-            "Fill out the question form and wait for the officers to respond.\n\n" +
-            "1. Your IGN(In Game Name)? - \n" +
-            "2. Your real name(or how we should call you)? - \n" +
-            "3. Your time zone? - \n" +
-            "4. How old are you? - \n" +
-            "5. Your max. tier of ground vehicles? - \n" +
-            "6. Your max. tier of flight vehicles? -\n" +
-            "7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - \n" +
-            "8. What is your schedule for the last month? - \n" +
-            "**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**"
-        );
+1. Your IGN(In Game Name)? - 
+2. Your real name(or how we should call you)? - 
+3. Your time zone? - 
+4. How old are you? - 
+5. Your max. tier of ground vehicles? - 
+6. Your max. tier of flight vehicles? -
+7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
+8. What is your schedule for the last month? -
 
-    // Отправляем приветственное сообщение
+**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**
+    `);
+
+    // ОДНО сообщение с упоминаниями, приветствием и анкетой
     await channel.send({ 
-        content: `<@&1424069201143926838> `
-    });
-    await channel.send({ 
-        content: `Здравствуйте, <@${user.id}>! пожалуйста заполните ниже бланк вопросов. `
-    }); 
-  
-    // Отправляем русскую анкету
-    await channel.send({ embeds: [embedRU] });
-
-    // Отправляем английскую анкету с кнопкой закрытия
-    await channel.send({ 
-        embeds: [embedEN],
+        content: `${roleMentions}`,
+        embeds: [combinedEmbed],
         components: [closeRow] 
     });
 
