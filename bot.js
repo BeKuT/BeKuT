@@ -2704,11 +2704,7 @@ Fill out the question form and wait for the officers to respond.
 5. Your max. tier of ground vehicles? - 
 6. Your max. tier of flight vehicles? -
 7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
-8. What is your schedule for the last month? -
-
-**📝 Примечание | Note:**
-*P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!*
-        `)
+8. What is your schedule for the last month? -`)
         .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
         .setTimestamp();
 
