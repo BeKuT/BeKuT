@@ -2712,27 +2712,22 @@ Fill out the question form and wait for the officers to respond.
         .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
         .setTimestamp();
 
-    // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
-    const roleMentions = settings.roleIds && settings.roleIds.length > 0 
-        ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
-        : '';
+   // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
+const roleMentions = settings.roleIds && settings.roleIds.length > 0 
+    ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
+    : '';
 
-    // ОДНО сообщение с упоминаниями, приветствием и анкетой
-    const messageContent = roleMentions 
-        ? `${roleMentions}`
-
-    await channel.send({ 
-        content: messageContent,
-        embeds: [combinedEmbed],
-        components: [closeRow] 
-    });
-
-    await interaction.reply({ 
-        content: `✅ Заявка создана: <#${channel.id}>`, 
-        ephemeral: true 
-    });
+// ОДНО сообщение ТОЛЬКО с упоминаниями ролей
+await channel.send({ 
+    content: roleMentions || ' ',
+    embeds: [combinedEmbed],
+    components: [closeRow] 
 });
 
+await interaction.reply({ 
+    content: `✅ Заявка создана: <#${channel.id}>`, 
+    flags: 64 
+});
 // Обработчик кнопки закрытия тикета (с созданием транскрипта и удалением канала)
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "close_ticket") return;
