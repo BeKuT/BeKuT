@@ -2728,6 +2728,7 @@ await interaction.reply({
     content: `✅ Заявка создана: <#${channel.id}>`, 
     flags: 64 
 });
+  });
 // Обработчик кнопки закрытия тикета (с созданием транскрипта и удалением канала)
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "close_ticket") return;
