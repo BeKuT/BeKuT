@@ -2705,7 +2705,7 @@ Fill out the question form and wait for the officers to respond.
 6. Your max. tier of flight vehicles? -
 7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
 8. What is your schedule for the last month? -`)
-        .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
+        .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields ' })
         .setTimestamp();
 
    // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
