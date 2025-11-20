@@ -2666,22 +2666,20 @@ client.on(Events.InteractionCreate, async interaction => {
         ]
     });
 
-    // Создаем кнопку закрытия
-    const closeButton = new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Закрыть")
-        .setStyle(ButtonStyle.Danger)
-        .setEmoji("🔒");
+   // Создаем кнопку закрытия
+const closeButton = new ButtonBuilder()
+    .setCustomId("close_ticket")
+    .setLabel("Закрыть")
+    .setStyle(ButtonStyle.Danger)
+    .setEmoji("🔒");
 
-    const closeRow = new ActionRowBuilder().addComponents(closeButton);
+const closeRow = new ActionRowBuilder().addComponents(closeButton);
 
-    // ОБЪЕДИНЕННАЯ АНКЕТА В ОДНОМ СООБЩЕНИИ
-    const combinedEmbed = new EmbedBuilder()
-        .setColor('#727070')
-        .setTitle('📝 Анкета для заявки в полк | Regiment Application Form')
-        .setDescription(`
-**🇷🇺 Русская версия:**
-
+// РУССКАЯ АНКЕТА
+const embedRU = new EmbedBuilder()
+    .setColor('#727070')
+    .setTitle(':flag_ru: - RU Blank')
+    .setDescription(`
 Заполните бланк вопросов, и ждите ответа офицеров.
 
 1. Ваш никнейм? - 
@@ -2692,9 +2690,13 @@ client.on(Events.InteractionCreate, async interaction => {
 6. Ваш макс БР летной техники? -
 7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? - 
 8. Какой у вас К/Д за последний месяц? -
+    `);
 
-**🇬🇧 English version:**
-
+// АНГЛИЙСКАЯ АНКЕТА
+const embedEN = new EmbedBuilder()
+    .setColor('#727070')
+    .setTitle(':flag_gb: - EN Blank')
+    .setDescription(`
 Fill out the question form and wait for the officers to respond.
 
 1. Your IGN(In Game Name)? - 
@@ -2704,19 +2706,22 @@ Fill out the question form and wait for the officers to respond.
 5. Your max. tier of ground vehicles? - 
 6. Your max. tier of flight vehicles? -
 7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
-8. What is your schedule for the last month? -`)
-        .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields ' })
-        .setTimestamp();
+8. What is your schedule for the last month? -
 
-   // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
+**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**
+    `)
+    .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
+    .setTimestamp();
+
+// ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
 const roleMentions = settings.roleIds && settings.roleIds.length > 0 
     ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
     : '';
 
-// ОДНО сообщение со всеми embed'ами и упоминаниями
+// ОДНО сообщение с ДВУМЯ embed'ами и упоминаниями
 await channel.send({ 
     content: roleMentions,
-    embeds: [embedRU, embedEN],
+    embeds: [embedRU, embedEN], // Два раздельных embed'а в одном сообщении
     components: [closeRow] 
 });
 
