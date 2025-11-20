@@ -2617,7 +2617,7 @@ async function initializeTicketSystem() {
     }
 }
 
-// Обработчик кнопки тикета
+// Обработчик кнопки тикета - ИСПРАВЛЕННАЯ ВЕРСИЯ
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "create_regiment_request") return;
 
@@ -2667,10 +2667,21 @@ client.on(Events.InteractionCreate, async interaction => {
     });
 
     // Создаем кнопку закрытия
-   const embedRU = new EmbedBuilder()
-    .setColor('#727070')
-    .setTitle(':flag_ru: - RU Blank')
-    .setDescription(`
+    const closeButton = new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Закрыть")
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji("🔒");
+
+    const closeRow = new ActionRowBuilder().addComponents(closeButton);
+
+    // ОБЪЕДИНЕННАЯ АНКЕТА В ОДНОМ СООБЩЕНИИ
+    const combinedEmbed = new EmbedBuilder()
+        .setColor('#727070')
+        .setTitle('📝 Анкета для заявки в полк | Regiment Application Form')
+        .setDescription(`
+**🇷🇺 Русская версия:**
+
 Заполните бланк вопросов, и ждите ответа офицеров.
 
 1. Ваш никнейм? - 
@@ -2681,12 +2692,9 @@ client.on(Events.InteractionCreate, async interaction => {
 6. Ваш макс БР летной техники? -
 7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? - 
 8. Какой у вас К/Д за последний месяц? -
-    `);
 
-const embedEN = new EmbedBuilder()
-    .setColor('#727070')
-    .setTitle(':flag_gb: - EN Blank')
-    .setDescription(`
+**🇬🇧 English version:**
+
 Fill out the question form and wait for the officers to respond.
 
 1. Your IGN(In Game Name)? - 
@@ -2698,12 +2706,23 @@ Fill out the question form and wait for the officers to respond.
 7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
 8. What is your schedule for the last month? -
 
-**P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**
-    `);
+**📝 Примечание | Note:**
+*P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!*
+        `)
+        .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
+        .setTimestamp();
+
+    // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
+    const roleMentions = settings.roleIds && settings.roleIds.length > 0 
+        ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
+        : '';
 
     // ОДНО сообщение с упоминаниями, приветствием и анкетой
+    const messageContent = roleMentions 
+        ? `${roleMentions}`
+
     await channel.send({ 
-        content: `${roleMentions}`,
+        content: messageContent,
         embeds: [combinedEmbed],
         components: [closeRow] 
     });
