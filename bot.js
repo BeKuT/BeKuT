@@ -1980,7 +1980,7 @@ client.on('messageCreate', async message => {
     }
  // Команды для настройки авто-перевода
 client.on('messageCreate', async message => {
-if (message.content.startsWith('-translation')) {
+if (message.content.startsWith('-translation')) 
     const args = message.content.split(' ');
     const subcommand = args[1];
     const settings = getServerSettings(message.guild.id);
