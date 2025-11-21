@@ -1959,7 +1959,7 @@ client.on('messageCreate', async message => {
 
     // Команда для проверки текущих настроек
   client.on('messageCreate', async message => {
-    if (message.content === '-transcriptsettings') 
+    if (message.content === '-transcriptsettings') {
         const settings = getServerSettings(message.guild.id);
         
         const statusEmbed = new EmbedBuilder()
@@ -1977,10 +1977,11 @@ client.on('messageCreate', async message => {
             .setFooter({ text: 'Используйте -settranscript для изменения настроек' });
 
         await message.reply({ embeds: [statusEmbed] });
-    }
+}
+});
  // Команды для настройки авто-перевода
 client.on('messageCreate', async message => {
-if (message.content.startsWith('-translation')) 
+if (message.content.startsWith('-translation')) {
     const args = message.content.split(' ');
     const subcommand = args[1];
     const settings = getServerSettings(message.guild.id);
