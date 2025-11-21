@@ -1958,6 +1958,7 @@ client.on('messageCreate', async message => {
     }
 
     // Команда для проверки текущих настроек
+  client.on('messageCreate', async message => {
     if (message.content === '-transcriptsettings') {
         const settings = getServerSettings(message.guild.id);
         
@@ -1978,6 +1979,7 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [statusEmbed] });
     }
  // Команды для настройки авто-перевода
+client.on('messageCreate', async message => {
 if (message.content.startsWith('-translation')) {
     const args = message.content.split(' ');
     const subcommand = args[1];
