@@ -1959,7 +1959,7 @@ client.on('messageCreate', async message => {
 
     // Команда для проверки текущих настроек
   client.on('messageCreate', async message => {
-    if (message.content === '-transcriptsettings') {
+    if (message.content === '-transcriptsettings') 
         const settings = getServerSettings(message.guild.id);
         
         const statusEmbed = new EmbedBuilder()
