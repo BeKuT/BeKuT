@@ -1889,6 +1889,71 @@ function hasRegionAccess(member) {
     );
 }
 
+// ==================== СИСТЕМА УПРАВЛЕНИЯ РЕГИОНАМИ ДИСКОРДА ====================
+
+// Хранилище настроек регионов для голосовых каналов
+const voiceRegionSettings = new Map();
+
+// Доступные регионы Discord - ПЕРЕМЕСТИТЕ ЭТО В НАЧАЛО КОДА, ПЕРЕД ИСПОЛЬЗОВАНИЕМ
+const availableRegions = [
+    'brazil',       // Бразилия
+    'hongkong',     // Гонконг
+    'india',        // Индия
+    'japan',        // Япония
+    'rotterdam',    // Роттердам
+    'russia',       // Россия
+    'singapore',    // Сингапур
+    'southafrica',  // Южная Африка
+    'sydney',       // Сидней
+    'us-central',   // США (Центр)
+    'us-east',      // США (Восток)
+    'us-south',     // США (Юг)
+    'us-west',      // США (Запад)
+    'europe',       // Европа',
+    'automatic'     // Автоматический выбор
+];
+
+// Функция для получения читаемого названия региона
+function getRegionName(regionCode) {
+    const regionNames = {
+        'brazil': 'Бразилия',
+        'hongkong': 'Гонконг', 
+        'india': 'Индия',
+        'japan': 'Япония',
+        'rotterdam': 'Роттердам (Европа)',
+        'russia': 'Россия',
+        'singapore': 'Сингапур',
+        'southafrica': 'Южная Африка',
+        'sydney': 'Сидней (Австралия)',
+        'us-central': 'США (Центр)',
+        'us-east': 'США (Восток)',
+        'us-south': 'США (Юг)',
+        'us-west': 'США (Запад)',
+        'europe': 'Европа',
+        'automatic': 'Автоматический выбор'
+    };
+    
+    return regionNames[regionCode] || regionCode;
+}
+
+// ==================== НАСТРОЙКА ДОСТУПА К КОМАНДЕ РЕГИОНА ====================
+
+// Добавьте эту переменную для хранения разрешенных ролей
+const ALLOWED_REGION_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
+
+// Функция проверки доступа к команде региона
+function hasRegionAccess(member) {
+    // Если список ролей пустой - доступ у всех
+    if (ALLOWED_REGION_ROLES.length === 0) {
+        return true;
+    }
+    
+    // Проверяем, есть ли у пользователя хотя бы одна из разрешенных ролей
+    return member.roles.cache.some(role => 
+        ALLOWED_REGION_ROLES.includes(role.id)
+    );
+}
+
 // ==================== ОБНОВЛЕННАЯ КОМАНДА РЕГИОНА ====================
 
 client.on('messageCreate', async (message) => {
@@ -1931,20 +1996,7 @@ client.on('messageCreate', async (message) => {
 \`!регион 123456789012345678 us-central\`
 
 **Доступные регионы:**
-• \`brazil\` - Бразилия
-• \`hongkong\` - Гонконг
-• \`india\` - Индия
-• \`japan\` - Япония
-• \`rotterdam\` - Роттердам
-• \`russia\` - Россия
-• \`singapore\` - Сингапур
-• \`southafrica\` - Южная Африка
-• \`sydney\` - Сидней
-• \`us-central\` - США (Центр)
-• \`us-east\` - США (Восток)
-• \`us-south\` - США (Юг)
-• \`us-west\` - США (Запад)
-• \`europe\` - Европа
+${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`).join('\n')}
 
 **Как получить ID голосового канала:**
 1. Включите режим разработчика в Discord
@@ -1985,8 +2037,11 @@ client.on('messageCreate', async (message) => {
                 return;
             }
 
+            // Для automatic используем null
+            const regionToSet = regionCode === 'automatic' ? null : regionCode;
+
             // Меняем регион голосового сервера
-            await voiceChannel.setRTCRegion(regionCode);
+            await voiceChannel.setRTCRegion(regionToSet);
 
             // Сохраняем настройки
             voiceRegionSettings.set(guild.id, {
@@ -1999,10 +2054,10 @@ client.on('messageCreate', async (message) => {
             const successEmbed = new EmbedBuilder()
                 .setColor('#57F287')
                 .setTitle('✅ Регион изменен')
-                .setDescription(`Регион голосового сервера изменен на: **${regionCode}**`)
+                .setDescription(`Регион голосового сервера изменен на: **${getRegionName(regionCode)}**`)
                 .addFields(
                     { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
-                    { name: 'Регион', value: regionCode, inline: true },
+                    { name: 'Регион', value: getRegionName(regionCode), inline: true },
                     { name: 'Статус', value: '✅ Успешно применен', inline: false }
                 )
                 .setFooter({ text: 'Изменения вступят в силу немедленно' })
@@ -2063,8 +2118,8 @@ client.on('messageCreate', async (message) => {
                 .setTitle('🌍 Текущие настройки региона')
                 .addFields(
                     { name: 'Голосовой канал', value: `<#${settings.voiceChannelId}>`, inline: true },
-                    { name: 'Установленный регион', value: settings.regionCode, inline: true },
-                    { name: 'Текущий регион', value: currentRegion || 'авто', inline: true },
+                    { name: 'Установленный регион', value: getRegionName(settings.regionCode), inline: true },
+                    { name: 'Текущий регион', value: currentRegion ? getRegionName(currentRegion) : 'авто', inline: true },
                     { name: 'Статус', value: voiceChannel ? '✅ Активен' : '❌ Канал не найден', inline: true },
                     { name: 'Последнее обновление', value: `<t:${Math.floor(settings.lastUpdated.getTime() / 1000)}:R>`, inline: false }
                 )
@@ -2123,6 +2178,22 @@ client.on('messageCreate', async (message) => {
             console.error('Voice region reset error:', error);
             await message.reply('❌ Ошибка при сбросе региона.');
         }
+    }
+
+    // Команда для списка доступных регионов
+    if (message.content === '!регион список') {
+        const regionsList = availableRegions.map(region => 
+            `• \`${region}\` - ${getRegionName(region)}`
+        ).join('\n');
+
+        const listEmbed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle('🌍 Доступные регионы Discord')
+            .setDescription(regionsList)
+            .setFooter({ text: 'Используйте: !регион <ID_канала> <код_региона>' })
+            .setTimestamp();
+
+        await message.reply({ embeds: [listEmbed] });
     }
 });
 
