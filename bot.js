@@ -1938,19 +1938,19 @@ function getRegionName(regionCode) {
 
 // ==================== НАСТРОЙКА ДОСТУПА К КОМАНДЕ РЕГИОНА ====================
 
-// Добавьте эту переменную для хранения разрешенных ролей
-const ALLOWED_REGION_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
+// Переименуем переменную чтобы избежать конфликта
+const REGION_COMMAND_ALLOWED_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
 
 // Функция проверки доступа к команде региона
 function hasRegionAccess(member) {
     // Если список ролей пустой - доступ у всех
-    if (ALLOWED_REGION_ROLES.length === 0) {
+    if (REGION_COMMAND_ALLOWED_ROLES.length === 0) {
         return true;
     }
     
     // Проверяем, есть ли у пользователя хотя бы одна из разрешенных ролей
     return member.roles.cache.some(role => 
-        ALLOWED_REGION_ROLES.includes(role.id)
+        REGION_COMMAND_ALLOWED_ROLES.includes(role.id)
     );
 }
 
@@ -1970,8 +1970,8 @@ client.on('messageCreate', async (message) => {
                 .setTitle('❌ Доступ запрещен')
                 .setDescription('У вас нет прав для использования этой команды.')
                 .addFields(
-                    { name: 'Требуемые роли', value: ALLOWED_REGION_ROLES.length > 0 ? 
-                        ALLOWED_REGION_ROLES.map(id => {
+                    { name: 'Требуемые роли', value: REGION_COMMAND_ALLOWED_ROLES.length > 0 ? 
+                        REGION_COMMAND_ALLOWED_ROLES.map(id => {
                             const role = message.guild.roles.cache.get(id);
                             return role ? `• ${role.name}` : `• ${id}`;
                         }).join('\n') : 'Не настроены', inline: false }
@@ -2215,8 +2215,8 @@ client.on('messageCreate', async (message) => {
                 { name: 'Ваши роли', value: userRoles.length > 100 ? userRoles.substring(0, 100) + '...' : userRoles || 'Нет ролей', inline: false }
             );
         
-        if (ALLOWED_REGION_ROLES.length > 0) {
-            const allowedRolesInfo = ALLOWED_REGION_ROLES.map(id => {
+        if (REGION_COMMAND_ALLOWED_ROLES.length > 0) {
+            const allowedRolesInfo = REGION_COMMAND_ALLOWED_ROLES.map(id => {
                 const role = message.guild.roles.cache.get(id);
                 return role ? `• ${role.name}` : `• ${id}`;
             }).join('\n');
