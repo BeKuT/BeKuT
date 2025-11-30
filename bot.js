@@ -3698,6 +3698,7 @@ client.on('messageCreate', async message => {
 // Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
+        // Проверка кулдауна
         const cooldownKey = `${user.id}-${reaction.message.id}`;
         if (translationCooldown.has(cooldownKey)) return;
         translationCooldown.add(cooldownKey);
@@ -3708,13 +3709,13 @@ client.on('messageReactionAdd', async (reaction, user) => {
             const message = reaction.message;
             if (message.system) return;
             
-            // ДОБАВЬТЕ ЭТУ ПРОВЕРКУ НАСТРОЕК:
+            // ВАЖНО: Проверяем настройки сервера и канала
             if (!message.guild) return;
             
             // Получаем настройки сервера
             const settings = getServerSettings(message.guild.id);
             
-            // Проверяем, включен ли авто-перевод
+            // Проверяем, включен ли авто-перевод глобально
             if (!settings.translationEnabled) {
                 console.log(`🚫 Translation disabled globally in guild: ${message.guild.name}`);
                 return;
@@ -3722,7 +3723,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
             
             // Проверяем, не отключен ли перевод в этом канале
             if (settings.disabledTranslationChannels.includes(message.channel.id)) {
-                console.log(`🚫 Translation disabled in channel: ${message.channel.name}`);
+                console.log(`🚫 Translation disabled in channel: ${message.channel.name} (${message.channel.id})`);
+                // НЕ удаляем реакцию, просто выходим
                 return;
             }
             
@@ -3734,26 +3736,37 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 );
                 if (hasProtectedRole) {
                     console.log(`🛡️ Translation blocked for protected role user: ${authorMember.user.tag}`);
+                    // НЕ удаляем реакцию, просто выходим
                     return;
                 }
             }
             
             console.log(`✅ Translation allowed for message in channel: ${message.channel.name}`);
-            // ... остальной код перевода ...
+            
+            // Остальной код перевода...
             const originalText = message.content;
+            if (!originalText || originalText.trim().length === 0) return;
+            
             const detectedLang = detectLanguage(originalText);
             let targetLang, flagEmoji, languageName;
             
             if (reaction.emoji.name === '🇷🇺') {
-                targetLang = 'ru'; flagEmoji = '🇷🇺'; languageName = 'Русский';
+                targetLang = 'ru'; 
+                flagEmoji = '🇷🇺'; 
+                languageName = 'Русский';
             } else {
-                targetLang = 'en'; flagEmoji = '🇬🇧'; languageName = 'Английский';
+                targetLang = 'en'; 
+                flagEmoji = '🇬🇧'; 
+                languageName = 'Английский';
             }
             
             const sourceLang = detectedLang === 'ru' ? 'ru' : 'en';
             if (sourceLang === targetLang) {
+                // Только для одинаковых языков удаляем реакцию (бесполезная реакция)
                 setTimeout(async () => {
-                    try { await reaction.users.remove(user.id); } catch (error) {}
+                    try { 
+                        await reaction.users.remove(user.id); 
+                    } catch (error) {}
                 }, 3000);
                 return;
             }
