@@ -1171,8 +1171,22 @@ function createCommandsPage(user, baseUrl) {
                 <div class="command-desc">Тестирует подключение к голосовому каналу</div>
                 <div class="command-usage">Использование: -testvoice</div>
             </div>
+            <div class="command-item">
+                <div class="command-name">!сервер <span class="permission-badge">ADMINISTRATOR</span></div>
+                <div class="command-desc">Настройка отображения сервера в голосовом канале</div>
+                <div class="command-usage">Использование: !сервер &lt;ID_канала&gt; &lt;сервер&gt;<br>Пример: !сервер 123456789012345678 EU Server<br>Доступные сервера: EU Server, US Server, Asia Server, RU Server, TR Server, Custom Server</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">!сервер статус</div>
+                <div class="command-desc">Показывает текущие настройки сервера для голосового канала</div>
+                <div class="command-usage">Использование: !сервер статус</div>
+            </div>
+            <div class="command-item">
+                <div class="command-name">!сервер сброс</div>
+                <div class="command-desc">Сбрасывает настройки сервера для голосового канала</div>
+                <div class="command-usage">Использование: !сервер сброс</div>
+            </div>
         </div>
-
         <div style="background: #2b2b2b; padding: 20px; border-radius: 10px; border-left: 4px solid #5865F2; margin-top: 30px;">
             <h3 style="color: #57F287; margin-bottom: 10px;">💡 Примечания по использованию</h3>
             <ul style="color: #b9bbbe; margin-left: 20px;">
@@ -1856,6 +1870,290 @@ function createTicketInfoEmbedWithParticipants(ticketReport) {
 function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
+
+// ==================== СИСТЕМА УПРАВЛЕНИЯ СЕРВЕРАМИ В ГОЛОСОВОМ КАНАЛЕ ====================
+
+// Хранилище настроек серверов для голосовых каналов
+const voiceServerSettings = new Map();
+
+// Команда для настройки сервера в голосовом канале
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    if (message.content.startsWith('!сервер')) {
+        const args = message.content.split(' ');
+        
+        if (args.length < 3) {
+            const helpEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('🎮 Управление серверами в голосовом канале')
+                .setDescription(`
+**Использование:**
+\`!сервер <ID_голосового_канала> <название_сервера>\`
+
+**Примеры:**
+\`!сервер 123456789012345678 EU Server\`
+\`!сервер 123456789012345678 US Server\`
+\`!сервер 123456789012345678 Asia Server\`
+
+**Как получить ID голосового канала:**
+1. Включите режим разработчика в Discord
+2. ПКМ по голосовому каналу → "Копировать ID"
+
+**Доступные сервера:**
+• EU Server
+• US Server  
+• Asia Server
+• RU Server
+• TR Server
+• Custom Server
+                `);
+            
+            await message.reply({ embeds: [helpEmbed] });
+            return;
+        }
+
+        const voiceChannelId = args[1];
+        const serverName = args.slice(2).join(' ');
+
+        // Список доступных серверов
+        const availableServers = [
+            'EU Server', 'US Server', 'Asia Server', 
+            'RU Server', 'TR Server', 'Custom Server'
+        ];
+
+        if (!availableServers.includes(serverName)) {
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Неверное название сервера')
+                .setDescription(`Доступные сервера: ${availableServers.join(', ')}`)
+                .addFields(
+                    { name: 'Примеры', value: 'EU Server, US Server, Asia Server', inline: false }
+                );
+            
+            await message.reply({ embeds: [errorEmbed] });
+            return;
+        }
+
+        try {
+            const guild = message.guild;
+            const voiceChannel = await guild.channels.fetch(voiceChannelId);
+            
+            if (!voiceChannel) {
+                await message.reply('❌ Голосовой канал не найден! Проверьте ID.');
+                return;
+            }
+
+            if (voiceChannel.type !== ChannelType.GuildVoice) {
+                await message.reply('❌ Указанный канал не является голосовым!');
+                return;
+            }
+
+            // Сохраняем настройки
+            voiceServerSettings.set(guild.id, {
+                voiceChannelId: voiceChannelId,
+                serverName: serverName,
+                guildId: guild.id,
+                lastUpdated: new Date()
+            });
+
+            // Обновляем название канала
+            const newChannelName = `🎮 ${serverName}`;
+            await voiceChannel.setName(newChannelName);
+
+            const successEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('✅ Сервер настроен')
+                .setDescription(`Голосовой канал обновлен с сервером: **${serverName}**`)
+                .addFields(
+                    { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
+                    { name: 'Сервер', value: serverName, inline: true },
+                    { name: 'Новое название', value: newChannelName, inline: false }
+                )
+                .setFooter({ text: 'Канал автоматически обновляется при изменении сервера' })
+                .setTimestamp();
+
+            await message.reply({ embeds: [successEmbed] });
+            console.log(`✅ Voice server configured: ${serverName} in ${guild.name}`);
+
+        } catch (error) {
+            console.error('Voice server setup error:', error);
+            
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Ошибка настройки')
+                .setDescription(`Не удалось настроить сервер: ${error.message}`)
+                .addFields(
+                    { name: 'Проверьте', value: '• Права бота\n• Корректность ID\n• Название сервера', inline: false }
+                );
+            
+            await message.reply({ embeds: [errorEmbed] });
+        }
+    }
+});
+
+// Команда для проверки текущих настроек сервера
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    if (message.content === '!сервер статус') {
+        const settings = voiceServerSettings.get(message.guild.id);
+        
+        if (!settings) {
+            const noSettingsEmbed = new EmbedBuilder()
+                .setColor('#FEE75C')
+                .setTitle('ℹ️ Настройки сервера')
+                .setDescription('Сервер для голосового канала еще не настроен.')
+                .addFields(
+                    { name: 'Использование', value: '`!сервер <ID_канала> <название_сервера>`', inline: false }
+                );
+            
+            await message.reply({ embeds: [noSettingsEmbed] });
+            return;
+        }
+
+        try {
+            const voiceChannel = await message.guild.channels.fetch(settings.voiceChannelId);
+            const statusEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('🎮 Текущие настройки сервера')
+                .addFields(
+                    { name: 'Голосовой канал', value: `<#${settings.voiceChannelId}>`, inline: true },
+                    { name: 'Сервер', value: settings.serverName, inline: true },
+                    { name: 'Статус', value: voiceChannel ? '✅ Активен' : '❌ Канал не найден', inline: true },
+                    { name: 'Последнее обновление', value: `<t:${Math.floor(settings.lastUpdated.getTime() / 1000)}:R>`, inline: false }
+                )
+                .setFooter({ text: 'Используйте !сервер для изменения настроек' })
+                .setTimestamp();
+
+            await message.reply({ embeds: [statusEmbed] });
+
+        } catch (error) {
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Ошибка проверки')
+                .setDescription('Не удалось проверить настройки сервера.');
+            
+            await message.reply({ embeds: [errorEmbed] });
+        }
+    }
+});
+
+// Команда для сброса настроек сервера
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    if (message.content === '!сервер сброс') {
+        const settings = voiceServerSettings.get(message.guild.id);
+        
+        if (!settings) {
+            await message.reply('❌ Настройки сервера не найдены для сброса.');
+            return;
+        }
+
+        try {
+            // Восстанавливаем оригинальное название канала
+            const voiceChannel = await message.guild.channels.fetch(settings.voiceChannelId);
+            if (voiceChannel) {
+                const originalName = voiceChannel.name.replace('🎮 ', '');
+                await voiceChannel.setName(originalName);
+            }
+
+            // Удаляем настройки
+            voiceServerSettings.delete(message.guild.id);
+
+            const resetEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('✅ Настройки сброшены')
+                .setDescription('Настройки сервера для голосового канала были сброшены.')
+                .addFields(
+                    { name: 'Канал', value: `<#${settings.voiceChannelId}>`, inline: true },
+                    { name: 'Статус', value: 'Сброшено', inline: true }
+                )
+                .setTimestamp();
+
+            await message.reply({ embeds: [resetEmbed] });
+            console.log(`✅ Voice server settings reset for guild: ${message.guild.name}`);
+
+        } catch (error) {
+            console.error('Voice server reset error:', error);
+            await message.reply('❌ Ошибка при сбросе настроек сервера.');
+        }
+    }
+});
+
+// Автоматическое обновление статуса канала при подключении пользователей
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+        // Проверяем, подключился ли пользователь к каналу с настройками сервера
+        if (newState.channel && newState.channelId !== oldState.channelId) {
+            const settings = voiceServerSettings.get(newState.guild.id);
+            
+            if (settings && newState.channelId === settings.voiceChannelId) {
+                // Обновляем название канала с эмодзи сервера
+                const currentName = newState.channel.name;
+                if (!currentName.startsWith('🎮')) {
+                    await newState.channel.setName(`🎮 ${settings.serverName}`);
+                }
+                
+                console.log(`✅ User joined voice channel with server: ${settings.serverName} in ${newState.guild.name}`);
+            }
+        }
+
+        // Проверяем количество пользователей в канале
+        if (newState.channel) {
+            const settings = voiceServerSettings.get(newState.guild.id);
+            
+            if (settings && newState.channelId === settings.voiceChannelId) {
+                const memberCount = newState.channel.members.size;
+                const baseName = `🎮 ${settings.serverName}`;
+                
+                // Обновляем название с количеством пользователей, если больше 0
+                if (memberCount > 0 && !newState.channel.name.includes('👥')) {
+                    await newState.channel.setName(`${baseName} 👥 ${memberCount}`);
+                } else if (memberCount === 0) {
+                    // Возвращаем базовое название когда канал пуст
+                    await newState.channel.setName(baseName);
+                }
+            }
+        }
+
+    } catch (error) {
+        console.error('Voice state update error:', error);
+    }
+});
+
+// Функция для принудительного обновления всех каналов с серверами
+async function updateAllVoiceChannels() {
+    for (const [guildId, settings] of voiceServerSettings) {
+        try {
+            const guild = client.guilds.cache.get(guildId);
+            if (!guild) continue;
+
+            const voiceChannel = await guild.channels.fetch(settings.voiceChannelId);
+            if (voiceChannel) {
+                const memberCount = voiceChannel.members.size;
+                const baseName = `🎮 ${settings.serverName}`;
+                
+                if (memberCount > 0) {
+                    await voiceChannel.setName(`${baseName} 👥 ${memberCount}`);
+                } else {
+                    await voiceChannel.setName(baseName);
+                }
+                
+                console.log(`✅ Updated voice channel: ${voiceChannel.name} in ${guild.name}`);
+            }
+        } catch (error) {
+            console.error(`Error updating voice channel for guild ${guildId}:`, error);
+        }
+    }
+}
+
+// Периодическое обновление каналов (каждые 5 минут)
+setInterval(updateAllVoiceChannels, 5 * 60 * 1000);
 
 // ==================== КОМАНДЫ НАСТРОЙКИ ТРАНСКРИПТОВ ====================
 
