@@ -1871,37 +1871,52 @@ function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 
-// ==================== СИСТЕМА УПРАВЛЕНИЯ РЕГИОНАМИ ДИСКОРДА ====================
+// ==================== НАСТРОЙКА ДОСТУПА К КОМАНДЕ РЕГИОНА ====================
 
-// Хранилище настроек регионов для голосовых каналов
-const voiceRegionSettings = new Map();
+// Добавьте эту переменную для хранения разрешенных ролей
+const ALLOWED_REGION_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
 
-// Доступные регионы Discord
-const availableRegions = [
-    'brazil',       // Бразилия
-    'hongkong',     // Гонконг
-    'india',        // Индия
-    'japan',        // Япония
-    'rotterdam',    // Роттердам
-    'russia',       // Россия
-    'singapore',    // Сингапур
-    'southafrica',  // Южная Африка
-    'sydney',       // Сидней
-    'us-central',   // США (Центр)
-    'us-east',      // США (Восток)
-    'us-south',     // США (Юг)
-    'us-west',      // США (Запад)
-    'europe',       // Европа
-];
+// Функция проверки доступа к команде региона
+function hasRegionAccess(member) {
+    // Если список ролей пустой - доступ у всех
+    if (ALLOWED_REGION_ROLES.length === 0) {
+        return true;
+    }
+    
+    // Проверяем, есть ли у пользователя хотя бы одна из разрешенных ролей
+    return member.roles.cache.some(role => 
+        ALLOWED_REGION_ROLES.includes(role.id)
+    );
+}
 
-// Команда для настройки региона голосового сервера
+// ==================== ОБНОВЛЕННАЯ КОМАНДА РЕГИОНА ====================
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
+    
+    // Команда региона с проверкой роли
     if (message.content.startsWith('!регион')) {
         const args = message.content.split(' ');
         
+        // Проверяем доступ
+        if (!hasRegionAccess(message.member)) {
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('❌ Доступ запрещен')
+                .setDescription('У вас нет прав для использования этой команды.')
+                .addFields(
+                    { name: 'Требуемые роли', value: ALLOWED_REGION_ROLES.length > 0 ? 
+                        ALLOWED_REGION_ROLES.map(id => {
+                            const role = message.guild.roles.cache.get(id);
+                            return role ? `• ${role.name}` : `• ${id}`;
+                        }).join('\n') : 'Не настроены', inline: false }
+                );
+            
+            await message.reply({ embeds: [errorEmbed] });
+            return;
+        }
+        
+        // Остальной код команды региона (ваш существующий код)
         if (args.length < 3) {
             const helpEmbed = new EmbedBuilder()
                 .setColor('#5865F2')
@@ -2012,12 +2027,18 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Команда для проверки текущих настроек региона
+// ==================== ОБНОВЛЕННЫЕ КОМАНДЫ СТАТУСА И СБРОСА ====================
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
+    // Команда для проверки текущих настроек региона
     if (message.content === '!регион статус') {
+        if (!hasRegionAccess(message.member)) {
+            await message.reply('❌ У вас нет прав для использования этой команды.');
+            return;
+        }
+
         const settings = voiceRegionSettings.get(message.guild.id);
         
         if (!settings) {
@@ -2061,14 +2082,14 @@ client.on('messageCreate', async (message) => {
             await message.reply({ embeds: [errorEmbed] });
         }
     }
-});
 
-// Команда для сброса региона (автоматический выбор)
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
+    // Команда для сброса региона (автоматический выбор)
     if (message.content === '!регион сброс') {
+        if (!hasRegionAccess(message.member)) {
+            await message.reply('❌ У вас нет прав для использования этой команды.');
+            return;
+        }
+
         const settings = voiceRegionSettings.get(message.guild.id);
         
         if (!settings) {
@@ -2105,47 +2126,36 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Команда для списка доступных регионов
+// ==================== КОМАНДА ДЛЯ ПРОВЕРКИ ДОСТУПА ====================
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    if (message.content === '!регион список') {
-        const regionsList = availableRegions.map(region => 
-            `• \`${region}\` - ${getRegionName(region)}`
-        ).join('\n');
-
-        const listEmbed = new EmbedBuilder()
-            .setColor('#5865F2')
-            .setTitle('🌍 Доступные регионы Discord')
-            .setDescription(regionsList)
-            .setFooter({ text: 'Используйте: !регион <ID_канала> <код_региона>' })
-            .setTimestamp();
-
-        await message.reply({ embeds: [listEmbed] });
+    // Команда для проверки своих прав
+    if (message.content === '!регион доступ') {
+        const hasAccess = hasRegionAccess(message.member);
+        const userRoles = message.member.roles.cache.map(role => role.name).join(', ');
+        
+        const accessEmbed = new EmbedBuilder()
+            .setColor(hasAccess ? '#57F287' : '#ED4245')
+            .setTitle('🔐 Проверка доступа к командам региона')
+            .addFields(
+                { name: 'Статус доступа', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
+                { name: 'Ваши роли', value: userRoles.length > 100 ? userRoles.substring(0, 100) + '...' : userRoles || 'Нет ролей', inline: false }
+            );
+        
+        if (ALLOWED_REGION_ROLES.length > 0) {
+            const allowedRolesInfo = ALLOWED_REGION_ROLES.map(id => {
+                const role = message.guild.roles.cache.get(id);
+                return role ? `• ${role.name}` : `• ${id}`;
+            }).join('\n');
+            
+            accessEmbed.addFields({ name: 'Требуемые роли', value: allowedRolesInfo, inline: false });
+        }
+        
+        await message.reply({ embeds: [accessEmbed] });
     }
 });
-
-// Функция для получения читаемого названия региона
-function getRegionName(regionCode) {
-    const regionNames = {
-        'brazil': 'Бразилия',
-        'hongkong': 'Гонконг', 
-        'india': 'Индия',
-        'japan': 'Япония',
-        'rotterdam': 'Роттердам (Европа)',
-        'russia': 'Россия',
-        'singapore': 'Сингапур',
-        'southafrica': 'Южная Африка',
-        'sydney': 'Сидней (Австралия)',
-        'us-central': 'США (Центр)',
-        'us-east': 'США (Восток)',
-        'us-south': 'США (Юг)',
-        'us-west': 'США (Запад)',
-        'europe': 'Европа'
-    };
-    
-    return regionNames[regionCode] || regionCode;
-}
 // ==================== КОМАНДЫ НАСТРОЙКИ ТРАНСКРИПТОВ ====================
 
 client.on('messageCreate', async message => {
