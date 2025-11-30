@@ -1871,43 +1871,69 @@ function generateTranscriptId() {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 
-// ==================== СИСТЕМА УПРАВЛЕНИЯ СЕРВЕРАМИ В ГОЛОСОВОМ КАНАЛЕ ====================
+// ==================== СИСТЕМА УПРАВЛЕНИЯ РЕГИОНАМИ ДИСКОРДА ====================
 
-// Хранилище настроек серверов для голосовых каналов
-const voiceServerSettings = new Map();
+// Хранилище настроек регионов для голосовых каналов
+const voiceRegionSettings = new Map();
 
-// Команда для настройки сервера в голосовом канале
+// Доступные регионы Discord
+const availableRegions = [
+    'brazil',       // Бразилия
+    'hongkong',     // Гонконг
+    'india',        // Индия
+    'japan',        // Япония
+    'rotterdam',    // Роттердам
+    'russia',       // Россия
+    'singapore',    // Сингапур
+    'southafrica',  // Южная Африка
+    'sydney',       // Сидней
+    'us-central',   // США (Центр)
+    'us-east',      // США (Восток)
+    'us-south',     // США (Юг)
+    'us-west',      // США (Запад)
+    'europe',       // Европа
+];
+
+// Команда для настройки региона голосового сервера
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-    if (message.content.startsWith('!сервер')) {
+    if (message.content.startsWith('!регион')) {
         const args = message.content.split(' ');
         
         if (args.length < 3) {
             const helpEmbed = new EmbedBuilder()
                 .setColor('#5865F2')
-                .setTitle('🎮 Управление серверами в голосовом канале')
+                .setTitle('🌍 Управление регионами Discord')
                 .setDescription(`
 **Использование:**
-\`!сервер <ID_голосового_канала> <название_сервера>\`
+\`!регион <ID_голосового_канала> <регион>\`
 
 **Примеры:**
-\`!сервер 123456789012345678 EU Server\`
-\`!сервер 123456789012345678 US Server\`
-\`!сервер 123456789012345678 Asia Server\`
+\`!регион 123456789012345678 russia\`
+\`!регион 123456789012345678 europe\`
+\`!регион 123456789012345678 us-central\`
+
+**Доступные регионы:**
+• \`brazil\` - Бразилия
+• \`hongkong\` - Гонконг
+• \`india\` - Индия
+• \`japan\` - Япония
+• \`rotterdam\` - Роттердам
+• \`russia\` - Россия
+• \`singapore\` - Сингапур
+• \`southafrica\` - Южная Африка
+• \`sydney\` - Сидней
+• \`us-central\` - США (Центр)
+• \`us-east\` - США (Восток)
+• \`us-south\` - США (Юг)
+• \`us-west\` - США (Запад)
+• \`europe\` - Европа
 
 **Как получить ID голосового канала:**
 1. Включите режим разработчика в Discord
 2. ПКМ по голосовому каналу → "Копировать ID"
-
-**Доступные сервера:**
-• EU Server
-• US Server  
-• Asia Server
-• RU Server
-• TR Server
-• Custom Server
                 `);
             
             await message.reply({ embeds: [helpEmbed] });
@@ -1915,21 +1941,15 @@ client.on('messageCreate', async (message) => {
         }
 
         const voiceChannelId = args[1];
-        const serverName = args.slice(2).join(' ');
+        const regionCode = args[2].toLowerCase();
 
-        // Список доступных серверов
-        const availableServers = [
-            'EU Server', 'US Server', 'Asia Server', 
-            'RU Server', 'TR Server', 'Custom Server'
-        ];
-
-        if (!availableServers.includes(serverName)) {
+        if (!availableRegions.includes(regionCode)) {
             const errorEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
-                .setTitle('❌ Неверное название сервера')
-                .setDescription(`Доступные сервера: ${availableServers.join(', ')}`)
+                .setTitle('❌ Неверный регион')
+                .setDescription(`Регион \`${regionCode}\` не найден.`)
                 .addFields(
-                    { name: 'Примеры', value: 'EU Server, US Server, Asia Server', inline: false }
+                    { name: 'Доступные регионы', value: availableRegions.map(r => `\`${r}\``).join(', '), inline: false }
                 );
             
             await message.reply({ embeds: [errorEmbed] });
@@ -1950,42 +1970,41 @@ client.on('messageCreate', async (message) => {
                 return;
             }
 
+            // Меняем регион голосового сервера
+            await voiceChannel.setRTCRegion(regionCode);
+
             // Сохраняем настройки
-            voiceServerSettings.set(guild.id, {
+            voiceRegionSettings.set(guild.id, {
                 voiceChannelId: voiceChannelId,
-                serverName: serverName,
+                regionCode: regionCode,
                 guildId: guild.id,
                 lastUpdated: new Date()
             });
 
-            // Обновляем название канала
-            const newChannelName = `🎮 ${serverName}`;
-            await voiceChannel.setName(newChannelName);
-
             const successEmbed = new EmbedBuilder()
                 .setColor('#57F287')
-                .setTitle('✅ Сервер настроен')
-                .setDescription(`Голосовой канал обновлен с сервером: **${serverName}**`)
+                .setTitle('✅ Регион изменен')
+                .setDescription(`Регион голосового сервера изменен на: **${regionCode}**`)
                 .addFields(
                     { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
-                    { name: 'Сервер', value: serverName, inline: true },
-                    { name: 'Новое название', value: newChannelName, inline: false }
+                    { name: 'Регион', value: regionCode, inline: true },
+                    { name: 'Статус', value: '✅ Успешно применен', inline: false }
                 )
-                .setFooter({ text: 'Канал автоматически обновляется при изменении сервера' })
+                .setFooter({ text: 'Изменения вступят в силу немедленно' })
                 .setTimestamp();
 
             await message.reply({ embeds: [successEmbed] });
-            console.log(`✅ Voice server configured: ${serverName} in ${guild.name}`);
+            console.log(`✅ Voice region changed to: ${regionCode} in ${guild.name}`);
 
         } catch (error) {
-            console.error('Voice server setup error:', error);
+            console.error('Voice region change error:', error);
             
             const errorEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
-                .setTitle('❌ Ошибка настройки')
-                .setDescription(`Не удалось настроить сервер: ${error.message}`)
+                .setTitle('❌ Ошибка изменения региона')
+                .setDescription(`Не удалось изменить регион: ${error.message}`)
                 .addFields(
-                    { name: 'Проверьте', value: '• Права бота\n• Корректность ID\n• Название сервера', inline: false }
+                    { name: 'Возможные причины', value: '• Недостаточно прав\n• Регион недоступен\n• Ошибка Discord API', inline: false }
                 );
             
             await message.reply({ embeds: [errorEmbed] });
@@ -1993,21 +2012,21 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Команда для проверки текущих настроек сервера
+// Команда для проверки текущих настроек региона
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-    if (message.content === '!сервер статус') {
-        const settings = voiceServerSettings.get(message.guild.id);
+    if (message.content === '!регион статус') {
+        const settings = voiceRegionSettings.get(message.guild.id);
         
         if (!settings) {
             const noSettingsEmbed = new EmbedBuilder()
                 .setColor('#FEE75C')
-                .setTitle('ℹ️ Настройки сервера')
-                .setDescription('Сервер для голосового канала еще не настроен.')
+                .setTitle('ℹ️ Настройки региона')
+                .setDescription('Регион голосового сервера еще не настроен.')
                 .addFields(
-                    { name: 'Использование', value: '`!сервер <ID_канала> <название_сервера>`', inline: false }
+                    { name: 'Использование', value: '`!регион <ID_канала> <регион>`', inline: false }
                 );
             
             await message.reply({ embeds: [noSettingsEmbed] });
@@ -2016,16 +2035,19 @@ client.on('messageCreate', async (message) => {
 
         try {
             const voiceChannel = await message.guild.channels.fetch(settings.voiceChannelId);
+            const currentRegion = voiceChannel.rtcRegion;
+            
             const statusEmbed = new EmbedBuilder()
                 .setColor('#5865F2')
-                .setTitle('🎮 Текущие настройки сервера')
+                .setTitle('🌍 Текущие настройки региона')
                 .addFields(
                     { name: 'Голосовой канал', value: `<#${settings.voiceChannelId}>`, inline: true },
-                    { name: 'Сервер', value: settings.serverName, inline: true },
+                    { name: 'Установленный регион', value: settings.regionCode, inline: true },
+                    { name: 'Текущий регион', value: currentRegion || 'авто', inline: true },
                     { name: 'Статус', value: voiceChannel ? '✅ Активен' : '❌ Канал не найден', inline: true },
                     { name: 'Последнее обновление', value: `<t:${Math.floor(settings.lastUpdated.getTime() / 1000)}:R>`, inline: false }
                 )
-                .setFooter({ text: 'Используйте !сервер для изменения настроек' })
+                .setFooter({ text: 'Используйте !регион для изменения настроек' })
                 .setTimestamp();
 
             await message.reply({ embeds: [statusEmbed] });
@@ -2034,127 +2056,96 @@ client.on('messageCreate', async (message) => {
             const errorEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
                 .setTitle('❌ Ошибка проверки')
-                .setDescription('Не удалось проверить настройки сервера.');
+                .setDescription('Не удалось проверить настройки региона.');
             
             await message.reply({ embeds: [errorEmbed] });
         }
     }
 });
 
-// Команда для сброса настроек сервера
+// Команда для сброса региона (автоматический выбор)
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-    if (message.content === '!сервер сброс') {
-        const settings = voiceServerSettings.get(message.guild.id);
+    if (message.content === '!регион сброс') {
+        const settings = voiceRegionSettings.get(message.guild.id);
         
         if (!settings) {
-            await message.reply('❌ Настройки сервера не найдены для сброса.');
+            await message.reply('❌ Настройки региона не найдены для сброса.');
             return;
         }
 
         try {
-            // Восстанавливаем оригинальное название канала
             const voiceChannel = await message.guild.channels.fetch(settings.voiceChannelId);
-            if (voiceChannel) {
-                const originalName = voiceChannel.name.replace('🎮 ', '');
-                await voiceChannel.setName(originalName);
-            }
+            
+            // Сбрасываем регион (null = автоматический выбор)
+            await voiceChannel.setRTCRegion(null);
 
             // Удаляем настройки
-            voiceServerSettings.delete(message.guild.id);
+            voiceRegionSettings.delete(message.guild.id);
 
             const resetEmbed = new EmbedBuilder()
                 .setColor('#57F287')
-                .setTitle('✅ Настройки сброшены')
-                .setDescription('Настройки сервера для голосового канала были сброшены.')
+                .setTitle('✅ Регион сброшен')
+                .setDescription('Регион голосового сервера сброшен на автоматический выбор.')
                 .addFields(
                     { name: 'Канал', value: `<#${settings.voiceChannelId}>`, inline: true },
-                    { name: 'Статус', value: 'Сброшено', inline: true }
+                    { name: 'Статус', value: 'Автоматический выбор региона', inline: true }
                 )
                 .setTimestamp();
 
             await message.reply({ embeds: [resetEmbed] });
-            console.log(`✅ Voice server settings reset for guild: ${message.guild.name}`);
+            console.log(`✅ Voice region reset to auto for guild: ${message.guild.name}`);
 
         } catch (error) {
-            console.error('Voice server reset error:', error);
-            await message.reply('❌ Ошибка при сбросе настроек сервера.');
+            console.error('Voice region reset error:', error);
+            await message.reply('❌ Ошибка при сбросе региона.');
         }
     }
 });
 
-// Автоматическое обновление статуса канала при подключении пользователей
-client.on('voiceStateUpdate', async (oldState, newState) => {
-    try {
-        // Проверяем, подключился ли пользователь к каналу с настройками сервера
-        if (newState.channel && newState.channelId !== oldState.channelId) {
-            const settings = voiceServerSettings.get(newState.guild.id);
-            
-            if (settings && newState.channelId === settings.voiceChannelId) {
-                // Обновляем название канала с эмодзи сервера
-                const currentName = newState.channel.name;
-                if (!currentName.startsWith('🎮')) {
-                    await newState.channel.setName(`🎮 ${settings.serverName}`);
-                }
-                
-                console.log(`✅ User joined voice channel with server: ${settings.serverName} in ${newState.guild.name}`);
-            }
-        }
+// Команда для списка доступных регионов
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
 
-        // Проверяем количество пользователей в канале
-        if (newState.channel) {
-            const settings = voiceServerSettings.get(newState.guild.id);
-            
-            if (settings && newState.channelId === settings.voiceChannelId) {
-                const memberCount = newState.channel.members.size;
-                const baseName = `🎮 ${settings.serverName}`;
-                
-                // Обновляем название с количеством пользователей, если больше 0
-                if (memberCount > 0 && !newState.channel.name.includes('👥')) {
-                    await newState.channel.setName(`${baseName} 👥 ${memberCount}`);
-                } else if (memberCount === 0) {
-                    // Возвращаем базовое название когда канал пуст
-                    await newState.channel.setName(baseName);
-                }
-            }
-        }
+    if (message.content === '!регион список') {
+        const regionsList = availableRegions.map(region => 
+            `• \`${region}\` - ${getRegionName(region)}`
+        ).join('\n');
 
-    } catch (error) {
-        console.error('Voice state update error:', error);
+        const listEmbed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle('🌍 Доступные регионы Discord')
+            .setDescription(regionsList)
+            .setFooter({ text: 'Используйте: !регион <ID_канала> <код_региона>' })
+            .setTimestamp();
+
+        await message.reply({ embeds: [listEmbed] });
     }
 });
 
-// Функция для принудительного обновления всех каналов с серверами
-async function updateAllVoiceChannels() {
-    for (const [guildId, settings] of voiceServerSettings) {
-        try {
-            const guild = client.guilds.cache.get(guildId);
-            if (!guild) continue;
-
-            const voiceChannel = await guild.channels.fetch(settings.voiceChannelId);
-            if (voiceChannel) {
-                const memberCount = voiceChannel.members.size;
-                const baseName = `🎮 ${settings.serverName}`;
-                
-                if (memberCount > 0) {
-                    await voiceChannel.setName(`${baseName} 👥 ${memberCount}`);
-                } else {
-                    await voiceChannel.setName(baseName);
-                }
-                
-                console.log(`✅ Updated voice channel: ${voiceChannel.name} in ${guild.name}`);
-            }
-        } catch (error) {
-            console.error(`Error updating voice channel for guild ${guildId}:`, error);
-        }
-    }
+// Функция для получения читаемого названия региона
+function getRegionName(regionCode) {
+    const regionNames = {
+        'brazil': 'Бразилия',
+        'hongkong': 'Гонконг', 
+        'india': 'Индия',
+        'japan': 'Япония',
+        'rotterdam': 'Роттердам (Европа)',
+        'russia': 'Россия',
+        'singapore': 'Сингапур',
+        'southafrica': 'Южная Африка',
+        'sydney': 'Сидней (Австралия)',
+        'us-central': 'США (Центр)',
+        'us-east': 'США (Восток)',
+        'us-south': 'США (Юг)',
+        'us-west': 'США (Запад)',
+        'europe': 'Европа'
+    };
+    
+    return regionNames[regionCode] || regionCode;
 }
-
-// Периодическое обновление каналов (каждые 5 минут)
-setInterval(updateAllVoiceChannels, 5 * 60 * 1000);
-
 // ==================== КОМАНДЫ НАСТРОЙКИ ТРАНСКРИПТОВ ====================
 
 client.on('messageCreate', async message => {
