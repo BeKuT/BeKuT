@@ -1941,8 +1941,8 @@ function getRegionName(regionCode) {
 // Переименуем переменную чтобы избежать конфликта
 const REGION_COMMAND_ALLOWED_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
 
-// Функция проверки доступа к команде региона
-function hasRegionAccess(member) {
+// Переименуем функцию чтобы избежать конфликта
+function checkRegionAccess(member) {
     // Если список ролей пустой - доступ у всех
     if (REGION_COMMAND_ALLOWED_ROLES.length === 0) {
         return true;
@@ -1964,7 +1964,7 @@ client.on('messageCreate', async (message) => {
         const args = message.content.split(' ');
         
         // Проверяем доступ
-        if (!hasRegionAccess(message.member)) {
+        if (!checkRegionAccess(message.member)) {
             const errorEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
                 .setTitle('❌ Доступ запрещен')
@@ -2089,7 +2089,7 @@ client.on('messageCreate', async (message) => {
 
     // Команда для проверки текущих настроек региона
     if (message.content === '!регион статус') {
-        if (!hasRegionAccess(message.member)) {
+        if (!checkRegionAccess(message.member)) {
             await message.reply('❌ У вас нет прав для использования этой команды.');
             return;
         }
@@ -2140,7 +2140,7 @@ client.on('messageCreate', async (message) => {
 
     // Команда для сброса региона (автоматический выбор)
     if (message.content === '!регион сброс') {
-        if (!hasRegionAccess(message.member)) {
+        if (!checkRegionAccess(message.member)) {
             await message.reply('❌ У вас нет прав для использования этой команды.');
             return;
         }
@@ -2204,7 +2204,7 @@ client.on('messageCreate', async (message) => {
 
     // Команда для проверки своих прав
     if (message.content === '!регион доступ') {
-        const hasAccess = hasRegionAccess(message.member);
+        const hasAccess = checkRegionAccess(message.member);
         const userRoles = message.member.roles.cache.map(role => role.name).join(', ');
         
         const accessEmbed = new EmbedBuilder()
