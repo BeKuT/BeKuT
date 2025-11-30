@@ -2836,6 +2836,7 @@ function setCustomStatus() {
 // Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
+        // Проверка кулдауна
         const cooldownKey = `${user.id}-${reaction.message.id}`;
         if (translationCooldown.has(cooldownKey)) return;
         translationCooldown.add(cooldownKey);
@@ -2846,20 +2847,76 @@ client.on('messageReactionAdd', async (reaction, user) => {
             const message = reaction.message;
             if (message.system) return;
             
+            // ВАЖНО: Проверяем настройки сервера и канала
+            if (!message.guild) return;
+            
+            // Получаем настройки сервера
+            const settings = getServerSettings(message.guild.id);
+            
+            // Проверяем, включен ли авто-перевод глобально
+            if (!settings.translationEnabled) {
+                console.log(`🚫 Translation disabled globally in guild: ${message.guild.name}`);
+                return;
+            }
+            
+            // Проверяем, не отключен ли перевод в этом канале
+            if (settings.disabledTranslationChannels.includes(message.channel.id)) {
+                console.log(`🚫 Translation disabled in channel: ${message.channel.name} (${message.channel.id})`);
+                // Удаляем реакцию пользователя, так как перевод запрещен
+                setTimeout(async () => {
+                    try { 
+                        await reaction.users.remove(user.id); 
+                        console.log(`🗑️ Removed reaction from ${user.tag} in disabled channel`);
+                    } catch (error) {
+                        console.error('Error removing reaction:', error);
+                    }
+                }, 1000);
+                return;
+            }
+            
+            // Проверяем, защищена ли роль автора сообщения
+            const authorMember = await message.guild.members.fetch(message.author.id).catch(() => null);
+            if (authorMember) {
+                const hasProtectedRole = authorMember.roles.cache.some(role => 
+                    settings.protectedRoles.includes(role.id)
+                );
+                if (hasProtectedRole) {
+                    console.log(`🛡️ Translation blocked for protected role user: ${authorMember.user.tag}`);
+                    // Удаляем реакцию для защищенных ролей
+                    setTimeout(async () => {
+                        try { 
+                            await reaction.users.remove(user.id); 
+                        } catch (error) {}
+                    }, 1000);
+                    return;
+                }
+            }
+            
+            console.log(`✅ Translation allowed for message in channel: ${message.channel.name}`);
+            
+            // Остальной код перевода...
             const originalText = message.content;
+            if (!originalText || originalText.trim().length === 0) return;
+            
             const detectedLang = detectLanguage(originalText);
             let targetLang, flagEmoji, languageName;
             
             if (reaction.emoji.name === '🇷🇺') {
-                targetLang = 'ru'; flagEmoji = '🇷🇺'; languageName = 'Русский';
+                targetLang = 'ru'; 
+                flagEmoji = '🇷🇺'; 
+                languageName = 'Русский';
             } else {
-                targetLang = 'en'; flagEmoji = '🇬🇧'; languageName = 'Английский';
+                targetLang = 'en'; 
+                flagEmoji = '🇬🇧'; 
+                languageName = 'Английский';
             }
             
             const sourceLang = detectedLang === 'ru' ? 'ru' : 'en';
             if (sourceLang === targetLang) {
                 setTimeout(async () => {
-                    try { await reaction.users.remove(user.id); } catch (error) {}
+                    try { 
+                        await reaction.users.remove(user.id); 
+                    } catch (error) {}
                 }, 3000);
                 return;
             }
