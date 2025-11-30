@@ -2862,15 +2862,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             // Проверяем, не отключен ли перевод в этом канале
             if (settings.disabledTranslationChannels.includes(message.channel.id)) {
                 console.log(`🚫 Translation disabled in channel: ${message.channel.name} (${message.channel.id})`);
-                // Удаляем реакцию пользователя, так как перевод запрещен
-                setTimeout(async () => {
-                    try { 
-                        await reaction.users.remove(user.id); 
-                        console.log(`🗑️ Removed reaction from ${user.tag} in disabled channel`);
-                    } catch (error) {
-                        console.error('Error removing reaction:', error);
-                    }
-                }, 1000);
+                // НЕ удаляем реакцию, просто выходим
                 return;
             }
             
@@ -2882,12 +2874,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 );
                 if (hasProtectedRole) {
                     console.log(`🛡️ Translation blocked for protected role user: ${authorMember.user.tag}`);
-                    // Удаляем реакцию для защищенных ролей
-                    setTimeout(async () => {
-                        try { 
-                            await reaction.users.remove(user.id); 
-                        } catch (error) {}
-                    }, 1000);
+                    // НЕ удаляем реакцию, просто выходим
                     return;
                 }
             }
@@ -2913,6 +2900,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             
             const sourceLang = detectedLang === 'ru' ? 'ru' : 'en';
             if (sourceLang === targetLang) {
+                // Только для одинаковых языков удаляем реакцию (бесполезная реакция)
                 setTimeout(async () => {
                     try { 
                         await reaction.users.remove(user.id); 
