@@ -1901,7 +1901,6 @@ const availableRegions = [
     'india',        // Индия
     'japan',        // Япония
     'rotterdam',    // Роттердам
-    'russia',       // Россия
     'singapore',    // Сингапур
     'southafrica',  // Южная Африка
     'sydney',       // Сидней
@@ -1909,7 +1908,6 @@ const availableRegions = [
     'us-east',      // США (Восток)
     'us-south',     // США (Юг)
     'us-west',      // США (Запад)
-    'europe',       // Европа',
     'automatic'     // Автоматический выбор
 ];
 
@@ -3060,6 +3058,7 @@ const embedRU = new EmbedBuilder()
 6. Ваш макс БР летной техники? -
 7. Ваша квалификация? (Танкист, Летчик, Вертолетчик, Зенитчик)? - 
 8. Какой у вас К/Д за последний месяц? -
+9. Играли ли вы полковые бои до этого? Если да, какие роли занимали в команде, в каких полках? -
     `);
 
 // АНГЛИЙСКАЯ АНКЕТА
@@ -3077,6 +3076,7 @@ Fill out the question form and wait for the officers to respond.
 6. Your max. tier of flight vehicles? -
 7. your qualification(what type of vehicle you play most)(Tank, Fighter, Heli, Anti-Air)? - 
 8. What is your schedule for the last month? -
+9. Did you play squadron battles before? If yes, which roles did you fulfill in the team, in what squadrons? - 
 
 **P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**
     `)
