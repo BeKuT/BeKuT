@@ -585,54 +585,56 @@ app.get('/api/permissions/:guildId', requireAdmin, (req, res) => {
 
 // ==================== API МАРШРУТЫ ====================
 
-app.get('/api/transcripts', (req, res) => {
-    const transcripts = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
-        id,
-        channelName: data.ticketInfo?.channelName,
-        server: data.ticketInfo?.server,
-        messageCount: data.ticketInfo?.messageCount,
-        createdAt: new Date(data.createdAt).toISOString(),
-        ageInDays: Math.floor((Date.now() - data.createdAt) / (1000 * 60 * 60 * 24))
-    }));
+// Просмотр транскрипта по ID
+app.get('/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcriptData = transcriptsStorage.get(transcriptId);
     
-    res.json({ 
-        transcripts,
-        storageInfo: {
-            total: transcriptsStorage.size,
-            permanentStorage: true
-        }
-    });
+    if (!transcriptData) {
+        return res.status(404).send(createErrorPage(
+            'Транскрипт не найден',
+            `Транскрипт с ID "${transcriptId}" не существует или был удален.`
+        ));
+    }
+    
+    // Отправляем HTML транскрипта
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(transcriptData.html);
 });
 
-app.get('/api/health', (req, res) => {
+// API для получения данных транскрипта
+app.get('/api/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcriptData = transcriptsStorage.get(transcriptId);
+    
+    if (!transcriptData) {
+        return res.status(404).json({ 
+            error: 'Transcript not found',
+            message: `Transcript with ID "${transcriptId}" does not exist`
+        });
+    }
+    
     res.json({
-        status: 'ok',
-        transcripts: transcriptsStorage.size,
+        id: transcriptId,
+        data: transcriptData,
         permanentStorage: true,
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
+        accessedAt: new Date().toISOString()
     });
 });
 
-// Отладочные маршруты
-app.get('/debug/env', (req, res) => {
-    res.json({
-        clientId: CLIENT_ID ? '✅ Установлен' : '❌ Отсутствует',
-        clientSecret: CLIENT_SECRET ? '✅ Установлен' : '❌ Отсутствует',
-        token: token ? '✅ Установлен' : '❌ Отсутствует',
-        baseUrl: getBaseUrl(),
-        redirectUri: `${getBaseUrl()}/auth/discord/callback`,
-        nodeEnv: process.env.NODE_ENV || 'not set'
-    });
-});
-
-app.get('/debug/session', (req, res) => {
-    req.session.test = 'session_works';
-    res.json({
-        session: req.session,
-        sessionId: req.sessionID
-    });
-});
+// Список всех транскриптов (админ)
+app.get('/admin/transcripts', requireAuth, (req, res) => {
+    const user = req.session.user;
+    
+    const transcriptsList = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
+        id,
+        server: data.ticketInfo?.server || 'Unknown',
+        channel: data.ticketInfo?.channelName || 'Unknown',
+        created: new Date(data.createdAt).toLocaleString('ru-RU'),
+        messages: data.ticketInfo?.messageCount || 0,
+        participants: data.ticketInfo?.participantsCount || 0,
+        url: `${getBaseUrl()}/transcript/${id}`
+    }));
 
 // ==================== HTML ШАБЛОНЫ ====================
 
