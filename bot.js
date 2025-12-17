@@ -6136,6 +6136,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('🌐 Haki Bot Panel running on port ' + PORT);
     console.log('🔗 Access at: ' + getBaseUrl());
+    console.log('✅ Permissions system initialized');
 });
 
 // Обработка graceful shutdown
