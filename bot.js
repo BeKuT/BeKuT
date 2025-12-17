@@ -18,6 +18,8 @@ import axios from 'axios';
 import express from 'express';
 import path from 'path';
 import session from 'express-session';
+import { REST, Routes } from 'discord.js';
+import { joinVoiceChannel, createAudioPlayer, createAudioResource } from '@discordjs/voice';
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
@@ -63,6 +65,256 @@ const transcriptsStorage = new Map();
 const translationMessages = new Map();
 const translationCooldown = new Set();
 const TRANSLATION_COOLDOWN_TIME = 30000;
+
+// ==================== НАСТРОЙКИ СЛЕШ-КОМАНД ====================
+
+// После создания клиента добавьте (после строки с const client = new Client({...})):
+client.commands = new Collection();
+
+// Определяем все слеш-команды (добавьте после импортов и переменных окружения)
+const slashCommands = [
+    {
+        name: 'ping',
+        description: 'Проверка работоспособности бота'
+    },
+    {
+        name: 'transcript',
+        description: 'Создать транскрипт текущего канала'
+    },
+    {
+        name: 'settranscript',
+        description: 'Настроить канал для транскриптов',
+        options: [
+            {
+                name: 'channel_id',
+                description: 'ID канала или "reset" для сброса',
+                type: 3, // STRING
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'transcriptsettings',
+        description: 'Показать текущие настройки транскриптов'
+    },
+    {
+        name: 'translation',
+        description: 'Управление автоматическим переводом',
+        options: [
+            {
+                name: 'action',
+                description: 'Действие',
+                type: 3, // STRING
+                required: true,
+                choices: [
+                    { name: 'Включить', value: 'on' },
+                    { name: 'Выключить', value: 'off' },
+                    { name: 'Статус', value: 'status' },
+                    { name: 'Отключить канал', value: 'disablechannel' },
+                    { name: 'Включить канал', value: 'enablechannel' },
+                    { name: 'Очистить каналы', value: 'clearchannels' },
+                    { name: 'Добавить роль', value: 'addrole' },
+                    { name: 'Удалить роль', value: 'removerole' }
+                ]
+            },
+            {
+                name: 'target',
+                description: 'Цель (канал или роль)',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'autodelete',
+        description: 'Управление автоудалением сообщений',
+        options: [
+            {
+                name: 'action',
+                description: 'Действие',
+                type: 3, // STRING
+                required: true,
+                choices: [
+                    { name: 'Включить', value: 'on' },
+                    { name: 'Выключить', value: 'off' },
+                    { name: 'Статус', value: 'status' },
+                    { name: 'Установить задержку', value: 'delay' },
+                    { name: 'Добавить канал', value: 'addchannel' },
+                    { name: 'Удалить канал', value: 'removechannel' },
+                    { name: 'Список каналов', value: 'listchannels' },
+                    { name: 'Очистить каналы', value: 'clearallchannels' },
+                    { name: 'Добавить роль', value: 'addrole' },
+                    { name: 'Удалить роль', value: 'removerole' },
+                    { name: 'Список ролей', value: 'listroles' },
+                    { name: 'Очистить роли', value: 'clearroles' },
+                    { name: 'Тест', value: 'test' }
+                ]
+            },
+            {
+                name: 'value',
+                description: 'Значение (задержка, ID канала/роли)',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'play',
+        description: 'Включить радиостанцию',
+        options: [
+            {
+                name: 'station',
+                description: 'Название радиостанции',
+                type: 3, // STRING
+                required: false,
+                choices: [
+                    { name: 'НВС', value: 'нвс' },
+                    { name: 'Шансон', value: 'шансон' },
+                    { name: 'Ретро', value: 'ретро' },
+                    { name: 'Рок', value: 'рок' }
+                ]
+            }
+        ]
+    },
+    {
+        name: 'stop',
+        description: 'Выключить радио'
+    },
+    {
+        name: 'stations',
+        description: 'Показать список радиостанций'
+    },
+    {
+        name: 'testvoice',
+        description: 'Тест подключения к голосовому каналу'
+    },
+    {
+        name: 'сервер',
+        description: 'Управление отображением сервера в голосовом канале',
+        options: [
+            {
+                name: 'action',
+                description: 'Действие',
+                type: 3, // STRING
+                required: true,
+                choices: [
+                    { name: 'Настроить сервер', value: 'setup' },
+                    { name: 'Статус', value: 'статус' },
+                    { name: 'Сброс', value: 'сброс' }
+                ]
+            },
+            {
+                name: 'channel_id',
+                description: 'ID голосового канала',
+                type: 3, // STRING
+                required: false
+            },
+            {
+                name: 'server_name',
+                description: 'Название сервера',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'ticket',
+        description: 'Настройка системы тикетов (только для администраторов)',
+        options: [
+            {
+                name: 'channel_id',
+                description: 'ID канала для кнопки заявок',
+                type: 3, // STRING
+                required: true
+            },
+            {
+                name: 'category_id',
+                description: 'ID категории для тикетов',
+                type: 3, // STRING
+                required: true
+            },
+            {
+                name: 'role_ids',
+                description: 'ID ролей через запятую',
+                type: 3, // STRING
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'стат',
+        description: 'Статистика игрока War Thunder через StatShark',
+        options: [
+            {
+                name: 'никнейм',
+                description: 'Никнейм или ID игрока',
+                type: 3, // STRING
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'полк',
+        description: 'Информация о полке War Thunder',
+        options: [
+            {
+                name: 'название',
+                description: 'Название полка',
+                type: 3, // STRING
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'регион',
+        description: 'Управление регионами голосовых серверов Discord',
+        options: [
+            {
+                name: 'действие',
+                description: 'Выберите действие',
+                type: 3, // STRING
+                required: true,
+                choices: [
+                    { name: 'Изменить регион', value: 'set' },
+                    { name: 'Статус', value: 'статус' },
+                    { name: 'Сброс', value: 'сброс' },
+                    { name: 'Список регионов', value: 'список' },
+                    { name: 'Проверка доступа', value: 'доступ' }
+                ]
+            },
+            {
+                name: 'channel_id',
+                description: 'ID голосового канала (только для изменения)',
+                type: 3, // STRING
+                required: false
+            },
+            {
+                name: 'регион',
+                description: 'Код региона (только для изменения)',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    }
+];
+
+// Функция регистрации слеш-команд
+async function registerSlashCommands() {
+    try {
+        const rest = new REST({ version: '10' }).setToken(token);
+        
+        console.log('🔄 Регистрация слеш-команд...');
+        
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: slashCommands }
+        );
+        
+        console.log('✅ Слеш-команды успешно зарегистрированы!');
+    } catch (error) {
+        console.error('❌ Ошибка регистрации слеш-команд:', error);
+    }
+}
 
 // ==================== EXPRESS СЕРВЕР ====================
 
@@ -1952,46 +2204,54 @@ function checkRegionAccess(member) {
     );
 }
 
-// ==================== ОБНОВЛЕННАЯ КОМАНДА РЕГИОНА ====================
+// ==================== ОБНОВЛЕННАЯ КОМАНДА РЕГИОНА (СЛЕШ-КОМАНДА) ====================
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    
-    // Команда региона с проверкой роли
-    if (message.content.startsWith('!регион')) {
-        const args = message.content.split(' ');
+// Обработчик слеш-команды /регион
+client.on('interactionCreate', async interaction => {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'регион') {
+        const action = interaction.options.getString('действие');
         
         // Проверяем доступ
-        if (!checkRegionAccess(message.member)) {
+        if (!checkRegionAccess(interaction.member)) {
             const errorEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
                 .setTitle('❌ Доступ запрещен')
                 .setDescription('У вас нет прав для использования этой команды.')
                 .addFields(
-                    { name: 'Требуемые роли', value: REGION_COMMAND_ALLOWED_ROLES.length > 0 ? 
-                        REGION_COMMAND_ALLOWED_ROLES.map(id => {
-                            const role = message.guild.roles.cache.get(id);
-                            return role ? `• ${role.name}` : `• ${id}`;
-                        }).join('\n') : 'Не настроены', inline: false }
+                    { 
+                        name: 'Требуемые роли', 
+                        value: REGION_COMMAND_ALLOWED_ROLES.length > 0 ? 
+                            REGION_COMMAND_ALLOWED_ROLES.map(id => {
+                                const role = interaction.guild.roles.cache.get(id);
+                                return role ? `• ${role.name}` : `• ${id}`;
+                            }).join('\n') : 'Не настроены', 
+                        inline: false 
+                    }
                 );
             
-            await message.reply({ embeds: [errorEmbed] });
+            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             return;
         }
         
-        // Остальной код команды региона (ваш существующий код)
-        if (args.length < 3) {
-            const helpEmbed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🌍 Управление регионами Discord')
-                .setDescription(`
+        await interaction.deferReply({ ephemeral: true });
+        
+        switch(action) {
+            case 'set':
+                const voiceChannelId = interaction.options.getString('channel_id');
+                const regionCode = interaction.options.getString('регион');
+                
+                if (!voiceChannelId || !regionCode) {
+                    const helpEmbed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('🌍 Управление регионами Discord')
+                        .setDescription(`
 **Использование:**
-\`!регион <ID_голосового_канала> <регион>\`
+\`/регион set channel_id: <ID_голосового_канала> регион: <код_региона>\`
 
 **Примеры:**
-\`!регион 123456789012345678 russia\`
-\`!регион 123456789012345678 europe\`
-\`!регион 123456789012345678 us-central\`
+\`/регион set channel_id: 123456789012345678 регион: russia\`
+\`/регион set channel_id: 123456789012345678 регион: europe\`
+\`/регион set channel_id: 123456789012345678 региon: us-central\`
 
 **Доступные регионы:**
 ${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`).join('\n')}
@@ -1999,90 +2259,223 @@ ${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`)
 **Как получить ID голосового канала:**
 1. Включите режим разработчика в Discord
 2. ПКМ по голосовому каналу → "Копировать ID"
-                `);
-            
-            await message.reply({ embeds: [helpEmbed] });
-            return;
-        }
+                        `);
+                    
+                    return interaction.editReply({ embeds: [helpEmbed] });
+                }
 
-        const voiceChannelId = args[1];
-        const regionCode = args[2].toLowerCase();
+                const regionCodeLower = regionCode.toLowerCase();
 
-        if (!availableRegions.includes(regionCode)) {
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setTitle('❌ Неверный регион')
-                .setDescription(`Регион \`${regionCode}\` не найден.`)
-                .addFields(
-                    { name: 'Доступные регионы', value: availableRegions.map(r => `\`${r}\``).join(', '), inline: false }
-                );
-            
-            await message.reply({ embeds: [errorEmbed] });
-            return;
-        }
+                if (!availableRegions.includes(regionCodeLower)) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor('#ED4245')
+                        .setTitle('❌ Неверный регион')
+                        .setDescription(`Регион \`${regionCode}\` не найден.`)
+                        .addFields(
+                            { name: 'Доступные регионы', value: availableRegions.map(r => `\`${r}\``).join(', '), inline: false }
+                        );
+                    
+                    return interaction.editReply({ embeds: [errorEmbed] });
+                }
 
-        try {
-            const guild = message.guild;
-            const voiceChannel = await guild.channels.fetch(voiceChannelId);
-            
-            if (!voiceChannel) {
-                await message.reply('❌ Голосовой канал не найден! Проверьте ID.');
-                return;
-            }
+                try {
+                    const guild = interaction.guild;
+                    const voiceChannel = await guild.channels.fetch(voiceChannelId);
+                    
+                    if (!voiceChannel) {
+                        return interaction.editReply('❌ Голосовой канал не найден! Проверьте ID.');
+                    }
 
-            if (voiceChannel.type !== ChannelType.GuildVoice) {
-                await message.reply('❌ Указанный канал не является голосовым!');
-                return;
-            }
+                    if (voiceChannel.type !== ChannelType.GuildVoice) {
+                        return interaction.editReply('❌ Указанный канал не является голосовым!');
+                    }
 
-            // Для automatic используем null
-            const regionToSet = regionCode === 'automatic' ? null : regionCode;
+                    // Для automatic используем null
+                    const regionToSet = regionCodeLower === 'automatic' ? null : regionCodeLower;
 
-            // Меняем регион голосового сервера
-            await voiceChannel.setRTCRegion(regionToSet);
+                    // Меняем регион голосового сервера
+                    await voiceChannel.setRTCRegion(regionToSet);
 
-            // Сохраняем настройки
-            voiceRegionSettings.set(guild.id, {
-                voiceChannelId: voiceChannelId,
-                regionCode: regionCode,
-                guildId: guild.id,
-                lastUpdated: new Date()
-            });
+                    // Сохраняем настройки
+                    voiceRegionSettings.set(guild.id, {
+                        voiceChannelId: voiceChannelId,
+                        regionCode: regionCodeLower,
+                        guildId: guild.id,
+                        lastUpdated: new Date()
+                    });
 
-            const successEmbed = new EmbedBuilder()
-                .setColor('#57F287')
-                .setTitle('✅ Регион изменен')
-                .setDescription(`Регион голосового сервера изменен на: **${getRegionName(regionCode)}**`)
-                .addFields(
-                    { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
-                    { name: 'Регион', value: getRegionName(regionCode), inline: true },
-                    { name: 'Статус', value: '✅ Успешно применен', inline: false }
-                )
-                .setFooter({ text: 'Изменения вступят в силу немедленно' })
-                .setTimestamp();
+                    const successEmbed = new EmbedBuilder()
+                        .setColor('#57F287')
+                        .setTitle('✅ Регион изменен')
+                        .setDescription(`Регион голосового сервера изменен на: **${getRegionName(regionCodeLower)}**`)
+                        .addFields(
+                            { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
+                            { name: 'Регион', value: getRegionName(regionCodeLower), inline: true },
+                            { name: 'Статус', value: '✅ Успешно применен', inline: false }
+                        )
+                        .setFooter({ text: 'Изменения вступят в силу немедленно' })
+                        .setTimestamp();
 
-            await message.reply({ embeds: [successEmbed] });
-            console.log(`✅ Voice region changed to: ${regionCode} in ${guild.name}`);
+                    await interaction.editReply({ embeds: [successEmbed] });
+                    console.log(`✅ Voice region changed to: ${regionCodeLower} in ${guild.name}`);
 
-        } catch (error) {
-            console.error('Voice region change error:', error);
-            
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setTitle('❌ Ошибка изменения региона')
-                .setDescription(`Не удалось изменить регион: ${error.message}`)
-                .addFields(
-                    { name: 'Возможные причины', value: '• Недостаточно прав\n• Регион недоступен\n• Ошибка Discord API', inline: false }
-                );
-            
-            await message.reply({ embeds: [errorEmbed] });
+                } catch (error) {
+                    console.error('Voice region change error:', error);
+                    
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor('#ED4245')
+                        .setTitle('❌ Ошибка изменения региона')
+                        .setDescription(`Не удалось изменить регион: ${error.message}`)
+                        .addFields(
+                            { name: 'Возможные причины', value: '• Недостаточно прав\n• Регион недоступен\n• Ошибка Discord API', inline: false }
+                        );
+                    
+                    await interaction.editReply({ embeds: [errorEmbed] });
+                }
+                break;
+                
+            case 'статус':
+                const settings = voiceRegionSettings.get(interaction.guild.id);
+                
+                if (!settings) {
+                    const noSettingsEmbed = new EmbedBuilder()
+                        .setColor('#FEE75C')
+                        .setTitle('ℹ️ Настройки региона')
+                        .setDescription('Регион голосового сервера еще не настроен.')
+                        .addFields(
+                            { name: 'Использование', value: '`/регион set channel_id: <ID_канала> регион: <регион>`', inline: false }
+                        );
+                    
+                    return interaction.editReply({ embeds: [noSettingsEmbed] });
+                }
+
+                try {
+                    const voiceChannel = await interaction.guild.channels.fetch(settings.voiceChannelId);
+                    const currentRegion = voiceChannel.rtcRegion;
+                    
+                    const statusEmbed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('🌍 Текущие настройки региона')
+                        .addFields(
+                            { name: 'Голосовой канал', value: `<#${settings.voiceChannelId}>`, inline: true },
+                            { name: 'Установленный регион', value: getRegionName(settings.regionCode), inline: true },
+                            { name: 'Текущий регион', value: currentRegion ? getRegionName(currentRegion) : 'авто', inline: true },
+                            { name: 'Статус', value: voiceChannel ? '✅ Активен' : '❌ Канал не найден', inline: true },
+                            { name: 'Последнее обновление', value: `<t:${Math.floor(settings.lastUpdated.getTime() / 1000)}:R>`, inline: false }
+                        )
+                        .setFooter({ text: 'Используйте /регион set для изменения настроек' })
+                        .setTimestamp();
+
+                    return interaction.editReply({ embeds: [statusEmbed] });
+
+                } catch (error) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor('#ED4245')
+                        .setTitle('❌ Ошибка проверки')
+                        .setDescription('Не удалось проверить настройки региона.');
+                    
+                    return interaction.editReply({ embeds: [errorEmbed] });
+                }
+                
+            case 'сброс':
+                const resetSettings = voiceRegionSettings.get(interaction.guild.id);
+                
+                if (!resetSettings) {
+                    return interaction.editReply('❌ Настройки региона не найдены для сброса.');
+                }
+
+                try {
+                    const voiceChannel = await interaction.guild.channels.fetch(resetSettings.voiceChannelId);
+                    
+                    // Сбрасываем регион (null = автоматический выбор)
+                    await voiceChannel.setRTCRegion(null);
+
+                    // Удаляем настройки
+                    voiceRegionSettings.delete(interaction.guild.id);
+
+                    const resetEmbed = new EmbedBuilder()
+                        .setColor('#57F287')
+                        .setTitle('✅ Регион сброшен')
+                        .setDescription('Регион голосового сервера сброшен на автоматический выбор.')
+                        .addFields(
+                            { name: 'Канал', value: `<#${resetSettings.voiceChannelId}>`, inline: true },
+                            { name: 'Статус', value: 'Автоматический выбор региона', inline: true }
+                        )
+                        .setTimestamp();
+
+                    await interaction.editReply({ embeds: [resetEmbed] });
+                    console.log(`✅ Voice region reset to auto for guild: ${interaction.guild.name}`);
+
+                } catch (error) {
+                    console.error('Voice region reset error:', error);
+                    await interaction.editReply('❌ Ошибка при сбросе региона.');
+                }
+                break;
+                
+            case 'список':
+                const regionsList = availableRegions.map(region => 
+                    `• \`${region}\` - ${getRegionName(region)}`
+                ).join('\n');
+
+                const listEmbed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('🌍 Доступные регионы Discord')
+                    .setDescription(regionsList)
+                    .setFooter({ text: 'Используйте: /регион set channel_id: <ID_канала> регион: <код_региона>' })
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [listEmbed] });
+                break;
+                
+            case 'доступ':
+                const hasAccess = checkRegionAccess(interaction.member);
+                const userRoles = interaction.member.roles.cache.map(role => role.name).join(', ');
+                
+                const accessEmbed = new EmbedBuilder()
+                    .setColor(hasAccess ? '#57F287' : '#ED4245')
+                    .setTitle('🔐 Проверка доступа к командам региона')
+                    .addFields(
+                        { name: 'Статус доступа', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
+                        { name: 'Ваши роли', value: userRoles.length > 100 ? userRoles.substring(0, 100) + '...' : userRoles || 'Нет ролей', inline: false }
+                    );
+                
+                if (REGION_COMMAND_ALLOWED_ROLES.length > 0) {
+                    const allowedRolesInfo = REGION_COMMAND_ALLOWED_ROLES.map(id => {
+                        const role = interaction.guild.roles.cache.get(id);
+                        return role ? `• ${role.name}` : `• ${id}`;
+                    }).join('\n');
+                    
+                    accessEmbed.addFields({ name: 'Требуемые роли', value: allowedRolesInfo, inline: false });
+                }
+                
+                await interaction.editReply({ embeds: [accessEmbed] });
+                break;
+                
+            default:
+                const defaultHelpEmbed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('🌍 Команда /регион')
+                    .setDescription(`
+**Доступные действия:**
+
+\`/регион set\` - Изменить регион голосового канала
+\`/регион статус\` - Показать текущие настройки региона
+\`/регион сброс\` - Сбросить регион на автоматический выбор
+\`/регион список\` - Показать список доступных регионов
+\`/регион доступ\` - Проверить права доступа
+
+**Пример использования:**
+\`/регион set channel_id: 123456789012345678 регион: russia\`
+                    `);
+                
+                await interaction.editReply({ embeds: [defaultHelpEmbed] });
         }
     }
 });
 
 // ==================== ОБНОВЛЕННЫЕ КОМАНДЫ СТАТУСА И СБРОСА ====================
 
-client.on('messageCreate', async (message) => {
+/* client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     // Команда для проверки текущих настроек региона
@@ -2194,10 +2587,10 @@ client.on('messageCreate', async (message) => {
         await message.reply({ embeds: [listEmbed] });
     }
 });
-
+*/
 // ==================== КОМАНДА ДЛЯ ПРОВЕРКИ ДОСТУПА ====================
 
-client.on('messageCreate', async (message) => {
+ /*client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     // Команда для проверки своих прав
@@ -2225,9 +2618,10 @@ client.on('messageCreate', async (message) => {
         await message.reply({ embeds: [accessEmbed] });
     }
 });
+*/
 // ==================== КОМАНДЫ НАСТРОЙКИ ТРАНСКРИПТОВ ====================
 
-client.on('messageCreate', async message => {
+/*client.on('messageCreate', async message => {
     if (message.system) return;
     if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
@@ -2643,6 +3037,787 @@ if (message.content.startsWith('-translation')) {
     }
 }
 });
+*/
+// ==================== ОБРАБОТКА СЛЕШ-КОМАНД ====================
+
+
+    // Обработка слеш-команд
+    if (interaction.isChatInputCommand()) {
+        const { commandName, options, user, member, guild } = interaction;
+
+        console.log(`⚡ Слеш-команда: /${commandName} от ${user.tag}`);
+
+        // Проверяем, что команда выполнена на сервере
+        if (!guild) {
+            return interaction.reply({ 
+                content: '❌ Эта команда работает только на серверах Discord!', 
+                ephemeral: true 
+            });
+        }
+
+        try {
+            switch(commandName) {
+                case 'ping':
+                    await interaction.reply('🏓 Понг! Бот работает.');
+                    break;
+
+                case 'transcript':
+                    // Проверяем права на управление сообщениями
+                    if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для создания транскриптов!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    // Вызываем функцию создания транскрипта
+                    await interaction.deferReply({ ephemeral: true });
+                    
+                    const settings = getServerSettings(guild.id);
+                    const transcriptChannelId = settings.transcriptChannelId;
+                    
+                    // Собираем сообщения
+                    let messageCollection = new Collection();
+                    let channelMessages = await interaction.channel.messages.fetch({ limit: 100 });
+                    messageCollection = messageCollection.concat(channelMessages);
+
+                    let lastMessage = channelMessages.last();
+                    while(channelMessages.size === 100 && lastMessage) {
+                        let lastMessageId = lastMessage.id;
+                        channelMessages = await interaction.channel.messages.fetch({ limit: 100, before: lastMessageId });
+                        if(channelMessages && channelMessages.size > 0) {
+                            messageCollection = messageCollection.concat(channelMessages);
+                            lastMessage = channelMessages.last();
+                        } else break;
+                    }
+
+                    const allMessages = Array.from(messageCollection.values()).reverse();
+                    
+                    const ticketInfo = await collectTicketInfo(interaction.channel, messageCollection);
+                    const ticketReport = generateTicketReport(ticketInfo);
+                    ticketReport.messageCount = allMessages.length;
+                    
+                    const transcriptId = generateTranscriptId();
+                    
+                    const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+                    
+                    const transcriptData = {
+                        html: htmlContent,
+                        createdAt: Date.now(),
+                        ticketInfo: {
+                            ...ticketReport.ticketInfo,
+                            messageCount: ticketReport.messageCount,
+                            participantsCount: ticketReport.participants.length
+                        }
+                    };
+                    
+                    transcriptsStorage.set(transcriptId, transcriptData);
+                    
+                    const baseUrl = getBaseUrl();
+                    const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+                    
+                    const row = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setLabel('📄 Open Transcript')
+                                .setURL(transcriptUrl)
+                                .setStyle(ButtonStyle.Link)
+                        );
+                    
+                    const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+                    
+                    const transcriptChannel = client.channels.cache.get(transcriptChannelId);
+                    
+                    if (transcriptChannel && transcriptChannel.isTextBased()) {
+                        await transcriptChannel.send({
+                            embeds: [ticketInfoEmbed],
+                            components: [row],
+                            content: `📋 **Transcript Created**\n**ID:** \`${transcriptId}\``
+                        });
+                        
+                        await interaction.editReply('✅ Transcript created! Check the transcript channel.');
+                    } else {
+                        await interaction.editReply('❌ Transcript channel not found!');
+                    }
+                    break;
+
+                case 'settranscript':
+                    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                        return interaction.reply({ 
+                            content: '❌ Только администраторы могут настраивать каналы транскриптов!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    const channelId = options.getString('channel_id');
+                    
+                    await interaction.deferReply({ ephemeral: true });
+                    
+                    if (channelId === 'reset') {
+                        const settings = getServerSettings(guild.id);
+                        settings.transcriptChannelId = TRANSCRIPT_CHANNEL_ID;
+                        saveServerSettings(guild.id, settings);
+                        
+                        await interaction.editReply({
+                            content: `✅ Настройки сброшены к значению по умолчанию: \`${TRANSCRIPT_CHANNEL_ID}\``
+                        });
+                        return;
+                    }
+
+                    if (!/^\d{17,20}$/.test(channelId)) {
+                        return interaction.editReply('❌ Укажите корректный ID канала (17-20 цифр)');
+                    }
+
+                    try {
+                        const channel = await guild.channels.fetch(channelId);
+                        if (!channel) {
+                            throw new Error('Канал не найден');
+                        }
+
+                        const botMember = guild.members.me;
+                        if (!channel.permissionsFor(botMember).has([PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.EmbedLinks])) {
+                            throw new Error('У бота нет прав для отправки сообщений в этот канал');
+                        }
+
+                        const settings = getServerSettings(guild.id);
+                        settings.transcriptChannelId = channelId;
+                        saveServerSettings(guild.id, settings);
+
+                        await interaction.editReply({
+                            content: `✅ Канал для транскриптов установлен: <#${channelId}>`
+                        });
+                        
+                    } catch (error) {
+                        await interaction.editReply(`❌ Ошибка: ${error.message}`);
+                    }
+                    break;
+
+                case 'transcriptsettings':
+                    const serverSettings = getServerSettings(guild.id);
+                    
+                    const embed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('⚙️ Текущие настройки транскриптов')
+                        .addFields(
+                            { 
+                                name: '📁 Канал для транскриптов', 
+                                value: serverSettings.transcriptChannelId === TRANSCRIPT_CHANNEL_ID ? 
+                                    `По умолчанию: \`${TRANSCRIPT_CHANNEL_ID}\`` : 
+                                    `<#${serverSettings.transcriptChannelId}> (\`${serverSettings.transcriptChannelId}\`)`, 
+                                inline: false 
+                            }
+                        )
+                        .setFooter({ text: 'Используйте /settranscript для изменения настроек' });
+
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                    break;
+
+                case 'translation':
+                    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                        return interaction.reply({ 
+                            content: '❌ Только администраторы могут управлять переводом!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    const action = options.getString('action');
+                    const target = options.getString('target');
+                    const translationSettings = getServerSettings(guild.id);
+                    
+                    await interaction.deferReply({ ephemeral: true });
+                    
+                    switch(action) {
+                        case 'on':
+                            translationSettings.translationEnabled = true;
+                            saveServerSettings(guild.id, translationSettings);
+                            await interaction.editReply('✅ Авто-перевод включен');
+                            break;
+                            
+                        case 'off':
+                            translationSettings.translationEnabled = false;
+                            saveServerSettings(guild.id, translationSettings);
+                            await interaction.editReply('❌ Авто-перевод выключен');
+                            break;
+                            
+                        case 'status':
+                            const status = translationSettings.translationEnabled ? '✅ ВКЛЮЧЕН' : '❌ ВЫКЛЮЧЕН';
+                            const disabledChannelsInfo = translationSettings.disabledTranslationChannels.length === 0 ? 
+                                'Нет' : 
+                                translationSettings.disabledTranslationChannels.map(id => {
+                                    const ch = guild.channels.cache.get(id);
+                                    return ch ? `#${ch.name}` : id;
+                                }).join(', ');
+                            
+                            const rolesInfo = translationSettings.protectedRoles.length === 0 ? 
+                                'Нет' : 
+                                translationSettings.protectedRoles.map(id => {
+                                    const role = guild.roles.cache.get(id);
+                                    return role ? role.name : id;
+                                }).join(', ');
+                            
+                            const statusEmbed = new EmbedBuilder()
+                                .setColor(translationSettings.translationEnabled ? 0x57F287 : 0xED4245)
+                                .setTitle('🌐 Статус авто-перевода')
+                                .setDescription(`
+**Общий статус:** ${status}
+🚫 **Отключен в каналах:** ${disabledChannelsInfo}
+🛡️ **Защищенные роли:** ${rolesInfo}
+                                `);
+                            
+                            await interaction.editReply({ embeds: [statusEmbed] });
+                            break;
+                            
+                        case 'disablechannel':
+                            if (!target) {
+                                return interaction.editReply('❌ Укажите канал!');
+                            }
+                            
+                            let channelToDisable = guild.channels.cache.get(target.replace(/[<#>]/g, ''));
+                            if (!channelToDisable) {
+                                channelToDisable = guild.channels.cache.find(ch => 
+                                    ch.name.toLowerCase().includes(target.toLowerCase())
+                                );
+                            }
+                            
+                            if (channelToDisable && channelToDisable.isTextBased()) {
+                                if (!translationSettings.disabledTranslationChannels.includes(channelToDisable.id)) {
+                                    translationSettings.disabledTranslationChannels.push(channelToDisable.id);
+                                    saveServerSettings(guild.id, translationSettings);
+                                    await interaction.editReply(`🚫 Перевод отключен для канала: **#${channelToDisable.name}**`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Канал **#${channelToDisable.name}** уже в списке отключенных`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Канал не найден');
+                            }
+                            break;
+                            
+                        case 'enablechannel':
+                            if (!target) {
+                                return interaction.editReply('❌ Укажите канал!');
+                            }
+                            
+                            let channelToEnable = guild.channels.cache.get(target.replace(/[<#>]/g, ''));
+                            if (!channelToEnable) {
+                                channelToEnable = guild.channels.cache.find(ch => 
+                                    ch.name.toLowerCase().includes(target.toLowerCase())
+                                );
+                            }
+                            
+                            if (channelToEnable) {
+                                const index = translationSettings.disabledTranslationChannels.indexOf(channelToEnable.id);
+                                if (index > -1) {
+                                    translationSettings.disabledTranslationChannels.splice(index, 1);
+                                    saveServerSettings(guild.id, translationSettings);
+                                    await interaction.editReply(`✅ Перевод включен для канала: **#${channelToEnable.name}**`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Канал **#${channelToEnable.name}** не найден в списке отключенных`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Канал не найден');
+                            }
+                            break;
+                            
+                        case 'clearchannels':
+                            translationSettings.disabledTranslationChannels = [];
+                            saveServerSettings(guild.id, translationSettings);
+                            await interaction.editReply('🗑️ Список отключенных каналов очищен');
+                            break;
+                            
+                        case 'addrole':
+                            if (!target) {
+                                return interaction.editReply('❌ Укажите роль!');
+                            }
+                            
+                            let roleToAdd = guild.roles.cache.get(target.replace(/[<@&>]/g, ''));
+                            if (!roleToAdd) {
+                                roleToAdd = guild.roles.cache.find(role => 
+                                    role.name.toLowerCase().includes(target.toLowerCase())
+                                );
+                            }
+                            
+                            if (roleToAdd) {
+                                if (!translationSettings.protectedRoles.includes(roleToAdd.id)) {
+                                    translationSettings.protectedRoles.push(roleToAdd.id);
+                                    saveServerSettings(guild.id, translationSettings);
+                                    await interaction.editReply(`🛡️ Роль **${roleToAdd.name}** добавлена в защищенные`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Роль **${roleToAdd.name}** уже в списке защищенных`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Роль не найдена');
+                            }
+                            break;
+                            
+                        case 'removerole':
+                            if (!target) {
+                                return interaction.editReply('❌ Укажите роль!');
+                            }
+                            
+                            let roleToRemove = guild.roles.cache.get(target.replace(/[<@&>]/g, ''));
+                            if (!roleToRemove) {
+                                roleToRemove = guild.roles.cache.find(role => 
+                                    role.name.toLowerCase().includes(target.toLowerCase())
+                                );
+                            }
+                            
+                            if (roleToRemove) {
+                                const index = translationSettings.protectedRoles.indexOf(roleToRemove.id);
+                                if (index > -1) {
+                                    translationSettings.protectedRoles.splice(index, 1);
+                                    saveServerSettings(guild.id, translationSettings);
+                                    await interaction.editReply(`✅ Роль **${roleToRemove.name}** удалена из защищенных`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Роль **${roleToRemove.name}** не найдена в списке защищенных`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Роль не найдена');
+                            }
+                            break;
+                    }
+                    break;
+
+                case 'autodelete':
+                    if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для управления автоудалением!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    const autodeleteAction = options.getString('action');
+                    const autodeleteValue = options.getString('value');
+                    const autodeleteSettings = getSettings(guild.id);
+                    
+                    await interaction.deferReply({ ephemeral: true });
+                    
+                    switch(autodeleteAction) {
+                        case 'on':
+                            autodeleteSettings.enabled = true;
+                            await interaction.editReply('✅ Автоудаление включено');
+                            break;
+                            
+                        case 'off':
+                            autodeleteSettings.enabled = false;
+                            await interaction.editReply('❌ Автоудаление выключено');
+                            break;
+                            
+                        case 'status':
+                            const statusText = autodeleteSettings.enabled ? '✅ ВКЛЮЧЕНО' : '❌ ВЫКЛЮЧЕНО';
+                            const channelsInfo = autodeleteSettings.targetChannels.length === 0 ? 
+                                'Все каналы' : 
+                                autodeleteSettings.targetChannels.map(id => {
+                                    const ch = guild.channels.cache.get(id);
+                                    return ch ? `#${ch.name}` : id;
+                                }).join(', ');
+                            
+                            const exemptRolesInfo = autodeleteSettings.exemptRoles.length === 0 ? 
+                                'Нет' : 
+                                autodeleteSettings.exemptRoles.map(id => {
+                                    const role = guild.roles.cache.get(id);
+                                    return role ? role.name : id;
+                                }).join(', ');
+                            
+                            const statusEmbed = new EmbedBuilder()
+                                .setColor(autodeleteSettings.enabled ? 0x57F287 : 0xED4245)
+                                .setTitle('⚡ Статус автоудаления')
+                                .setDescription(`
+**${statusText}**
+⏰ **Задержка:** ${autodeleteSettings.delay}мс
+🎯 **Каналы:** ${channelsInfo}
+🛡️ **Исключенные роли:** ${exemptRolesInfo}
+                                `);
+                            
+                            await interaction.editReply({ embeds: [statusEmbed] });
+                            break;
+                            
+                        case 'delay':
+                            const delay = parseInt(autodeleteValue);
+                            if (delay && delay >= 1000 && delay <= 30000) {
+                                autodeleteSettings.delay = delay;
+                                await interaction.editReply(`⏰ Задержка установлена: **${delay}мс**`);
+                            } else {
+                                await interaction.editReply('❌ Укажите задержку от 1000 до 30000 мс');
+                            }
+                            break;
+                            
+                        case 'addchannel':
+                            if (!autodeleteValue) {
+                                return interaction.editReply('❌ Укажите канал!');
+                            }
+                            
+                            let channelToAdd = guild.channels.cache.get(autodeleteValue.replace(/[<#>]/g, ''));
+                            if (!channelToAdd) {
+                                channelToAdd = guild.channels.cache.find(ch => 
+                                    ch.name.toLowerCase().includes(autodeleteValue.toLowerCase())
+                                );
+                            }
+                            
+                            if (channelToAdd) {
+                                if (!autodeleteSettings.targetChannels.includes(channelToAdd.id)) {
+                                    autodeleteSettings.targetChannels.push(channelToAdd.id);
+                                    await interaction.editReply(`✅ Канал **#${channelToAdd.name}** добавлен в автоудаление`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Канал **#${channelToAdd.name}** уже в списке`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Канал не найден');
+                            }
+                            break;
+                            
+                        case 'removechannel':
+                            if (!autodeleteValue) {
+                                return interaction.editReply('❌ Укажите канал!');
+                            }
+                            
+                            let channelToRemove = guild.channels.cache.get(autodeleteValue.replace(/[<#>]/g, ''));
+                            if (!channelToRemove) {
+                                channelToRemove = guild.channels.cache.find(ch => 
+                                    ch.name.toLowerCase().includes(autodeleteValue.toLowerCase())
+                                );
+                            }
+                            
+                            if (channelToRemove) {
+                                const index = autodeleteSettings.targetChannels.indexOf(channelToRemove.id);
+                                if (index > -1) {
+                                    autodeleteSettings.targetChannels.splice(index, 1);
+                                    await interaction.editReply(`✅ Канал **#${channelToRemove.name}** удален из автоудаления`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Канал **#${channelToRemove.name}** не найден в списке`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Канал не найден');
+                            }
+                            break;
+                            
+                        case 'addrole':
+                            if (!autodeleteValue) {
+                                return interaction.editReply('❌ Укажите роль!');
+                            }
+                            
+                            let roleToAdd = guild.roles.cache.get(autodeleteValue.replace(/[<@&>]/g, ''));
+                            if (!roleToAdd) {
+                                roleToAdd = guild.roles.cache.find(role => 
+                                    role.name.toLowerCase().includes(autodeleteValue.toLowerCase())
+                                );
+                            }
+                            
+                            if (roleToAdd) {
+                                if (!autodeleteSettings.exemptRoles.includes(roleToAdd.id)) {
+                                    autodeleteSettings.exemptRoles.push(roleToAdd.id);
+                                    await interaction.editReply(`🛡️ Роль **${roleToAdd.name}** добавлена в исключения`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Роль **${roleToAdd.name}** уже в списке исключений`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Роль не найдена');
+                            }
+                            break;
+                            
+                        case 'removerole':
+                            if (!autodeleteValue) {
+                                return interaction.editReply('❌ Укажите роль!');
+                            }
+                            
+                            let roleToRemove = guild.roles.cache.get(autodeleteValue.replace(/[<@&>]/g, ''));
+                            if (!roleToRemove) {
+                                roleToRemove = guild.roles.cache.find(role => 
+                                    role.name.toLowerCase().includes(autodeleteValue.toLowerCase())
+                                );
+                            }
+                            
+                            if (roleToRemove) {
+                                const index = autodeleteSettings.exemptRoles.indexOf(roleToRemove.id);
+                                if (index > -1) {
+                                    autodeleteSettings.exemptRoles.splice(index, 1);
+                                    await interaction.editReply(`✅ Роль **${roleToRemove.name}** удалена из исключений`);
+                                } else {
+                                    await interaction.editReply(`ℹ️ Роль **${roleToRemove.name}** не найдена в списке исключений`);
+                                }
+                            } else {
+                                await interaction.editReply('❌ Роль не найдена');
+                            }
+                            break;
+                            
+                        case 'test':
+                            const testMessage = await interaction.channel.send('🧪 Тестовое сообщение для проверки автоудаления');
+                            setTimeout(async () => {
+                                if (testMessage.deletable) {
+                                    await testMessage.delete();
+                                }
+                            }, 3000);
+                            await interaction.editReply('🧪 Тестовое сообщение отправлено (удалится через 3 сек)');
+                            break;
+                    }
+                    break;
+
+                case 'play':
+                    if (!member.voice?.channel) {
+                        return interaction.reply({ 
+                            content: '❌ Зайдите в голосовой канал!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    const station = options.getString('station') || 'нвс';
+                    
+                    if (!radioStations[station]) {
+                        return interaction.reply({ 
+                            content: '❌ Неизвестная радиостанция! Используйте /stations для списка', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    await interaction.deferReply();
+                    
+                    const voiceChannel = member.voice.channel;
+                    
+                    try {
+                        // Останавливаем предыдущее воспроизведение
+                        if (players.has(guild.id)) {
+                            players.get(guild.id).stop();
+                            players.delete(guild.id);
+                        }
+
+                        // Подключаемся к каналу
+                        const connection = joinVoiceChannel({
+                            channelId: voiceChannel.id,
+                            guildId: guild.id,
+                            adapterCreator: guild.voiceAdapterCreator,
+                        });
+
+                        // Создаем плеер и ресурс
+                        const player = createAudioPlayer();
+                        const resource = createAudioResource(radioStations[station], {
+                            inlineVolume: true
+                        });
+
+                        resource.volume.setVolume(0.5);
+                        player.play(resource);
+                        connection.subscribe(player);
+                        players.set(guild.id, player);
+
+                        await interaction.editReply(`🔊 Включена радиостанция **${station}** в канале ${voiceChannel.name}`);
+                    } catch (error) {
+                        console.error('Ошибка радио:', error);
+                        await interaction.editReply('❌ Ошибка при включении радио');
+                    }
+                    break;
+
+                case 'stop':
+                    if (players.has(guild.id)) {
+                        players.get(guild.id).stop();
+                        players.delete(guild.id);
+                        await interaction.reply('⏹️ Радио выключено');
+                    } else {
+                        await interaction.reply({ 
+                            content: '❌ Радио и так не играет', 
+                            ephemeral: true 
+                        });
+                    }
+                    break;
+
+                case 'stations':
+                    await interaction.reply(`📻 **Доступные станции:** ${Object.keys(radioStations).join(', ')}`);
+                    break;
+
+                case 'testvoice':
+                    if (!member.voice?.channel) {
+                        return interaction.reply({ 
+                            content: '❌ Зайдите в голосовой канал!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    await interaction.deferReply();
+                    
+                    try {
+                        const connection = joinVoiceChannel({
+                            channelId: member.voice.channel.id,
+                            guildId: guild.id,
+                            adapterCreator: guild.voiceAdapterCreator,
+                        });
+
+                        await interaction.editReply('✅ Успешно подключился к голосовому каналу!');
+                        
+                        setTimeout(() => {
+                            connection.destroy();
+                        }, 3000);
+                    } catch (error) {
+                        await interaction.editReply(`❌ Ошибка: ${error.message}`);
+                    }
+                    break;
+
+                case 'стат':
+                    const nickname = options.getString('никнейм');
+                    await interaction.deferReply();
+                    
+                    try {
+                        // Ваш код для получения статистики War Thunder
+                        // Например:
+                        // const stats = await getWarThunderStats(nickname);
+                        // await interaction.editReply(stats);
+                        
+                        await interaction.editReply(`📊 Статистика для ${nickname} - функция в разработке`);
+                    } catch (error) {
+                        await interaction.editReply(`❌ Ошибка получения статистики: ${error.message}`);
+                    }
+                    break;
+
+                case 'полк':
+                    const regimentName = options.getString('название');
+                    await interaction.deferReply();
+                    
+                    try {
+                        // Ваш код для получения информации о полке
+                        await interaction.editReply(`🏰 Информация о полке "${regimentName}" - функция в разработке`);
+                    } catch (error) {
+                        await interaction.editReply(`❌ Ошибка: ${error.message}`);
+                    }
+                    break;
+
+                case 'регион':
+                    const regionAction = options.getString('действие');
+                    
+                    // Проверяем доступ к команде региона
+                    if (!checkRegionAccess(member)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для использования этой команды!', 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    await interaction.deferReply({ ephemeral: true });
+                    
+                    switch(regionAction) {
+                        case 'set':
+                            const channelId = options.getString('channel_id');
+                            const regionCode = options.getString('регион');
+                            
+                            if (!channelId || !regionCode) {
+                                return interaction.editReply('❌ Укажите ID канала и код региона!');
+                            }
+                            
+                            if (!availableRegions.includes(regionCode)) {
+                                return interaction.editReply(`❌ Неверный регион. Используйте /регион список для просмотра доступных`);
+                            }
+                            
+                            try {
+                                const voiceChannel = await guild.channels.fetch(channelId);
+                                
+                                if (!voiceChannel) {
+                                    return interaction.editReply('❌ Голосовой канал не найден!');
+                                }
+                                
+                                if (voiceChannel.type !== ChannelType.GuildVoice) {
+                                    return interaction.editReply('❌ Указанный канал не является голосовым!');
+                                }
+                                
+                                const regionToSet = regionCode === 'automatic' ? null : regionCode;
+                                await voiceChannel.setRTCRegion(regionToSet);
+                                
+                                voiceRegionSettings.set(guild.id, {
+                                    voiceChannelId: channelId,
+                                    regionCode: regionCode,
+                                    guildId: guild.id,
+                                    lastUpdated: new Date()
+                                });
+                                
+                                await interaction.editReply(`✅ Регион изменен на: **${getRegionName(regionCode)}**`);
+                            } catch (error) {
+                                await interaction.editReply(`❌ Ошибка: ${error.message}`);
+                            }
+                            break;
+                            
+                        case 'статус':
+                            const regionSettings = voiceRegionSettings.get(guild.id);
+                            
+                            if (!regionSettings) {
+                                return interaction.editReply('ℹ️ Регион голосового сервера еще не настроен');
+                            }
+                            
+                            try {
+                                const voiceChannel = await guild.channels.fetch(regionSettings.voiceChannelId);
+                                const currentRegion = voiceChannel.rtcRegion;
+                                
+                                const statusEmbed = new EmbedBuilder()
+                                    .setColor('#5865F2')
+                                    .setTitle('🌍 Текущие настройки региона')
+                                    .addFields(
+                                        { name: 'Голосовой канал', value: `<#${regionSettings.voiceChannelId}>`, inline: true },
+                                        { name: 'Установленный регион', value: getRegionName(regionSettings.regionCode), inline: true },
+                                        { name: 'Текущий регион', value: currentRegion ? getRegionName(currentRegion) : 'авто', inline: true }
+                                    );
+                                
+                                await interaction.editReply({ embeds: [statusEmbed] });
+                            } catch (error) {
+                                await interaction.editReply('❌ Ошибка проверки настроек региона');
+                            }
+                            break;
+                            
+                        case 'сброс':
+                            const resetSettings = voiceRegionSettings.get(guild.id);
+                            
+                            if (!resetSettings) {
+                                return interaction.editReply('❌ Настройки региона не найдены для сброса');
+                            }
+                            
+                            try {
+                                const voiceChannel = await guild.channels.fetch(resetSettings.voiceChannelId);
+                                await voiceChannel.setRTCRegion(null);
+                                voiceRegionSettings.delete(guild.id);
+                                
+                                await interaction.editReply('✅ Регион сброшен на автоматический выбор');
+                            } catch (error) {
+                                await interaction.editReply('❌ Ошибка при сбросе региона');
+                            }
+                            break;
+                            
+                        case 'список':
+                            const regionsList = availableRegions.map(region => 
+                                `• \`${region}\` - ${getRegionName(region)}`
+                            ).join('\n');
+                            
+                            await interaction.editReply(`🌍 **Доступные регионы:**\n${regionsList}`);
+                            break;
+                            
+                        case 'доступ':
+                            const hasAccess = checkRegionAccess(member);
+                            const userRoles = member.roles.cache.map(role => role.name).join(', ');
+                            
+                            const accessEmbed = new EmbedBuilder()
+                                .setColor(hasAccess ? '#57F287' : '#ED4245')
+                                .setTitle('🔐 Проверка доступа к командам региона')
+                                .addFields(
+                                    { name: 'Статус доступа', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
+                                    { name: 'Ваши роли', value: userRoles || 'Нет ролей', inline: false }
+                                );
+                            
+                            await interaction.editReply({ embeds: [accessEmbed] });
+                            break;
+                    }
+                    break;
+
+                default:
+                    await interaction.reply({ 
+                        content: '❌ Неизвестная команда!', 
+                        ephemeral: true 
+                    });
+            }
+        } catch (error) {
+            console.error('Ошибка обработки слеш-команды:', error);
+            
+            if (interaction.deferred) {
+                await interaction.editReply('❌ Произошла ошибка при выполнении команды!');
+            } else {
+                await interaction.reply({ 
+                    content: '❌ Произошла ошибка при выполнении команды!', 
+                    ephemeral: true 
+                });
+            }
+        }
+    }
+});
 
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
@@ -2656,7 +3831,7 @@ const radioStations = {
 
 const players = new Map();
 
-client.on('messageCreate', async (message) => {
+/* client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
 
@@ -2765,7 +3940,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 });
-
+*/
 // Автоотключение при пустом канале
 client.on('voiceStateUpdate', (oldState, newState) => {
     if (oldState.channel && !newState.channel) {
@@ -2825,51 +4000,35 @@ async function translateWithAPI(text, targetLang) {
     }
 }
 
-// ==================== СИСТЕМА ТИКЕТОВ ====================
+// ==================== СИСТЕМА ТИКЕТОВ СЛЕШ-КОМАНД ====================
 
-// Хранилище настроек тикетов
+// Хранилище настроек тикетов (оставить как есть)
 const ticketSettings = new Map();
 
-// Команда настройки тикетов
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
-    if (message.content.startsWith('!ticket')) {
-        const args = message.content.split(' ');
-        
-        if (args.length < 4) {
-            const helpEmbed = new EmbedBuilder()
-                .setColor('#727070')
-                .setTitle(':gear: Настройка системы заявок в полк')
-                .setDescription(`
-**Использование:**
-\`!ticket <ID_канала> <ID_категории> <ID_ролей через запятую>\`
-
-**Пример:**
-\`!ticket 123456789 987654321 111111111,222222222\`
-
-**Как получить ID:**
-• Включите режим разработчика в Discord
-• ПКМ по каналу/роли → "Копировать ID"
-                `);
-            
-            await message.reply({ embeds: [helpEmbed] });
-            return;
+// Обработчик слеш-команды /ticket
+client.on('interactionCreate', async interaction => {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'ticket') {
+        // Проверяем права администратора
+        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return interaction.reply({ 
+                content: '❌ Только администраторы могут настраивать систему тикетов!', 
+                ephemeral: true 
+            });
         }
 
-        const channelId = args[1];
-        const categoryId = args[2];
-        const roleIds = args[3].split(',').map(id => id.trim());
+        const channelId = interaction.options.getString('channel_id');
+        const categoryId = interaction.options.getString('category_id');
+        const roleIds = interaction.options.getString('role_ids').split(',').map(id => id.trim());
+
+        await interaction.deferReply({ ephemeral: true });
 
         try {
-            const guild = message.guild;
+            const guild = interaction.guild;
             const targetChannel = await guild.channels.fetch(channelId);
             const category = await guild.channels.fetch(categoryId);
             
             if (!targetChannel || !category) {
-                await message.reply('❌ Канал или категория не найдены! Проверьте ID.');
-                return;
+                return interaction.editReply('❌ Канал или категория не найдены! Проверьте ID.');
             }
 
             // Проверяем роли
@@ -2884,8 +4043,7 @@ client.on('messageCreate', async (message) => {
             }
 
             if (validRoles.length === 0) {
-                await message.reply('❌ Не найдено ни одной валидной роли!');
-                return;
+                return interaction.editReply('❌ Не найдено ни одной валидной роли!');
             }
 
             // Сохраняем настройки
@@ -2924,19 +4082,19 @@ client.on('messageCreate', async (message) => {
 Теперь пользователи могут создавать заявки в полк!
                 `);
 
-            await message.reply({ embeds: [successEmbed] });
+            await interaction.editReply({ embeds: [successEmbed] });
             console.log(`✅ Ticket system configured for guild: ${guild.name}`);
 
         } catch (error) {
             console.error('Ticket setup error:', error);
-            await message.reply('❌ Ошибка при настройке! Проверьте ID и права бота.');
+            await interaction.editReply('❌ Ошибка при настройке! Проверьте ID и права бота.');
         }
     }
 });
 
-// Функция инициализации тикет системы (аналогично вашей)
+// Функция инициализации тикет системы (оставить как есть)
 async function initializeTicketSystem() {
-    // Используем настройки из команды !ticket
+    // Используем настройки из команды /ticket
     for (const [guildId, settings] of ticketSettings) {
         try {
             const guild = client.guilds.cache.get(guildId);
@@ -2985,7 +4143,7 @@ async function initializeTicketSystem() {
     }
 }
 
-// Обработчик кнопки тикета - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Обработчик кнопки создания тикета (оставить как есть, но обновить ссылку на команду)
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "create_regiment_request") return;
 
@@ -2994,7 +4152,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (!settings) {
         await interaction.reply({ 
-            content: '❌ Система заявок не настроена на этом сервере! Обратитесь к администратору.', 
+            content: '❌ Система заявок не настроена на этом сервере! Попросите администратора использовать команду `/ticket`.', 
             ephemeral: true 
         });
         return;
@@ -3034,20 +4192,20 @@ client.on(Events.InteractionCreate, async interaction => {
         ]
     });
 
-   // Создаем кнопку закрытия
-const closeButton = new ButtonBuilder()
-    .setCustomId("close_ticket")
-    .setLabel("Закрыть")
-    .setStyle(ButtonStyle.Danger)
-    .setEmoji("🔒");
+    // Создаем кнопку закрытия
+    const closeButton = new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Закрыть")
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji("🔒");
 
-const closeRow = new ActionRowBuilder().addComponents(closeButton);
+    const closeRow = new ActionRowBuilder().addComponents(closeButton);
 
-// РУССКАЯ АНКЕТА
-const embedRU = new EmbedBuilder()
-    .setColor('#727070')
-    .setTitle(':flag_ru: - RU Blank')
-    .setDescription(`
+    // РУССКАЯ АНКЕТА
+    const embedRU = new EmbedBuilder()
+        .setColor('#727070')
+        .setTitle(':flag_ru: - RU Blank')
+        .setDescription(`
 Заполните бланк вопросов, и ждите ответа офицеров.
 
 1. Ваш никнейм? - 
@@ -3061,11 +4219,11 @@ const embedRU = new EmbedBuilder()
 9. Играли ли вы полковые бои до этого? Если да, какие роли занимали в команде, в каких полках? -
     `);
 
-// АНГЛИЙСКАЯ АНКЕТА
-const embedEN = new EmbedBuilder()
-    .setColor('#727070')
-    .setTitle(':flag_gb: - EN Blank')
-    .setDescription(`
+    // АНГЛИЙСКАЯ АНКЕТА
+    const embedEN = new EmbedBuilder()
+        .setColor('#727070')
+        .setTitle(':flag_gb: - EN Blank')
+        .setDescription(`
 Fill out the question form and wait for the officers to respond.
 
 1. Your IGN(In Game Name)? - 
@@ -3080,27 +4238,28 @@ Fill out the question form and wait for the officers to respond.
 
 **P.s. we have a lot of russian players, who doesn't speak english. Please be patient and nice with everyone!**
     `)
-    .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
-    .setTimestamp();
+        .setFooter({ text: 'Пожалуйста, заполните все поля | Please fill in all fields' })
+        .setTimestamp();
 
-// ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
-const roleMentions = settings.roleIds && settings.roleIds.length > 0 
-    ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
-    : '';
+    // ДИНАМИЧЕСКОЕ УПОМИНАНИЕ РОЛЕЙ ИЗ НАСТРОЕК
+    const roleMentions = settings.roleIds && settings.roleIds.length > 0 
+        ? settings.roleIds.map(roleId => `<@&${roleId}>`).join(' ') 
+        : '';
 
-// ОДНО сообщение с ДВУМЯ embed'ами и упоминаниями
-await channel.send({ 
-    content: roleMentions,
-    embeds: [embedRU, embedEN], // Два раздельных embed'а в одном сообщении
-    components: [closeRow] 
+    // ОДНО сообщение с ДВУМЯ embed'ами и упоминаниями
+    await channel.send({ 
+        content: roleMentions,
+        embeds: [embedRU, embedEN],
+        components: [closeRow] 
+    });
+
+    await interaction.reply({ 
+        content: `✅ Заявка создана: <#${channel.id}>`, 
+        flags: 64 
+    });
 });
 
-await interaction.reply({ 
-    content: `✅ Заявка создана: <#${channel.id}>`, 
-    flags: 64 
-});
-  });
-// Обработчик кнопки закрытия тикета (с созданием транскрипта и удалением канала)
+// Обработчик кнопки закрытия тикета с обновленной командой транскрипта
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() || interaction.customId !== "close_ticket") return;
 
@@ -3131,8 +4290,91 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.message.edit({ components: [] });
         await interaction.reply({ content: '🔒 Создаю транскрипт и удаляю заявку...' });
 
-        // Создаем транскрипт
-        await channel.send('-transcript');
+        // Создаем транскрипт с помощью слеш-команды (имитируем вызов)
+        const transcriptInteraction = {
+            user: user,
+            member: interaction.member,
+            guild: interaction.guild,
+            channel: channel,
+            deferred: false,
+            replied: false,
+            deferReply: async () => { this.deferred = true; },
+            editReply: async (content) => { 
+                await channel.send(typeof content === 'string' ? content : content.content || 'Транскрипт создан'); 
+            },
+            reply: async (content) => { 
+                await channel.send(typeof content === 'string' ? content : content.content || 'Транскрипт создан'); 
+            }
+        };
+        
+        // Имитируем вызов слеш-команды /transcript
+        await interaction.channel.send('📝 Создаю транскрипт...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Используем функцию создания транскрипта напрямую
+        const settings = getServerSettings(interaction.guild.id);
+        const transcriptChannelId = settings.transcriptChannelId;
+        
+        let messageCollection = new Collection();
+        let channelMessages = await channel.messages.fetch({ limit: 100 });
+        messageCollection = messageCollection.concat(channelMessages);
+
+        let lastMessage = channelMessages.last();
+        while(channelMessages.size === 100 && lastMessage) {
+            let lastMessageId = lastMessage.id;
+            channelMessages = await channel.messages.fetch({ limit: 100, before: lastMessageId });
+            if(channelMessages && channelMessages.size > 0) {
+                messageCollection = messageCollection.concat(channelMessages);
+                lastMessage = channelMessages.last();
+            } else break;
+        }
+
+        const allMessages = Array.from(messageCollection.values()).reverse();
+        
+        const ticketInfo = await collectTicketInfo(channel, messageCollection);
+        const ticketReport = generateTicketReport(ticketInfo);
+        ticketReport.messageCount = allMessages.length;
+        
+        const transcriptId = generateTranscriptId();
+        
+        const htmlContent = createHTMLTranscript(ticketReport, allMessages);
+        
+        const transcriptData = {
+            html: htmlContent,
+            createdAt: Date.now(),
+            ticketInfo: {
+                ...ticketReport.ticketInfo,
+                messageCount: ticketReport.messageCount,
+                participantsCount: ticketReport.participants.length
+            }
+        };
+        
+        transcriptsStorage.set(transcriptId, transcriptData);
+        
+        const baseUrl = getBaseUrl();
+        const transcriptUrl = `${baseUrl}/transcript/${transcriptId}`;
+        
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('📄 Open Transcript')
+                    .setURL(transcriptUrl)
+                    .setStyle(ButtonStyle.Link)
+            );
+        
+        const ticketInfoEmbed = createTicketInfoEmbedWithParticipants(ticketReport);
+        
+        const transcriptChannel = client.channels.cache.get(transcriptChannelId);
+        
+        if (transcriptChannel && transcriptChannel.isTextBased()) {
+            await transcriptChannel.send({
+                embeds: [ticketInfoEmbed],
+                components: [row],
+                content: `📋 **Transcript Created**\n**ID:** \`${transcriptId}\``
+            });
+            
+            await channel.send('✅ Транскрипт создан!');
+        }
 
         // Ждем 2 секунды чтобы команда транскрипта обработалась
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -3145,7 +4387,7 @@ client.on(Events.InteractionCreate, async interaction => {
             .addFields(
                 { name: '👤 Удалил', value: `${user.tag}`, inline: true },
                 { name: '⏰ Время удаления', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
-                { name: '📄 Транскрипт', value: 'Транскрипт заявки был создан и сохранен', inline: false }
+                { name: '📄 Транскрипт', value: `[Открыть транскрипт](${transcriptUrl})`, inline: false }
             )
             .setTimestamp();
 
@@ -3173,10 +4415,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
 // ==================== ОБРАБОТЧИКИ СОБЫТИЙ БОТА ====================
 
-client.on('ready', () => {
+client.on('ready', async () => {
     console.log(`✅ Bot has logged in as ${client.user.tag}`);
     setCustomStatus();
     setInterval(setCustomStatus, 5 * 1000);
+    
+    // Регистрируем слеш-команды
+    await registerSlashCommands();
     
     const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
     if (transcriptChannel) {
@@ -3188,9 +4433,9 @@ client.on('ready', () => {
 
 function setCustomStatus() {
     const statuses = [
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Playing, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Watching, status: 'online' },
-        { name: 'Тех.Админ BeKuT', type: ActivityType.Listening, status: 'online' }
+        { name: 'BeKuT Пидор', type: ActivityType.Playing, status: 'online' },
+        { name: 'BeKuT Пидор', type: ActivityType.Watching, status: 'online' },
+        { name: 'BeKuT Пидор', type: ActivityType.Listening, status: 'online' }
     ];
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
     try {
@@ -3420,7 +4665,7 @@ function shouldAutoDeleteInChannel(channel, settings) {
 }
 
 // Обработчик сообщений для автоматического удаления
-client.on('messageCreate', async (message) => {
+/* client.on('messageCreate', async (message) => {
     if (message.system) return;
     if (!message.guild) return;
     
@@ -3947,9 +5192,9 @@ ${exemptRolesInfo}
             }).then(msg => setTimeout(() => msg.delete(), 5000));
         }
     }
-});
+}); 
 // Обработка команды -transcript
-client.on('messageCreate', async message => {
+/* client.on('messageCreate', async message => {
     if (message.system) return;
 
     if (message.content.toLowerCase() === '-transcript') {
@@ -4053,6 +5298,7 @@ client.on('messageCreate', async message => {
         }
     }
   });
+  */
 // Обработка реакций для перевода
 client.on('messageReactionAdd', async (reaction, user) => {
     if (reaction.emoji.name === '🇷🇺' || reaction.emoji.name === '🇬🇧') {
