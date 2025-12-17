@@ -3033,24 +3033,6 @@ function getRegionName(regionCode) {
     return regionNames[regionCode] || regionCode;
 }
 
-// ==================== НАСТРОЙКА ДОСТУПА К КОМАНДЕ РЕГИОНА ====================
-
-// Переименуем переменную чтобы избежать конфликта
-const REGION_COMMAND_ALLOWED_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
-
-// Переименуем функцию чтобы избежать конфликта
-function checkRegionAccess(member) {
-    // Если список ролей пустой - доступ у всех
-    if (REGION_COMMAND_ALLOWED_ROLES.length === 0) {
-        return true;
-    }
-    
-    // Проверяем, есть ли у пользователя хотя бы одна из разрешенных ролей
-    return member.roles.cache.some(role => 
-        REGION_COMMAND_ALLOWED_ROLES.includes(role.id)
-    );
-}
-
 // ==================== ОБНОВЛЕННАЯ КОМАНДА РЕГИОНА (СЛЕШ-КОМАНДА) ====================
 
 // Обработчик слеш-команды /регион
