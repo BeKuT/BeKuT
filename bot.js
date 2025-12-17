@@ -18,8 +18,7 @@ import axios from 'axios';
 import express from 'express';
 import path from 'path';
 import session from 'express-session';
-import { REST, Routes } from 'discord.js';
-import { joinVoiceChannel, createAudioPlayer, createAudioResource } from '@discordjs/voice';
+
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
