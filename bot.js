@@ -22,6 +22,7 @@ import path from 'path';
 import session from 'express-session';
 
 
+
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
 const TRANSCRIPT_CHANNEL_ID = process.env.TRANSCRIPT_CHANNEL_ID || '1430613860473114805';
@@ -333,24 +334,26 @@ app.use(express.static('public'));
 
 // Сессии для авторизации
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'haki-bot-secret-key',
+    secret: process.env.SESSION_SECRET || 'haki-bot-secret-key-change-this',
     resave: false,
     saveUninitialized: false,
     cookie: { 
         secure: process.env.NODE_ENV === 'production',
-        maxAge: 24 * 60 * 60 * 1000
-    }
+        maxAge: 24 * 60 * 60 * 1000,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    },
+    store: new session.MemoryStore() // В продакшене используйте Redis
 }));
 
 // ==================== ФУНКЦИИ ====================
 
-// Функция для получения базового URL
 function getBaseUrl() {
     if (process.env.RAILWAY_PUBLIC_DOMAIN) {
         return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
     }
     if (process.env.RAILWAY_STATIC_URL) {
         let url = process.env.RAILWAY_STATIC_URL;
+        // Убедитесь, что URL начинается с https://
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'https://' + url;
         }
@@ -358,7 +361,6 @@ function getBaseUrl() {
     }
     return `http://localhost:${PORT}`;
 }
-
 // Получение разрешений для сервера
 function getGuildPermissions(guildId) {
     if (!commandPermissions.has(guildId)) {
@@ -2974,7 +2976,7 @@ function generateTranscriptId() {
 const ALLOWED_REGION_ROLES = process.env.ALLOWED_REGION_ROLES?.split(',').map(id => id.trim()) || [];
 
 // Функция проверки доступа к команде региона
-function hasRegionAccess(member) {
+function checkRegionAccess(member) {
     // Если список ролей пустой - доступ у всех
     if (ALLOWED_REGION_ROLES.length === 0) {
         return true;
@@ -4525,7 +4527,7 @@ client.on('interactionCreate', async (interaction) => {
                     const regionAction = options.getString('действие');
                     
                     // Проверяем доступ к команде региона
-                    if (!checkRegionAccess(member)) {
+                    if (!checkRegionAccess(interaction.member)) {
                         return interaction.reply({ 
                             content: '❌ У вас нет прав для использования этой команды!', 
                             flags: 64 
