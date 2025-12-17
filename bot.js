@@ -2965,11 +2965,11 @@ client.on('interactionCreate', async interaction => {
                     }
                 );
             
-            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            await interaction.reply({ embeds: [errorEmbed], flags: 64 });
             return;
         }
         
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: 64 });
         
         switch(action) {
             case 'set':
@@ -3787,7 +3787,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!guild) {
             return interaction.reply({ 
                 content: '❌ Эта команда работает только на серверах Discord!', 
-                ephemeral: true 
+                flags: 64 
             });
         }
 
@@ -3802,12 +3802,12 @@ client.on('interactionCreate', async (interaction) => {
                     if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
                         return interaction.reply({ 
                             content: '❌ У вас нет прав для создания транскриптов!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
                     // Вызываем функцию создания транскрипта
-                    await interaction.deferReply({ ephemeral: true });
+                    await interaction.deferReply({ flags: 64 });
                     
                     const settings = getServerSettings(guild.id);
                     const transcriptChannelId = settings.transcriptChannelId;
@@ -3881,13 +3881,13 @@ client.on('interactionCreate', async (interaction) => {
                     if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
                         return interaction.reply({ 
                             content: '❌ Только администраторы могут настраивать каналы транскриптов!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
                     const channelId = options.getString('channel_id');
                     
-                    await interaction.deferReply({ ephemeral: true });
+                    await interaction.deferReply({ flags: 64 });
                     
                     if (channelId === 'reset') {
                         const settings = getServerSettings(guild.id);
@@ -3945,14 +3945,14 @@ client.on('interactionCreate', async (interaction) => {
                         )
                         .setFooter({ text: 'Используйте /settranscript для изменения настроек' });
 
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                    await interaction.reply({ embeds: [embed], flags: 64 });
                     break;
 
                 case 'translation':
                     if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
                         return interaction.reply({ 
                             content: '❌ Только администраторы могут управлять переводом!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
@@ -3960,7 +3960,7 @@ client.on('interactionCreate', async (interaction) => {
                     const target = options.getString('target');
                     const translationSettings = getServerSettings(guild.id);
                     
-                    await interaction.deferReply({ ephemeral: true });
+                    await interaction.deferReply({ flags: 64 });
                     
                     switch(action) {
                         case 'on':
@@ -4117,7 +4117,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
                         return interaction.reply({ 
                             content: '❌ У вас нет прав для управления автоудалением!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
@@ -4125,7 +4125,7 @@ client.on('interactionCreate', async (interaction) => {
                     const autodeleteValue = options.getString('value');
                     const autodeleteSettings = getSettings(guild.id);
                     
-                    await interaction.deferReply({ ephemeral: true });
+                    await interaction.deferReply({ flags: 64 });
                     
                     switch(autodeleteAction) {
                         case 'on':
@@ -4291,7 +4291,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!member.voice?.channel) {
                         return interaction.reply({ 
                             content: '❌ Зайдите в голосовой канал!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
@@ -4300,7 +4300,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!radioStations[station]) {
                         return interaction.reply({ 
                             content: '❌ Неизвестная радиостанция! Используйте /stations для списка', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
@@ -4348,7 +4348,7 @@ client.on('interactionCreate', async (interaction) => {
                     } else {
                         await interaction.reply({ 
                             content: '❌ Радио и так не играет', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     break;
@@ -4361,7 +4361,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!member.voice?.channel) {
                         return interaction.reply({ 
                             content: '❌ Зайдите в голосовой канал!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
@@ -4419,11 +4419,11 @@ client.on('interactionCreate', async (interaction) => {
                     if (!checkRegionAccess(member)) {
                         return interaction.reply({ 
                             content: '❌ У вас нет прав для использования этой команды!', 
-                            ephemeral: true 
+                            flags: 64 
                         });
                     }
                     
-                    await interaction.deferReply({ ephemeral: true });
+                    await interaction.deferReply({ flags: 64 });
                     
                     switch(regionAction) {
                         case 'set':
@@ -4537,7 +4537,7 @@ client.on('interactionCreate', async (interaction) => {
                 default:
                     await interaction.reply({ 
                         content: '❌ Неизвестная команда!', 
-                        ephemeral: true 
+                        flags: 64 
                     });
             }
         } catch (error) {
@@ -4548,7 +4548,7 @@ client.on('interactionCreate', async (interaction) => {
             } else {
                 await interaction.reply({ 
                     content: '❌ Произошла ошибка при выполнении команды!', 
-                    ephemeral: true 
+                    flags: 64 
                 });
             }
         }
@@ -4747,7 +4747,7 @@ client.on('interactionCreate', async interaction => {
         if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return interaction.reply({ 
                 content: '❌ Только администраторы могут настраивать систему тикетов!', 
-                ephemeral: true 
+                flags: 64 
             });
         }
 
@@ -4755,7 +4755,7 @@ client.on('interactionCreate', async interaction => {
         const categoryId = interaction.options.getString('category_id');
         const roleIds = interaction.options.getString('role_ids').split(',').map(id => id.trim());
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: 64 });
 
         try {
             const guild = interaction.guild;
@@ -4888,7 +4888,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!settings) {
         await interaction.reply({ 
             content: '❌ Система заявок не настроена на этом сервере! Попросите администратора использовать команду `/ticket`.', 
-            ephemeral: true 
+            flags: 64 
         });
         return;
     }
@@ -4902,7 +4902,7 @@ client.on(Events.InteractionCreate, async interaction => {
     );
     
     if (existing) {
-        await interaction.reply({ content: "У вас уже есть открытая заявка!", ephemeral: true });
+        await interaction.reply({ content: "У вас уже есть открытая заявка!", flags: 64 });
         return;
     }
 
@@ -5002,7 +5002,7 @@ client.on(Events.InteractionCreate, async interaction => {
     
     // Проверяем, что это тикет-канал
     if (!channel.name.startsWith('ticket│')) {
-        await interaction.reply({ content: '❌ Эта кнопка работает только в тикет-каналах!', ephemeral: true });
+        await interaction.reply({ content: '❌ Эта кнопка работает только в тикет-каналах!', flags: 64 });
         return;
     }
 
@@ -5015,7 +5015,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!isOwner && !isModerator) {
         await interaction.reply({ 
             content: '❌ Только создатель заявки или модератор может закрыть тикет!', 
-            ephemeral: true 
+            flags: 64 
         });
         return;
     }
@@ -5143,7 +5143,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.replied) {
             await interaction.editReply({ content: '❌ Ошибка при удалении заявки!' });
         } else {
-            await interaction.reply({ content: '❌ Ошибка при удалении заявки!', ephemeral: true });
+            await interaction.reply({ content: '❌ Ошибка при удалении заявки!', flags: 64 });
         }
     }
 });
