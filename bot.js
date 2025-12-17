@@ -346,20 +346,27 @@ app.use(session({
 }));
 
 // ==================== ФУНКЦИИ ====================
-
 function getBaseUrl() {
+    // Проверяем в порядке приоритета
     if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        const url = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        console.log('🌐 Using RAILWAY_PUBLIC_DOMAIN:', url);
+        return url;
     }
+    
     if (process.env.RAILWAY_STATIC_URL) {
         let url = process.env.RAILWAY_STATIC_URL;
-        // Убедитесь, что URL начинается с https://
+        // Убедимся, что URL начинается с https://
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'https://' + url;
         }
+        console.log('🌐 Using RAILWAY_STATIC_URL:', url);
         return url;
     }
-    return `http://localhost:${PORT}`;
+    
+    const localUrl = `http://localhost:${PORT}`;
+    console.log('🌐 Using local URL:', localUrl);
+    return localUrl;
 }
 // Получение разрешений для сервера
 function getGuildPermissions(guildId) {
