@@ -11,6 +11,8 @@ import {
   PermissionsBitField,
   ChannelType,
   Events,
+  REST, 
+  Routes
 } from 'discord.js';
 
 import fs from 'fs/promises';
