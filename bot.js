@@ -354,9 +354,31 @@ function getBaseUrl() {
         }
         return url;
     }
-    return 'https://panel-haki.up.railway.app';
+    return `http://localhost:${PORT}`;
 }
 
+// Получение разрешений для сервера
+function getGuildPermissions(guildId) {
+    if (!commandPermissions.has(guildId)) {
+        commandPermissions.set(guildId, {
+            'region': [], // Разрешенные роли для команды /регион
+            'transcript': [], // Разрешенные роли для команды /transcript
+            'ticket': [] // Разрешенные роли для команды /ticket
+        });
+    }
+    return commandPermissions.get(guildId);
+}
+
+// Сохранение разрешений
+function savePermissions() {
+    const permissionsObj = {};
+    for (const [guildId, permissions] of commandPermissions.entries()) {
+        permissionsObj[guildId] = permissions;
+    }
+    // В реальном проекте сохраняйте в базу данных
+    console.log('💾 Permissions saved to memory');
+    return permissionsObj;
+}
 // ==================== АВТОРИЗАЦИЯ DISCORD ====================
 
 // Реддирект на Discord OAuth
@@ -371,8 +393,6 @@ app.get('/auth/discord/callback', async (req, res) => {
     try {
         const { code, error, error_description } = req.query;
         
-        console.log('🔄 Discord callback received');
-        
         if (error) {
             console.error('❌ Discord OAuth error:', error, error_description);
             return res.redirect('/?error=discord_oauth_failed');
@@ -384,15 +404,8 @@ app.get('/auth/discord/callback', async (req, res) => {
         }
 
         const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
-        console.log('🔗 Using redirect URI:', redirectUri);
-
-        if (!CLIENT_ID || !CLIENT_SECRET) {
-            console.error('❌ Missing OAuth credentials');
-            return res.redirect('/?error=missing_credentials');
-        }
 
         // Получаем access token
-        console.log('🔄 Exchanging code for access token...');
         const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
             new URLSearchParams({
                 client_id: CLIENT_ID,
@@ -408,11 +421,9 @@ app.get('/auth/discord/callback', async (req, res) => {
             }
         );
 
-        console.log('✅ Access token received');
         const { access_token } = tokenResponse.data;
 
         // Получаем данные пользователя
-        console.log('🔄 Fetching user data...');
         const userResponse = await axios.get('https://discord.com/api/users/@me', {
             headers: {
                 Authorization: `Bearer ${access_token}`
@@ -421,7 +432,6 @@ app.get('/auth/discord/callback', async (req, res) => {
         });
 
         // Получаем сервера пользователя
-        console.log('🔄 Fetching user guilds...');
         const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
             headers: {
                 Authorization: `Bearer ${access_token}`
@@ -438,11 +448,7 @@ app.get('/auth/discord/callback', async (req, res) => {
         res.redirect('/');
         
     } catch (error) {
-        console.error('❌ Auth callback error:');
-        console.error('Error message:', error.message);
-        console.error('Response data:', error.response?.data);
-        console.error('Response status:', error.response?.status);
-        
+        console.error('❌ Auth callback error:', error.message);
         res.redirect('/?error=auth_failed&details=' + encodeURIComponent(error.message));
     }
 });
@@ -461,6 +467,24 @@ function requireAuth(req, res, next) {
     next();
 }
 
+// Middleware проверки прав администратора
+function requireAdmin(req, res, next) {
+    if (!req.session.isAuthenticated) {
+        return res.redirect('/auth/discord');
+    }
+    
+    const userGuilds = req.session.guilds || [];
+    const adminGuilds = userGuilds.filter(guild => 
+        (guild.permissions & 0x8) === 0x8 // ADMINISTRATOR permission
+    );
+    
+    if (adminGuilds.length === 0) {
+        return res.status(403).send(createErrorPage('Доступ запрещен', 'Требуются права администратора Discord сервера'));
+    }
+    
+    next();
+}
+
 // ==================== СТРАНИЦЫ ====================
 
 app.get('/', (req, res) => {
@@ -473,130 +497,90 @@ app.get('/', (req, res) => {
     const user = req.session.user;
     const guilds = req.session.guilds || [];
     
-    const mutualGuilds = guilds.filter(guild => {
-        const botGuild = client.guilds.cache.get(guild.id);
-        return botGuild && (guild.permissions & 0x20) === 0x20;
-    });
+    // Фильтруем только те сервера, где пользователь администратор И есть бот
+    const adminGuilds = guilds.filter(guild => 
+        (guild.permissions & 0x8) === 0x8 // ADMINISTRATOR permission
+    );
 
-    res.send(createDashboardPage(user, mutualGuilds, baseUrl));
+    res.send(createDashboardPage(user, adminGuilds, baseUrl));
 });
 
-app.get('/server/:id', requireAuth, (req, res) => {
-    const guildId = req.params.id;
-    const guild = client.guilds.cache.get(guildId);
-    
-    if (!guild) {
-        return res.status(404).send('Сервер не найден или бот не на этом сервере');
-    }
-
+app.get('/permissions', requireAdmin, (req, res) => {
     const baseUrl = getBaseUrl();
     const user = req.session.user;
-    
-    res.send(createServerPage(guild, user, baseUrl));
-});
-
-app.get('/commands', requireAuth, (req, res) => {
-    const baseUrl = getBaseUrl();
-    const user = req.session.user;
-    res.send(createCommandsPage(user, baseUrl));
-});
-
-app.get('/about', requireAuth, (req, res) => {
-    const baseUrl = getBaseUrl();
-    const user = req.session.user;
-    res.send(createAboutPage(user, baseUrl));
-});
-
-app.get('/transcripts', requireAuth, (req, res) => {
-    const baseUrl = getBaseUrl();
-    const user = req.session.user;
-    
-    // Проверяем, есть ли у пользователя права администратора хотя бы на одном сервере ГДЕ ЕСТЬ БОТ
     const userGuilds = req.session.guilds || [];
-    const adminGuilds = userGuilds.filter(guild => {
-        const botGuild = client.guilds.cache.get(guild.id);
-        return botGuild && (guild.permissions & 0x8) === 0x8; // ADMINISTRATOR permission + бот на сервере
-    });
     
-    if (adminGuilds.length === 0) {
-        return res.status(403).send(`
-            <!DOCTYPE html>
-            <html lang="ru">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Доступ запрещен - Haki Bot</title>
-                <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body { 
-                        font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-                        background: #1a1a1a; 
-                        color: #ffffff; 
-                        line-height: 1.6;
-                        display: flex;
-                        min-height: 100vh;
-                        align-items: center;
-                        justify-content: center;
-                    }
-                    .error-container {
-                        background: #2b2b2b;
-                        padding: 40px;
-                        border-radius: 15px;
-                        text-align: center;
-                        max-width: 500px;
-                        border: 1px solid #ed4245;
-                    }
-                    .error-icon {
-                        font-size: 4rem;
-                        margin-bottom: 20px;
-                    }
-                    .back-btn {
-                        background: #5865F2;
-                        color: white;
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        text-decoration: none;
-                        display: inline-block;
-                        margin-top: 20px;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="error-container">
-                    <div class="error-icon">🚫</div>
-                    <h1>Доступ запрещен</h1>
-                    <p style="color: #b9bbbe; margin: 15px 0;">
-                        Для доступа к разделу "Транскрипты" необходимы права администратора 
-                        хотя бы на одном сервере где есть бот.
-                    </p>
-                    <a href="/" class="back-btn">Вернуться на главную</a>
-                </div>
-            </body>
-            </html>
-        `);
-    }
-    
-    res.send(createTranscriptsPage(user, baseUrl, adminGuilds));
+    const adminGuilds = userGuilds.filter(guild => 
+        (guild.permissions & 0x8) === 0x8
+    );
+
+    res.send(createPermissionsPage(user, adminGuilds, baseUrl));
 });
 
-app.get('/transcript/:id', (req, res) => {
-    const transcriptId = req.params.id;
-    const transcript = transcriptsStorage.get(transcriptId);
+app.get('/permissions/:guildId', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
     
-    if (!transcript) {
-        return res.status(404).send(`
-            <html>
-                <body style="background: #1a1a1a; color: white; font-family: Arial; text-align: center; padding: 50px;">
-                    <h1>📄 Transcript Not Found</h1>
-                    <p>This transcript doesn't exist or was manually deleted.</p>
-                </body>
-            </html>
-        `);
+    try {
+        // Получаем информацию о сервере через Discord API
+        const guildResponse = await axios.get(`https://discord.com/api/v10/guilds/${guildId}`, {
+            headers: {
+                'Authorization': `Bearer ${req.session.accessToken}`
+            }
+        });
+        
+        // Получаем роли сервера
+        const rolesResponse = await axios.get(`https://discord.com/api/v10/guilds/${guildId}/roles`, {
+            headers: {
+                'Authorization': `Bearer ${req.session.accessToken}`
+            }
+        });
+        
+        const guild = guildResponse.data;
+        const roles = rolesResponse.data;
+        
+        // Получаем текущие разрешения
+        const permissions = getGuildPermissions(guildId);
+        
+        res.send(createGuildPermissionsPage(user, guild, roles, permissions, baseUrl));
+        
+    } catch (error) {
+        console.error('Error fetching guild data:', error);
+        res.status(404).send(createErrorPage('Сервер не найден', 'Не удалось получить информацию о сервере'));
+    }
+});
+
+// API для сохранения разрешений
+app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
+    const guildId = req.params.guildId;
+    const { commandName, roleIds } = req.body;
+    
+    if (!commandName || !Array.isArray(roleIds)) {
+        return res.status(400).json({ error: 'Неверные данные' });
     }
     
-    res.send(transcript.html);
+    const permissions = getGuildPermissions(guildId);
+    permissions[commandName] = roleIds;
+    
+    // Сохраняем в памяти
+    commandPermissions.set(guildId, permissions);
+    
+    // Можно сохранить в переменную окружения или БД
+    const savedPerms = savePermissions();
+    
+    res.json({ 
+        success: true, 
+        message: 'Разрешения сохранены',
+        permissions: permissions[commandName]
+    });
+});
+
+// API для получения текущих разрешений
+app.get('/api/permissions/:guildId', requireAdmin, (req, res) => {
+    const guildId = req.params.guildId;
+    const permissions = getGuildPermissions(guildId);
+    res.json({ permissions });
 });
 
 // ==================== API МАРШРУТЫ ====================
@@ -663,10 +647,11 @@ function createUnauthorizedPage(baseUrl) {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #1a1a1a 0%, #2b2b2b 100%); 
             color: #ffffff; 
             line-height: 1.6;
+            min-height: 100vh;
         }
         .container { 
             max-width: 1200px; 
@@ -675,63 +660,112 @@ function createUnauthorizedPage(baseUrl) {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
         .header { 
-            background: #2b2b2b; 
-            padding: 30px; 
-            border-radius: 15px; 
-            margin-bottom: 30px; 
-            border-left: 5px solid #5865F2;
             text-align: center;
+            margin-bottom: 40px;
         }
         .header h1 { 
-            font-size: 2.5rem; 
+            font-size: 3.5rem; 
             margin-bottom: 10px; 
             background: linear-gradient(135deg, #5865F2, #57F287);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            font-weight: 800;
         }
-        .login-box {
-            background: #2b2b2b;
-            padding: 40px;
-            border-radius: 15px;
+        .header p {
+            font-size: 1.2rem;
+            color: #b9bbbe;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .login-card {
+            background: rgba(43, 43, 43, 0.9);
+            padding: 50px;
+            border-radius: 20px;
             text-align: center;
             max-width: 500px;
-            margin: 50px auto;
-            border: 1px solid #40444b;
+            width: 100%;
+            border: 1px solid rgba(64, 68, 75, 0.3);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        .login-card h2 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .login-card p {
+            color: #b9bbbe;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
         }
         .login-btn {
-            background: #5865F2;
+            background: linear-gradient(135deg, #5865F2 0%, #4752C4 100%);
             color: white;
-            padding: 15px 30px;
+            padding: 18px 40px;
             border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
+            border-radius: 12px;
+            font-size: 1.2rem;
+            font-weight: 600;
             cursor: pointer;
             text-decoration: none;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            width: 100%;
             margin-top: 20px;
-            transition: background 0.3s ease;
         }
         .login-btn:hover {
-            background: #4752C4;
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.4);
         }
         .features {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-top: 40px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-top: 60px;
+            width: 100%;
         }
         .feature-card {
-            background: #2b2b2b;
-            padding: 25px;
-            border-radius: 10px;
+            background: rgba(43, 43, 43, 0.7);
+            padding: 30px;
+            border-radius: 15px;
             text-align: center;
-            border: 1px solid #40444b;
+            border: 1px solid rgba(64, 68, 75, 0.2);
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            border-color: #5865F2;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
         }
         .feature-icon {
-            font-size: 2.5rem;
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #5865F2, #57F287);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .feature-card h3 {
+            font-size: 1.5rem;
             margin-bottom: 15px;
+            color: #fff;
+        }
+        .feature-card p {
+            color: #b9bbbe;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+        @media (max-width: 768px) {
+            .container { padding: 15px; }
+            .header h1 { font-size: 2.5rem; }
+            .login-card { padding: 30px 20px; }
+            .features { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -739,30 +773,35 @@ function createUnauthorizedPage(baseUrl) {
     <div class="container">
         <div class="header">
             <h1>🤖 Haki Bot</h1>
-            <p>Мощная панель управления для вашего Discord сервера</p>
+            <p>Мощная панель управления для вашего Discord сервера с адаптивным дизайном и управлением правами</p>
         </div>
         
-        <div class="login-box">
+        <div class="login-card">
             <h2>🔐 Требуется авторизация</h2>
             <p>Для доступа к панели управления необходимо войти через Discord</p>
-            <a href="/auth/discord" class="login-btn">Войти через Discord</a>
+            <a href="/auth/discord" class="login-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515a.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0a12.64 12.64 0 00-.617-1.25a.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057a19.9 19.9 0 005.993 3.03a.078.078 0 00.084-.028a14.09 14.09 0 001.226-1.994a.076.076 0 00-.041-.106a13.107 13.107 0 01-1.872-.892a.077.077 0 01-.008-.128a10.2 10.2 0 00.372-.292a.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127a12.3 12.3 0 01-1.873.892a.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028a19.839 19.839 0 006.002-3.03a.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
+                </svg>
+                Войти через Discord
+            </a>
         </div>
 
         <div class="features">
             <div class="feature-card">
-                <div class="feature-icon">📊</div>
-                <h3>Статистика серверов</h3>
-                <p>Просматривайте информацию о всех серверах где есть бот</p>
+                <div class="feature-icon">🔧</div>
+                <h3>Управление правами</h3>
+                <p>Настраивайте доступ к командам для разных ролей на вашем сервере</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">📄</div>
-                <h3>Управление транскриптами</h3>
-                <p>Создавайте и просматривайте транскрипты бесед</p>
+                <div class="feature-icon">📱</div>
+                <h3>Адаптивный дизайн</h3>
+                <p>Полностью адаптирован для мобильных устройств и компьютеров</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">⚙️</div>
-                <h3>Настройка бота</h3>
-                <p>Управляйте настройками бота для каждого сервера</p>
+                <div class="feature-icon">🛡️</div>
+                <h3>Безопасность</h3>
+                <p>Только администраторы серверов имеют доступ к настройкам</p>
             </div>
         </div>
     </div>
@@ -770,7 +809,7 @@ function createUnauthorizedPage(baseUrl) {
 </html>`;
 }
 
-function createDashboardPage(user, mutualGuilds, baseUrl) {
+function createDashboardPage(user, adminGuilds, baseUrl) {
     return `
 <!DOCTYPE html>
 <html lang="ru">
@@ -780,1111 +819,1807 @@ function createDashboardPage(user, mutualGuilds, baseUrl) {
     <title>Haki Bot - Панель управления</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
         body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
-            color: #ffffff; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
             line-height: 1.6;
-            display: flex;
             min-height: 100vh;
+        }
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            font-size: 1.2rem;
         }
         .sidebar {
             width: 280px;
-            background: #2b2b2b;
+            background: var(--surface);
             padding: 20px;
-            border-right: 1px solid #40444b;
+            border-right: 1px solid var(--border);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
         }
         .main-content {
-            flex: 1;
+            margin-left: 280px;
             padding: 30px;
-            overflow-y: auto;
+            min-height: 100vh;
         }
         .user-info {
             display: flex;
             align-items: center;
-            padding: 15px;
-            background: #36393f;
-            border-radius: 10px;
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 12px;
             margin-bottom: 30px;
+            border-left: 4px solid var(--primary);
         }
         .user-avatar {
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             border-radius: 50%;
-            margin-right: 15px;
+            margin-right: 20px;
+            border: 3px solid var(--primary);
+        }
+        .user-details {
+            flex: 1;
+        }
+        .user-name {
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: var(--text);
+        }
+        .user-discriminator {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        .user-status {
+            background: var(--success);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 8px;
+        }
+        .nav-section {
+            margin: 25px 0;
+        }
+        .nav-title {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            padding: 0 10px;
         }
         .nav-item {
             display: flex;
             align-items: center;
             padding: 15px;
             margin: 5px 0;
-            background: #36393f;
-            border-radius: 8px;
+            background: var(--surface-light);
+            border-radius: 10px;
             text-decoration: none;
-            color: #ffffff;
-            transition: background 0.3s ease;
+            color: var(--text);
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
         }
         .nav-item:hover {
-            background: #40444b;
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
         }
         .nav-item.active {
-            background: #5865F2;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
         }
         .nav-icon {
-            font-size: 1.2rem;
-            margin-right: 10px;
-            width: 20px;
+            font-size: 1.3rem;
+            margin-right: 15px;
+            width: 24px;
             text-align: center;
         }
         .server-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
         }
         .server-card {
-            background: #2b2b2b;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #40444b;
-            transition: transform 0.3s ease;
+            background: var(--surface);
+            padding: 25px;
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
             cursor: pointer;
+            position: relative;
+            overflow: hidden;
         }
         .server-card:hover {
-            transform: translateY(-5px);
-            border-color: #5865F2;
+            transform: translateY(-8px);
+            border-color: var(--primary);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
         }
-        .server-icon {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            margin-right: 15px;
+        .server-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--success));
         }
         .server-header {
             display: flex;
             align-items: center;
-            margin-bottom: 15px;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: #2b2b2b;
-            padding: 25px;
-            border-radius: 10px;
-            text-align: center;
-            border-left: 4px solid #5865F2;
-        }
-        .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        .logout-btn {
-            background: #ed4245;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 20px;
-            width: 100%;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                 alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold;">${user.global_name || user.username}</div>
-                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
-            </div>
-        </div>
-
-        <a href="/" class="nav-item active">
-            <span class="nav-icon">🏠</span>
-            Главная
-        </a>
-        <a href="/about" class="nav-item">
-            <span class="nav-icon">📋</span>
-            Общие сведения
-        </a>
-        <a href="/transcripts" class="nav-item">
-            <span class="nav-icon">📄</span>
-            Транскрипты
-        </a>
-        <a href="/commands" class="nav-item">
-            <span class="nav-icon">⚡</span>
-            Команды
-        </a>
-
-        <div style="margin: 30px 0 10px 0; color: #b9bbbe; font-size: 0.9rem; padding: 0 15px;">СЕРВЕРА</div>
-        
-        ${mutualGuilds.map(guild => `
-            <a href="/server/${guild.id}" class="nav-item">
-                <span class="nav-icon">🏰</span>
-                ${guild.name}
-            </a>
-        `).join('')}
-
-        <a href="/auth/logout" class="logout-btn">Выйти</a>
-    </div>
-
-    <div class="main-content">
-        <div style="margin-bottom: 30px;">
-            <h1>🏠 Главная панель</h1>
-            <p style="color: #b9bbbe;">Добро пожаловать в панель управления Haki Bot</p>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">${mutualGuilds.length}</div>
-                <div style="color: #b9bbbe;">Серверов с ботом</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${transcriptsStorage.size}</div>
-                <div style="color: #b9bbbe;">Транскриптов</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">24/7</div>
-                <div style="color: #b9bbbe;">Аптайм</div>
-            </div>
-        </div>
-
-        <h2 style="margin-bottom: 20px;">🏰 Ваши сервера</h2>
-        <div class="server-grid">
-            ${mutualGuilds.map(guild => `
-                <div class="server-card" onclick="window.location.href='/server/${guild.id}'">
-                    <div class="server-header">
-                        ${guild.icon ? 
-                            `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png" alt="${guild.name}" class="server-icon">` :
-                            `<div style="width: 50px; height: 50px; background: #5865F2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; margin-right: 15px;">🏰</div>`
-                        }
-                        <div>
-                            <div style="font-weight: bold; font-size: 1.1rem;">${guild.name}</div>
-                            <div style="color: #b9bbbe; font-size: 0.9rem;">Участников: ${guild.approximate_member_count || 'N/A'}</div>
-                        </div>
-                    </div>
-                    <div style="color: #57F287; font-size: 0.9rem;">✓ Бот активен</div>
-                </div>
-            `).join('')}
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-function createAboutPage(user, baseUrl) {
-    return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Общие сведения - Haki Bot</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
-            color: #ffffff; 
-            line-height: 1.6;
-            display: flex;
-            min-height: 100vh;
-        }
-        .sidebar {
-            width: 280px;
-            background: #2b2b2b;
-            padding: 20px;
-            border-right: 1px solid #40444b;
-        }
-        .main-content {
-            flex: 1;
-            padding: 30px;
-            overflow-y: auto;
-        }
-        .content-box {
-            background: #2b2b2b;
-            padding: 30px;
-            border-radius: 10px;
-            border: 1px solid #40444b;
             margin-bottom: 20px;
-        }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            margin: 5px 0;
-            background: #36393f;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #ffffff;
-            transition: background 0.3s ease;
-        }
-        .nav-item:hover {
-            background: #40444b;
-        }
-        .nav-item.active {
-            background: #5865F2;
-        }
-        .nav-icon {
-            font-size: 1.2rem;
-            margin-right: 10px;
-            width: 20px;
-            text-align: center;
-        }
-        .logout-btn {
-            background: #ed4245;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 20px;
-            width: 100%;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                 alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold;">${user.global_name || user.username}</div>
-                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
-            </div>
-        </div>
-
-        <a href="/" class="nav-item">
-            <span class="nav-icon">🏠</span>
-            Главная
-        </a>
-        <a href="/about" class="nav-item active">
-            <span class="nav-icon">📋</span>
-            Общие сведения
-        </a>
-        <a href="/transcripts" class="nav-item">
-            <span class="nav-icon">📄</span>
-            Транскрипты
-        </a>
-        <a href="/commands" class="nav-item">
-            <span class="nav-icon">⚡</span>
-            Команды
-        </a>
-
-        <a href="/auth/logout" class="logout-btn">Выйти</a>
-    </div>
-
-    <div class="main-content">
-        <div style="margin-bottom: 30px;">
-            <h1>📋 Общие сведения</h1>
-            <p style="color: #b9bbbe;">Информация о боте Haki и его возможностях</p>
-        </div>
-
-        <div class="content-box">
-            <h2 style="margin-bottom: 20px; color: #5865F2;">О боте Haki</h2>
-            <div style="line-height: 1.8;">
-                <p>Haki Bot - это многофункциональный Discord бот, созданный для улучшения управления серверами и взаимодействия с участниками.</p>
-                
-                <h3 style="margin: 25px 0 15px 0; color: #57F287;">Основные возможности:</h3>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Создание транскриптов бесед</li>
-                    <li>Система тикетов</li>
-                    <li>Модерационные команды</li>
-                    <li>Интеграция с War Thunder</li>
-                    <li>Автоматический перевод сообщений</li>
-                    <li>Панель управления через веб-интерфейс</li>
-                </ul>
-
-                <h3 style="margin: 25px 0 15px 0; color: #57F287;">Техническая информация:</h3>
-                <ul style="margin-left: 20px;">
-                    <li><strong>Версия:</strong> 2.0.0</li>
-                    <li><strong>База данных:</strong> In-memory хранилище</li>
-                    <li><strong>Аптайм:</strong> 99.9%</li>
-                    <li><strong>Поддержка:</strong> 24/7</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-function createCommandsPage(user, baseUrl) {
-    return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Команды - Haki Bot</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
-            color: #ffffff; 
-            line-height: 1.6;
-            display: flex;
-            min-height: 100vh;
-        }
-        .sidebar {
-            width: 280px;
-            background: #2b2b2b;
-            padding: 20px;
-            border-right: 1px solid #40444b;
-        }
-        .main-content {
-            flex: 1;
-            padding: 30px;
-            overflow-y: auto;
-        }
-        .command-category {
-            background: #2b2b2b;
-            padding: 25px;
-            border-radius: 10px;
-            border: 1px solid #40444b;
-            margin-bottom: 20px;
-        }
-        .command-item {
-            background: #36393f;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border-left: 4px solid #5865F2;
-        }
-        .command-name {
-            font-weight: bold;
-            color: #57F287;
-        }
-        .command-desc {
-            color: #b9bbbe;
-            margin-top: 5px;
-        }
-        .command-usage {
-            background: #2f3136;
-            padding: 8px 12px;
-            border-radius: 4px;
-            margin: 8px 0;
-            font-family: 'Consolas', monospace;
-            font-size: 0.9rem;
-            border-left: 3px solid #57F287;
-        }
-        .permission-badge {
-            background: #ed4245;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            margin-left: 10px;
-        }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            margin: 5px 0;
-            background: #36393f;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #ffffff;
-            transition: background 0.3s ease;
-        }
-        .nav-item:hover {
-            background: #40444b;
-        }
-        .nav-item.active {
-            background: #5865F2;
-        }
-        .nav-icon {
-            font-size: 1.2rem;
-            margin-right: 10px;
-            width: 20px;
-            text-align: center;
-        }
-        .logout-btn {
-            background: #ed4245;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 20px;
-            width: 100%;
-        }
-        .user-info {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            background: #36393f;
-            border-radius: 10px;
-            margin-bottom: 30px;
-        }
-        .user-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            margin-right: 15px;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                 alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold;">${user.global_name || user.username}</div>
-                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
-            </div>
-        </div>
-
-        <a href="/" class="nav-item">
-            <span class="nav-icon">🏠</span>
-            Главная
-        </a>
-        <a href="/about" class="nav-item">
-            <span class="nav-icon">📋</span>
-            Общие сведения
-        </a>
-        <a href="/transcripts" class="nav-item">
-            <span class="nav-icon">📄</span>
-            Транскрипты
-        </a>
-        <a href="/commands" class="nav-item active">
-            <span class="nav-icon">⚡</span>
-            Команды
-        </a>
-
-        <a href="/auth/logout" class="logout-btn">Выйти</a>
-    </div>
-
-    <div class="main-content">
-        <div style="margin-bottom: 30px;">
-            <h1>⚡ Команды бота</h1>
-            <p style="color: #b9bbbe;">Все доступные команды Haki Bot</p>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">📄 Команды транскриптов</h2>
-            
-            <div class="command-item">
-                <div class="command-name">-transcript <span class="permission-badge">MANAGE_MESSAGES</span></div>
-                <div class="command-desc">Создает транскрипт текущего канала и отправляет его в настроенный канал</div>
-                <div class="command-usage">Использование: -transcript</div>
-            </div>
-            
-            <div class="command-item">
-                <div class="command-name">-settranscript <span class="permission-badge">ADMINISTRATOR</span></div>
-                <div class="command-desc">Настраивает канал для отправки транскриптов</div>
-                <div class="command-usage">Использование: -settranscript &lt;ID_канала&gt;<br>Пример: -settranscript 123456789012345678<br>Сброс: -settranscript reset</div>
-            </div>
-            
-            <div class="command-item">
-                <div class="command-name">-transcriptsettings</div>
-                <div class="command-desc">Показывает текущие настройки транскриптов для этого сервера</div>
-                <div class="command-usage">Использование: -transcriptsettings</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🌐 Команды перевода</h2>
-            <div class="command-item">
-                <div class="command-name">-translation on/off <span class="permission-badge">ADMINISTRATOR</span></div>
-                <div class="command-desc">Включает/выключает автоматический перевод по реакциям</div>
-                <div class="command-usage">Пример: -translation on</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-translation disablechannel #канал</div>
-                <div class="command-desc">Отключает авто-перевод в указанном канале</div>
-                <div class="command-usage">Пример: -translation disablechannel #важный</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-translation enablechannel #канал</div>
-                <div class="command-desc">Включает авто-перевод в указанном канале</div>
-                <div class="command-usage">Пример: -translation enablechannel #общение</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-translation clearchannels</div>
-                <div class="command-desc">Включает перевод во всех каналах (очищает исключения)</div>
-                <div class="command-usage">Использование: -translation clearchannels</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-translation addrole @роль</div>
-                <div class="command-desc">Добавляет защищенную роль (сообщения не переводятся)</div>
-                <div class="command-usage">Пример: -translation addrole @Модератор</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-translation status</div>
-                <div class="command-desc">Показывает текущие настройки перевода</div>
-                <div class="command-usage">Использование: -translation status</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">Реакции 🇷🇺/🇬🇧</div>
-                <div class="command-desc">Автоматический перевод при добавлении флаговых реакций</div>
-                <div class="command-usage">🇷🇺 - перевод на русский<br>🇬🇧 - перевод на английский</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">📊 Команды статистики</h2>
-            <div class="command-item">
-                <div class="command-name">!stat [никнейм/ID]</div>
-                <div class="command-desc">Показывает статистику игрока War Thunder через StatShark</div>
-                <div class="command-usage">Пример: !stat PlayerName</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">!полк [название]</div>
-                <div class="command-desc">Информация о полке War Thunder</div>
-                <div class="command-usage">Пример: !полк НазваниеПолка</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🎵 Команды радио</h2>
-            <div class="command-item">
-                <div class="command-name">-play [станция]</div>
-                <div class="command-desc">Включает радиостанцию в голосовом канале</div>
-                <div class="command-usage">Пример: -play нвс<br>Доступные станции: нвс, шансон, ретро, рок</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-stop</div>
-                <div class="command-desc">Выключает радио</div>
-                <div class="command-usage">Использование: -stop</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-stations</div>
-                <div class="command-desc">Показывает список доступных радиостанций</div>
-                <div class="command-usage">Использование: -stations</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🗑️ Команды автоудаления</h2>
-            <div class="command-item">
-                <div class="command-name">-autodelete on/off <span class="permission-badge">MANAGE_MESSAGES</span></div>
-                <div class="command-desc">Включает/выключает автоматическое удаление сообщений</div>
-                <div class="command-usage">Пример: -autodelete on</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-autodelete delay [мс]</div>
-                <div class="command-desc">Устанавливает задержку перед удалением сообщений</div>
-                <div class="command-usage">Пример: -autodelete delay 5000</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-autodelete addchannel #канал</div>
-                <div class="command-desc">Добавляет канал в список автоудаления</div>
-                <div class="command-usage">Пример: -autodelete addchannel #флуд</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-autodelete addrole @роль</div>
-                <div class="command-desc">Добавляет исключенную роль (сообщения не удаляются)</div>
-                <div class="command-usage">Пример: -autodelete addrole @Модератор</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-autodelete status</div>
-                <div class="command-desc">Показывает текущие настройки автоудаления</div>
-                <div class="command-usage">Использование: -autodelete status</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🎫 Команды тикетов</h2>
-            <div class="command-item">
-                <div class="command-name">!ticket <span class="permission-badge">ADMINISTRATOR</span></div>
-                <div class="command-desc">Настройка системы тикетов для заявок в полк</div>
-                <div class="command-usage">Использование: !ticket &lt;ID_канала&gt; &lt;ID_категории&gt; &lt;ID_ролей&gt;<br>Пример: !ticket 123456789 987654321 111111111,222222222</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">Кнопка "Создать заявку в полк"</div>
-                <div class="command-desc">Создает тикет для подачи заявки в полк</div>
-                <div class="command-usage">Нажмите на кнопку в настроенном канале тикетов</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">Кнопка "Закрыть" в тикете</div>
-                <div class="command-desc">Закрывает тикет и создает транскрипт</div>
-                <div class="command-usage">Нажмите на кнопку в канале тикета</div>
-            </div>
-        </div>
-
-        <div class="command-category">
-            <h2 style="color: #5865F2; margin-bottom: 20px;">🔧 Сервисные команды</h2>
-            <div class="command-item">
-                <div class="command-name">-ping</div>
-                <div class="command-desc">Проверяет работоспособность бота</div>
-                <div class="command-usage">Использование: -ping</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">-testvoice</div>
-                <div class="command-desc">Тестирует подключение к голосовому каналу</div>
-                <div class="command-usage">Использование: -testvoice</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">!сервер <span class="permission-badge">ADMINISTRATOR</span></div>
-                <div class="command-desc">Настройка отображения сервера в голосовом канале</div>
-                <div class="command-usage">Использование: !сервер &lt;ID_канала&gt; &lt;сервер&gt;<br>Пример: !сервер 123456789012345678 EU Server<br>Доступные сервера: EU Server, US Server, Asia Server, RU Server, TR Server, Custom Server</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">!сервер статус</div>
-                <div class="command-desc">Показывает текущие настройки сервера для голосового канала</div>
-                <div class="command-usage">Использование: !сервер статус</div>
-            </div>
-            <div class="command-item">
-                <div class="command-name">!сервер сброс</div>
-                <div class="command-desc">Сбрасывает настройки сервера для голосового канала</div>
-                <div class="command-usage">Использование: !сервер сброс</div>
-            </div>
-        </div>
-        <div style="background: #2b2b2b; padding: 20px; border-radius: 10px; border-left: 4px solid #5865F2; margin-top: 30px;">
-            <h3 style="color: #57F287; margin-bottom: 10px;">💡 Примечания по использованию</h3>
-            <ul style="color: #b9bbbe; margin-left: 20px;">
-                <li>Команды с бейджем <span class="permission-badge">ADMINISTRATOR</span> требуют прав администратора</li>
-                <li>Команды с бейджем <span class="permission-badge">MANAGE_MESSAGES</span> требуют прав управления сообщениями</li>
-                <li>Для работы радио необходимо находиться в голосовом канале</li>
-                <li>Транскрипты сохраняются в постоянное хранилище и доступны по ссылке</li>
-                <li>Авто-перевод работает во всех каналах, кроме указанных в исключениях</li>
-            </ul>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-function createServerPage(guild, user, baseUrl) {
-    const memberCount = guild.memberCount;
-    const createdAt = guild.createdAt.toLocaleDateString('ru-RU');
-    
-    return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${guild.name} - Haki Bot</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
-            color: #ffffff; 
-            line-height: 1.6;
-            display: flex;
-            min-height: 100vh;
-        }
-        .sidebar {
-            width: 280px;
-            background: #2b2b2b;
-            padding: 20px;
-            border-right: 1px solid #40444b;
-        }
-        .main-content {
-            flex: 1;
-            padding: 30px;
-            overflow-y: auto;
-        }
-        .server-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #2b2b2b;
-            border-radius: 10px;
-            border: 1px solid #40444b;
         }
         .server-icon {
-            width: 80px;
-            height: 80px;
+            width: 70px;
+            height: 70px;
             border-radius: 50%;
             margin-right: 20px;
+            object-fit: cover;
+            border: 3px solid var(--surface-light);
+        }
+        .server-icon-placeholder {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin-right: 20px;
+            color: white;
+            border: 3px solid var(--surface-light);
+        }
+        .server-info {
+            flex: 1;
+        }
+        .server-name {
+            font-weight: 700;
+            font-size: 1.4rem;
+            color: var(--text);
+            margin-bottom: 5px;
+        }
+        .server-members {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .server-badge {
+            background: var(--primary);
+            color: white;
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
         }
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
         }
         .stat-card {
-            background: #2b2b2b;
-            padding: 25px;
-            border-radius: 10px;
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface-dark) 100%);
+            padding: 30px;
+            border-radius: 15px;
             text-align: center;
-            border-left: 4px solid #5865F2;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
         }
         .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
-            margin-bottom: 5px;
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            margin: 5px 0;
-            background: #36393f;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #ffffff;
-            transition: background 0.3s ease;
-        }
-        .nav-item:hover {
-            background: #40444b;
-        }
-        .nav-item.active {
-            background: #5865F2;
-        }
-        .nav-icon {
-            font-size: 1.2rem;
-            margin-right: 10px;
-            width: 20px;
-            text-align: center;
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         .logout-btn {
-            background: #ed4245;
+            background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%);
             color: white;
-            padding: 10px 20px;
+            padding: 15px;
             border: none;
-            border-radius: 5px;
+            border-radius: 10px;
             cursor: pointer;
-            margin-top: 20px;
+            font-weight: 600;
+            font-size: 1rem;
             width: 100%;
-        }
-        .feature-card {
-            background: #2b2b2b;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #40444b;
-            margin-bottom: 15px;
-            cursor: pointer;
-            transition: border-color 0.3s ease;
-        }
-        .feature-card:hover {
-            border-color: #5865F2;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                 alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold;">${user.global_name || user.username}</div>
-                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
-            </div>
-        </div>
-
-        <a href="/" class="nav-item">
-            <span class="nav-icon">🏠</span>
-            Главная
-        </a>
-        <a href="/about" class="nav-item">
-            <span class="nav-icon">📋</span>
-            Общие сведения
-        </a>
-        <a href="/transcripts" class="nav-item">
-            <span class="nav-icon">📄</span>
-            Транскрипты
-        </a>
-        <a href="/commands" class="nav-item">
-            <span class="nav-icon">⚡</span>
-            Команды
-        </a>
-
-        <a href="/auth/logout" class="logout-btn">Выйти</a>
-    </div>
-
-    <div class="main-content">
-        <div class="server-header">
-            ${guild.icon ? 
-                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png" alt="${guild.name}" class="server-icon">` :
-                `<div style="width: 80px; height: 80px; background: #5865F2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin-right: 20px;">🏰</div>`
-            }
-            <div>
-                <h1>${guild.name}</h1>
-                <p style="color: #b9bbbe;">Управление сервером через Haki Bot</p>
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">${memberCount}</div>
-                <div style="color: #b9bbbe;">Участников</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${guild.channels.cache.size}</div>
-                <div style="color: #b9bbbe;">Каналов</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${guild.roles.cache.size}</div>
-                <div style="color: #b9bbbe;">Ролей</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${createdAt}</div>
-                <div style="color: #b9bbbe;">Создан</div>
-            </div>
-        </div>
-
-        <h2 style="margin-bottom: 20px;">⚙️ Управление сервером</h2>
-        
-        <div class="feature-card" onclick="window.location.href='/transcripts'">
-            <h3 style="color: #57F287; margin-bottom: 10px;">📄 Транскрипты</h3>
-            <p style="color: #b9bbbe;">Создание и просмотр транскриптов бесед. Управление архивами сообщений.</p>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-function createTranscriptsPage(user, baseUrl, adminGuilds) {
-    // Фильтруем транскрипты только для серверов, где пользователь администратор
-    const adminGuildIds = adminGuilds.map(guild => guild.id);
-    const transcripts = Array.from(transcriptsStorage.entries())
-        .map(([id, data]) => ({
-            id,
-            channelName: data.ticketInfo?.channelName,
-            server: data.ticketInfo?.server,
-            serverId: data.ticketInfo?.serverId,
-            messageCount: data.ticketInfo?.messageCount,
-            createdAt: new Date(data.createdAt).toLocaleDateString('ru-RU')
-        }))
-        .filter(transcript => {
-            // Если нет serverId, показываем всем администраторам
-            if (!transcript.serverId) return true;
-            // Показываем только транскрипты с серверов, где пользователь администратор
-            return adminGuildIds.includes(transcript.serverId);
-        });
-
-    return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Транскрипты - Haki Bot</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            background: #1a1a1a; 
-            color: #ffffff; 
-            line-height: 1.6;
+            margin-top: 20px;
+            transition: all 0.3s ease;
             display: flex;
-            min-height: 100vh;
-        }
-        .sidebar {
-            width: 280px;
-            background: #2b2b2b;
-            padding: 20px;
-            border-right: 1px solid #40444b;
-        }
-        .main-content {
-            flex: 1;
-            padding: 30px;
-            overflow-y: auto;
-        }
-        .transcript-item {
-            background: #2b2b2b;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #40444b;
-            margin-bottom: 15px;
-            display: flex;
-            justify-content: space-between;
             align-items: center;
-        }
-        .transcript-info {
-            flex: 1;
-        }
-        .transcript-actions {
-            display: flex;
+            justify-content: center;
             gap: 10px;
         }
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none;
-            color: white;
-            font-size: 0.9rem;
+        .logout-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(237, 66, 69, 0.3);
         }
-        .btn-primary {
-            background: #5865F2;
+        .section-header {
+            margin-bottom: 30px;
         }
-        .btn-outline {
-            background: transparent;
-            border: 1px solid #40444b;
-            color: #b9bbbe;
+        .section-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
         }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            margin: 5px 0;
-            background: #36393f;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #ffffff;
-            transition: background 0.3s ease;
-        }
-        .nav-item:hover {
-            background: #40444b;
-        }
-        .nav-item.active {
-            background: #5865F2;
-        }
-        .nav-icon {
-            font-size: 1.2rem;
-            margin-right: 10px;
-            width: 20px;
-            text-align: center;
-        }
-        .logout-btn {
-            background: #ed4245;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 20px;
-            width: 100%;
+        .section-header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 600px;
         }
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: #b9bbbe;
+            padding: 80px 20px;
+            color: var(--text-secondary);
         }
-        .admin-badge {
-            background: #ed4245;
+        .empty-icon {
+            font-size: 5rem;
+            margin-bottom: 30px;
+            opacity: 0.5;
+        }
+        .empty-state h3 {
+            font-size: 1.8rem;
+            margin-bottom: 15px;
+            color: var(--text);
+        }
+        .empty-state p {
+            font-size: 1.1rem;
+            max-width: 500px;
+            margin: 0 auto 25px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
             color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            margin-left: 10px;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
         }
-        .access-info {
-            background: #2b2b2b;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #5865F2;
-            margin-bottom: 20px;
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.3);
+        }
+        @media (max-width: 1024px) {
+            .server-grid {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            }
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+        }
+        @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 80px 20px 30px;
+            }
+            .server-grid {
+                grid-template-columns: 1fr;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .section-header h1 {
+                font-size: 2rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .user-info {
+                flex-direction: column;
+                text-align: center;
+            }
+            .user-avatar {
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
+            .server-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .server-icon, .server-icon-placeholder {
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- Боковая панель -->
-    <div class="sidebar">
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+    
+    <div class="sidebar" id="sidebar">
         <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
                  alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold;">${user.global_name || user.username}</div>
-                <div style="color: #b9bbbe; font-size: 0.9rem;">${user.username}#${user.discriminator}</div>
-                <div style="color: #57F287; font-size: 0.8rem; margin-top: 5px;">
-                    ✅ Администратор
-                </div>
+            <div class="user-details">
+                <div class="user-name">${user.global_name || user.username}</div>
+                <div class="user-discriminator">${user.username}</div>
+                <span class="user-status">✅ Администратор</span>
             </div>
         </div>
 
-        <a href="/" class="nav-item">
-            <span class="nav-icon">🏠</span>
-            Главная
-        </a>
-        <a href="/about" class="nav-item">
-            <span class="nav-icon">📋</span>
-            Общие сведения
-        </a>
-        <a href="/transcripts" class="nav-item active">
-            <span class="nav-icon">📄</span>
-            Транскрипты
-        </a>
-        <a href="/commands" class="nav-item">
-            <span class="nav-icon">⚡</span>
-            Команды
-        </a>
-
-        <div style="margin: 30px 0 10px 0; color: #b9bbbe; font-size: 0.9rem; padding: 0 15px;">ВАШИ СЕРВЕРА</div>
-        
-        ${adminGuilds.map(guild => `
-            <a href="/server/${guild.id}" class="nav-item">
-                <span class="nav-icon">🏰</span>
-                ${guild.name}
-                <span class="admin-badge">ADMIN</span>
+        <div class="nav-section">
+            <div class="nav-title">Навигация</div>
+            <a href="/" class="nav-item active">
+                <span class="nav-icon">🏠</span>
+                Главная
             </a>
-        `).join('')}
+            <a href="/permissions" class="nav-item">
+                <span class="nav-icon">🔐</span>
+                Управление правами
+            </a>
+        </div>
 
-        <a href="/auth/logout" class="logout-btn">Выйти</a>
+        <div class="nav-section">
+            <div class="nav-title">Ваши сервера</div>
+            ${adminGuilds.length > 0 ? adminGuilds.map(guild => `
+                <a href="/permissions/${guild.id}" class="nav-item">
+                    <span class="nav-icon">🏰</span>
+                    ${guild.name}
+                    <span style="margin-left: auto; font-size: 0.8rem; color: var(--text-secondary);">⚙️</span>
+                </a>
+            `).join('') : `
+                <div style="color: var(--text-secondary); padding: 15px; text-align: center;">
+                    Нет серверов с правами администратора
+                </div>
+            `}
+        </div>
+
+        <a href="/auth/logout" class="logout-btn">
+            <span class="nav-icon">🚪</span>
+            Выйти
+        </a>
     </div>
 
-    <!-- Основной контент -->
     <div class="main-content">
-        <div style="margin-bottom: 30px;">
-            <h1>📄 Транскрипты <span class="admin-badge">ТОЛЬКО ДЛЯ АДМИНИСТРАТОРОВ</span></h1>
-            <p style="color: #b9bbbe;">Управление архивами бесед - доступно только администраторам серверов</p>
+        <div class="section-header">
+            <h1>🏠 Главная панель</h1>
+            <p>Добро пожаловать в панель управления Haki Bot. Управляйте настройками ваших серверов Discord.</p>
         </div>
 
-        <div class="access-info">
-            <strong>🔐 Уровень доступа:</strong> Администратор сервера
-            <br>
-            <strong>🏠 Доступные сервера:</strong> ${adminGuilds.map(g => g.name).join(', ')}
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">${adminGuilds.length}</div>
+                <div class="stat-label">Серверов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">3</div>
+                <div class="stat-label">Команд</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">24/7</div>
+                <div class="stat-label">Аптайм</div>
+            </div>
         </div>
 
-        ${transcripts.length === 0 ? `
+        <div class="section-header">
+            <h2>🏰 Ваши сервера</h2>
+            <p>Выберите сервер для управления правами доступа к командам</p>
+        </div>
+
+        ${adminGuilds.length === 0 ? `
             <div class="empty-state">
-                <div style="font-size: 4rem; margin-bottom: 20px;">📝</div>
-                <h3>Транскрипты не найдены</h3>
-                <p>На ваших серверах пока нет созданных транскриптов</p>
-                <p style="font-size: 0.9rem; margin-top: 10px; color: #8e9297;">
-                    Используйте команду <code>-transcript</code> в канале на сервере где вы администратор
-                </p>
+                <div class="empty-icon">🏰</div>
+                <h3>Серверы не найдены</h3>
+                <p>Вы не являетесь администратором ни на одном сервере Discord, или у вас нет доступа к управлению ботом на этих серверах.</p>
+                <a href="https://discord.com/developers/applications" target="_blank" class="btn-primary">
+                    <span class="nav-icon">➕</span>
+                    Добавить бота на сервер
+                </a>
             </div>
         ` : `
-            <div style="margin-bottom: 20px; color: #b9bbbe;">
-                Всего транскриптов на ваших серверах: <strong>${transcripts.length}</strong>
+            <div class="server-grid">
+                ${adminGuilds.map(guild => `
+                    <div class="server-card" onclick="window.location.href='/permissions/${guild.id}'">
+                        <div class="server-header">
+                            ${guild.icon ? 
+                                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="server-icon">` :
+                                `<div class="server-icon-placeholder">🏰</div>`
+                            }
+                            <div class="server-info">
+                                <div class="server-name">${guild.name}</div>
+                                <div class="server-members">
+                                    <span>👥</span>
+                                    <span>${guild.approximate_member_count || 'N/A'} участников</span>
+                                </div>
+                                <div class="server-badge">
+                                    <span>🛡️</span>
+                                    Администратор
+                                </div>
+                            </div>
+                        </div>
+                        <div style="color: var(--success); font-size: 0.9rem; margin-top: 15px; display: flex; align-items: center; gap: 8px;">
+                            <span>⚡</span>
+                            Нажмите для управления правами
+                        </div>
+                    </div>
+                `).join('')}
             </div>
-            
-            ${transcripts.map(transcript => `
-                <div class="transcript-item">
-                    <div class="transcript-info">
-                        <div style="font-weight: bold; margin-bottom: 5px;">
-                            📄 Транскрипт #${transcript.channelName || 'unknown'}
-                        </div>
-                        <div style="color: #b9bbbe; font-size: 0.9rem;">
-                            🏠 ${transcript.server || 'Unknown Server'} • 
-                            💬 ${transcript.messageCount || 0} сообщений • 
-                            📅 ${transcript.createdAt}
-                        </div>
-                    </div>
-                    <div class="transcript-actions">
-                        <a href="/transcript/${transcript.id}" class="btn btn-primary" target="_blank">
-                            👁️ Просмотр
-                        </a>
-                        <button class="btn btn-outline" onclick="copyTranscriptUrl('${transcript.id}')">
-                            📋 Ссылка
-                        </button>
-                    </div>
-                </div>
-            `).join('')}
         `}
     </div>
 
     <script>
-        function copyTranscriptUrl(id) {
-            const url = window.location.origin + '/transcript/' + id;
-            navigator.clipboard.writeText(url).then(() => {
-                alert('Ссылка скопирована в буфер обмена');
-            });
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
         }
+
+        // Закрываем sidebar при клике на основной контент на мобильных
+        document.addEventListener('click', (e) => {
+            const sidebar = document.getElementById('sidebar');
+            const menuBtn = document.querySelector('.mobile-menu-btn');
+            
+            if (window.innerWidth <= 768 && 
+                !sidebar.contains(e.target) && 
+                !menuBtn.contains(e.target) && 
+                sidebar.classList.contains('active')) {
+                sidebar.classList.remove('active');
+            }
+        });
+
+        // Анимация загрузки карточек
+        document.addEventListener('DOMContentLoaded', () => {
+            const cards = document.querySelectorAll('.server-card, .stat-card');
+            cards.forEach((card, index) => {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                
+                setTimeout(() => {
+                    card.style.transition = 'all 0.5s ease';
+                    card.style.opacity = '1';
+                    card.style.transform = 'translateY(0)';
+                }, index * 100);
+            });
+        });
     </script>
 </body>
 </html>`;
 }
 
+function createPermissionsPage(user, adminGuilds, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление правами - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        .main-content {
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary);
+        }
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin-right: 20px;
+            border: 3px solid var(--primary);
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: var(--surface-light);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--text);
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
+        }
+        .nav-icon {
+            font-size: 1.3rem;
+            margin-right: 15px;
+            width: 24px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%);
+            color: white;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            width: 100%;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .section-header {
+            margin-bottom: 40px;
+        }
+        .section-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+        .section-header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 700px;
+        }
+        .permissions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+        }
+        .permission-card {
+            background: var(--surface);
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .permission-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--primary);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+        }
+        .permission-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+        }
+        .permission-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .permission-icon {
+            font-size: 2.5rem;
+            margin-right: 20px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .permission-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 5px;
+        }
+        .permission-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        .permission-info {
+            margin-top: 20px;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: var(--surface-light);
+            border-radius: 8px;
+        }
+        .info-label {
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .info-value {
+            color: var(--text);
+            font-weight: 700;
+        }
+        .btn-manage {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            width: 100%;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .btn-manage:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.3);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-secondary);
+            grid-column: 1 / -1;
+        }
+        .empty-icon {
+            font-size: 5rem;
+            margin-bottom: 30px;
+            opacity: 0.5;
+        }
+        .empty-state h3 {
+            font-size: 1.8rem;
+            margin-bottom: 15px;
+            color: var(--text);
+        }
+        .empty-state p {
+            font-size: 1.1rem;
+            max-width: 500px;
+            margin: 0 auto 25px;
+        }
+        @media (max-width: 1024px) {
+            .permissions-grid {
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            }
+        }
+        @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 80px 20px 30px;
+            }
+            .permissions-grid {
+                grid-template-columns: 1fr;
+            }
+            .section-header h1 {
+                font-size: 2rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .permission-card {
+                padding: 20px;
+            }
+            .permission-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .permission-icon {
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+    
+    <div class="sidebar" id="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold; font-size: 1.1rem;">${user.global_name || user.username}</div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
+                <div style="color: var(--success); font-size: 0.8rem; margin-top: 5px; font-weight: 600;">✅ Администратор</div>
+            </div>
+        </div>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Навигация</div>
+        
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/permissions" class="nav-item active">
+            <span class="nav-icon">🔐</span>
+            Управление правами
+        </a>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Ваши сервера</div>
+        
+        ${adminGuilds.map(guild => `
+            <a href="/permissions/${guild.id}" class="nav-item">
+                <span class="nav-icon">🏰</span>
+                ${guild.name}
+                <span style="margin-left: auto; font-size: 0.8rem; color: var(--text-secondary);">⚙️</span>
+            </a>
+        `).join('')}
+
+        <a href="/auth/logout" class="logout-btn">
+            <span class="nav-icon">🚪</span>
+            Выйти
+        </a>
+    </div>
+
+    <div class="main-content">
+        <div class="section-header">
+            <h1>🔐 Управление правами команд</h1>
+            <p>Настройте доступ к командам бота для различных ролей на ваших серверах. Только администраторы серверов могут изменять эти настройки.</p>
+        </div>
+
+        <div class="permissions-grid">
+            <div class="permission-card">
+                <div class="permission-header">
+                    <div class="permission-icon">🌍</div>
+                    <div>
+                        <div class="permission-title">Команда /регион</div>
+                        <div class="permission-desc">Управление регионами голосовых серверов Discord</div>
+                    </div>
+                </div>
+                <div class="permission-info">
+                    <div class="info-item">
+                        <span class="info-label">По умолчанию:</span>
+                        <span class="info-value">Только администраторы</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Функции:</span>
+                        <span class="info-value">Изменение региона, статус, сброс</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Доступно на:</span>
+                        <span class="info-value">${adminGuilds.length} серверах</span>
+                    </div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 15px; padding: 10px; background: var(--surface-light); border-radius: 8px;">
+                    💡 Вы можете разрешить использование этой команды определенным ролям на каждом сервере отдельно
+                </div>
+            </div>
+
+            <div class="permission-card">
+                <div class="permission-header">
+                    <div class="permission-icon">📄</div>
+                    <div>
+                        <div class="permission-title">Команда /transcript</div>
+                        <div class="permission-desc">Создание транскриптов бесед и тикетов</div>
+                    </div>
+                </div>
+                <div class="permission-info">
+                    <div class="info-item">
+                        <span class="info-label">По умолчанию:</span>
+                        <span class="info-value">Управление сообщениями</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Функции:</span>
+                        <span class="info-value">Транскрипты, архивация</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Доступно на:</span>
+                        <span class="info-value">${adminGuilds.length} серверах</span>
+                    </div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 15px; padding: 10px; background: var(--surface-light); border-radius: 8px;">
+                    💡 Настраивайте какие роли могут создавать и просматривать транскрипты
+                </div>
+            </div>
+
+            <div class="permission-card">
+                <div class="permission-header">
+                    <div class="permission-icon">🎫</div>
+                    <div>
+                        <div class="permission-title">Команда /ticket</div>
+                        <div class="permission-desc">Настройка системы тикетов и заявок</div>
+                    </div>
+                </div>
+                <div class="permission-info">
+                    <div class="info-item">
+                        <span class="info-label">По умолчанию:</span>
+                        <span class="info-value">Только администраторы</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Функции:</span>
+                        <span class="info-value">Создание тикетов, управление</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Доступно на:</span>
+                        <span class="info-value">${adminGuilds.length} серверах</span>
+                    </div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 15px; padding: 10px; background: var(--surface-light); border-radius: 8px;">
+                    💡 Определите кто может настраивать и управлять системой тикетов
+                </div>
+            </div>
+
+            ${adminGuilds.length === 0 ? `
+                <div class="empty-state">
+                    <div class="empty-icon">🔒</div>
+                    <h3>Нет доступных серверов</h3>
+                    <p>Для управления правами вам необходимо быть администратором хотя бы на одном сервере Discord.</p>
+                </div>
+            ` : `
+                <div class="permission-card" style="grid-column: 1 / -1; background: linear-gradient(135deg, var(--surface-dark) 0%, #2a2d31 100%);">
+                    <div class="permission-header">
+                        <div class="permission-icon">⚡</div>
+                        <div>
+                            <div class="permission-title">Начать настройку</div>
+                            <div class="permission-desc">Выберите сервер для управления правами доступа к командам</div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
+                        ${adminGuilds.slice(0, 3).map(guild => `
+                            <a href="/permissions/${guild.id}" class="btn-manage" style="margin-top: 0;">
+                                <span class="nav-icon">🏰</span>
+                                ${guild.name.length > 15 ? guild.name.substring(0, 15) + '...' : guild.name}
+                            </a>
+                        `).join('')}
+                        ${adminGuilds.length > 3 ? `
+                            <a href="/" class="btn-manage" style="margin-top: 0; background: linear-gradient(135deg, var(--surface-light) 0%, var(--surface) 100%); color: var(--text);">
+                                <span class="nav-icon">📋</span>
+                                Все серверы (${adminGuilds.length})
+                            </a>
+                        ` : ''}
+                    </div>
+                </div>
+            `}
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+        }
+
+        // Анимация загрузки карточек
+        document.addEventListener('DOMContentLoaded', () => {
+            const cards = document.querySelectorAll('.permission-card');
+            cards.forEach((card, index) => {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                
+                setTimeout(() => {
+                    card.style.transition = 'all 0.5s ease';
+                    card.style.opacity = '1';
+                    card.style.transform = 'translateY(0)';
+                }, index * 100);
+            });
+        });
+    </script>
+</body>
+</html>`;
+}
+
+function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
+    const availableCommands = [
+        { id: 'region', name: '/регион', icon: '🌍', description: 'Управление регионами голосовых серверов' },
+        { id: 'transcript', name: '/transcript', icon: '📄', description: 'Создание транскриптов бесед' },
+        { id: 'ticket', name: '/ticket', icon: '🎫', description: 'Настройка системы тикетов' }
+    ];
+
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${guild.name} - Управление правами</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        .main-content {
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary);
+        }
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin-right: 20px;
+            border: 3px solid var(--primary);
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: var(--surface-light);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--text);
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
+        }
+        .nav-icon {
+            font-size: 1.3rem;
+            margin-right: 15px;
+            width: 24px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%);
+            color: white;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            width: 100%;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .guild-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        .guild-icon {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin-right: 30px;
+            border: 4px solid var(--surface-light);
+            object-fit: cover;
+        }
+        .guild-icon-placeholder {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin-right: 30px;
+            color: white;
+            border: 4px solid var(--surface-light);
+        }
+        .guild-info {
+            flex: 1;
+        }
+        .guild-name {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .guild-stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .guild-stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text);
+            display: block;
+        }
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .permissions-container {
+            background: var(--surface);
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .permission-tabs {
+            display: flex;
+            background: var(--surface-dark);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        .permission-tab {
+            padding: 20px 30px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            border-bottom: 3px solid transparent;
+        }
+        .permission-tab:hover {
+            color: var(--text);
+            background: var(--surface-light);
+        }
+        .permission-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: var(--surface);
+        }
+        .permission-content {
+            padding: 30px;
+        }
+        .command-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .command-icon {
+            font-size: 3rem;
+            margin-right: 25px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .command-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 5px;
+        }
+        .command-desc {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            max-width: 600px;
+        }
+        .roles-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 30px;
+            padding-right: 10px;
+        }
+        .role-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: var(--surface-light);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .role-item:hover {
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .role-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        .role-name {
+            flex: 1;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .role-members {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-right: 20px;
+        }
+        .role-checkbox {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            border: 2px solid var(--border);
+            background: var(--surface-dark);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        .role-checkbox.checked {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+        .role-checkbox.checked::after {
+            content: '✓';
+            color: white;
+            font-weight: bold;
+        }
+        .save-section {
+            background: var(--surface-dark);
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .save-info {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+        .save-info strong {
+            color: var(--text);
+        }
+        .btn-save {
+            background: linear-gradient(135deg, var(--success) 0%, #4ad175 100%);
+            color: white;
+            padding: 15px 35px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-save:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(87, 242, 135, 0.3);
+        }
+        .btn-save:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .success-message {
+            background: linear-gradient(135deg, var(--success) 0%, rgba(87, 242, 135, 0.1) 100%);
+            border: 1px solid var(--success);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .back-btn {
+            background: linear-gradient(135deg, var(--surface-light) 0%, var(--surface) 100%);
+            color: var(--text);
+            padding: 12px 25px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
+        }
+        .back-btn:hover {
+            border-color: var(--primary);
+            transform: translateX(-5px);
+        }
+        @media (max-width: 1024px) {
+            .guild-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .guild-icon, .guild-icon-placeholder {
+                margin-right: 0;
+                margin-bottom: 20px;
+            }
+            .guild-stats {
+                justify-content: center;
+            }
+        }
+        @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 80px 20px 30px;
+            }
+            .permission-tabs {
+                flex-wrap: wrap;
+            }
+            .permission-tab {
+                flex: 1;
+                min-width: 150px;
+                text-align: center;
+            }
+            .guild-name {
+                font-size: 2rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .guild-stats {
+                flex-direction: column;
+                gap: 15px;
+            }
+            .save-section {
+                flex-direction: column;
+                gap: 20px;
+                text-align: center;
+            }
+            .permission-content {
+                padding: 20px;
+            }
+            .command-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .command-icon {
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+    
+    <div class="sidebar" id="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold; font-size: 1.1rem;">${user.global_name || user.username}</div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
+                <div style="color: var(--success); font-size: 0.8rem; margin-top: 5px; font-weight: 600;">✅ Администратор</div>
+            </div>
+        </div>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Навигация</div>
+        
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/permissions" class="nav-item">
+            <span class="nav-icon">🔐</span>
+            Управление правами
+        </a>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
+        
+        <a href="/permissions" class="nav-item active">
+            <span class="nav-icon">🏰</span>
+            Все серверы
+        </a>
+
+        <a href="/auth/logout" class="logout-btn">
+            <span class="nav-icon">🚪</span>
+            Выйти
+        </a>
+    </div>
+
+    <div class="main-content">
+        <a href="/permissions" class="back-btn">
+            <span class="nav-icon">⬅️</span>
+            Назад к списку серверов
+        </a>
+        
+        <div class="guild-header">
+            ${guild.icon ? 
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="guild-icon">` :
+                `<div class="guild-icon-placeholder">🏰</div>`
+            }
+            <div class="guild-info">
+                <h1 class="guild-name">${guild.name}</h1>
+                <p style="color: var(--text-secondary); font-size: 1.1rem;">Управление правами доступа к командам</p>
+                
+                <div class="guild-stats">
+                    <div class="guild-stat">
+                        <span class="stat-value">${roles.length}</span>
+                        <span class="stat-label">Ролей</span>
+                    </div>
+                    <div class="guild-stat">
+                        <span class="stat-value">${availableCommands.length}</span>
+                        <span class="stat-label">Команд</span>
+                    </div>
+                    <div class="guild-stat">
+                        <span class="stat-value">${guild.approximate_member_count || 'N/A'}</span>
+                        <span class="stat-label">Участников</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="permissions-container">
+            <div class="permission-tabs" id="permissionTabs">
+                ${availableCommands.map((cmd, index) => `
+                    <button class="permission-tab ${index === 0 ? 'active' : ''}" data-command="${cmd.id}">
+                        ${cmd.icon} ${cmd.name}
+                    </button>
+                `).join('')}
+            </div>
+
+            <div class="permission-content">
+                ${availableCommands.map((cmd, index) => `
+                    <div class="command-content" id="content-${cmd.id}" style="display: ${index === 0 ? 'block' : 'none'};">
+                        <div class="command-header">
+                            <div class="command-icon">${cmd.icon}</div>
+                            <div>
+                                <div class="command-title">${cmd.name}</div>
+                                <div class="command-desc">${cmd.description}</div>
+                            </div>
+                        </div>
+
+                        <div style="color: var(--text-secondary); margin-bottom: 25px; padding: 15px; background: var(--surface-dark); border-radius: 10px;">
+                            💡 Выберите роли, которым будет разрешено использовать команду <strong>${cmd.name}</strong>. Если ни одна роль не выбрана, команду смогут использовать только администраторы сервера.
+                        </div>
+
+                        <div class="roles-list">
+                            ${roles.filter(role => role.name !== '@everyone').map(role => {
+                                const isChecked = permissions[cmd.id] && permissions[cmd.id].includes(role.id);
+                                return `
+                                    <div class="role-item" data-role-id="${role.id}">
+                                        <div class="role-color" style="background-color: #${role.color.toString(16).padStart(6, '0') || '5865F2'};"></div>
+                                        <div class="role-name">${role.name}</div>
+                                        <div class="role-members">${role.members || '?'} участников</div>
+                                        <div class="role-checkbox ${isChecked ? 'checked' : ''}" onclick="toggleRole('${cmd.id}', '${role.id}')"></div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <div class="save-section">
+                            <div class="save-info">
+                                Выбрано: <strong id="selected-count-${cmd.id}">${permissions[cmd.id] ? permissions[cmd.id].length : 0}</strong> из ${roles.filter(role => role.name !== '@everyone').length} ролей
+                            </div>
+                            <button class="btn-save" onclick="savePermissions('${cmd.id}')" id="save-btn-${cmd.id}">
+                                <span class="nav-icon">💾</span>
+                                Сохранить изменения
+                            </button>
+                        </div>
+
+                        <div id="message-${cmd.id}" style="display: none;"></div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+        }
+
+        // Переключение между командами
+        document.querySelectorAll('.permission-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Обновляем активную вкладку
+                document.querySelectorAll('.permission-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Показываем соответствующий контент
+                const commandId = tab.dataset.command;
+                document.querySelectorAll('.command-content').forEach(content => {
+                    content.style.display = 'none';
+                });
+                document.getElementById('content-' + commandId).style.display = 'block';
+            });
+        });
+
+        // Хранилище выбранных ролей
+        const selectedRoles = {
+            ${availableCommands.map(cmd => `'${cmd.id}': ${JSON.stringify(permissions[cmd.id] || [])}`).join(',\n            ')}
+        };
+
+        function toggleRole(commandId, roleId) {
+            const checkbox = document.querySelector(\`.role-item[data-role-id="\${roleId}"] .role-checkbox\`);
+            const roleIndex = selectedRoles[commandId].indexOf(roleId);
+            
+            if (roleIndex === -1) {
+                selectedRoles[commandId].push(roleId);
+                checkbox.classList.add('checked');
+            } else {
+                selectedRoles[commandId].splice(roleIndex, 1);
+                checkbox.classList.remove('checked');
+            }
+            
+            // Обновляем счетчик
+            updateSelectedCount(commandId);
+        }
+
+        function updateSelectedCount(commandId) {
+            const countElement = document.getElementById('selected-count-' + commandId);
+            countElement.textContent = selectedRoles[commandId].length;
+        }
+
+        async function savePermissions(commandId) {
+            const saveBtn = document.getElementById('save-btn-' + commandId);
+            const messageDiv = document.getElementById('message-' + commandId);
+            
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<div class="loading-spinner"></div> Сохранение...';
+            
+            try {
+                const response = await fetch('/api/permissions/${guild.id}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        commandName: commandId,
+                        roleIds: selectedRoles[commandId]
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageDiv.style.display = 'block';
+                    messageDiv.className = 'success-message';
+                    messageDiv.innerHTML = \`
+                        <span class="nav-icon">✅</span>
+                        <div>
+                            <strong>Настройки сохранены!</strong><br>
+                            Команда \${getCommandName(commandId)} теперь доступна для \${data.permissions.length} ролей.
+                        </div>
+                    \`;
+                    
+                    // Автоматически скрываем сообщение через 5 секунд
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 5000);
+                } else {
+                    throw new Error(data.error || 'Ошибка сохранения');
+                }
+            } catch (error) {
+                messageDiv.style.display = 'block';
+                messageDiv.className = 'success-message';
+                messageDiv.style.background = 'linear-gradient(135deg, var(--danger) 0%, rgba(237, 66, 69, 0.1) 100%)';
+                messageDiv.style.borderColor = 'var(--danger)';
+                messageDiv.innerHTML = \`
+                    <span class="nav-icon">❌</span>
+                    <div>
+                        <strong>Ошибка сохранения:</strong><br>
+                        \${error.message}
+                    </div>
+                \`;
+                
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<span class="nav-icon">💾</span> Сохранить изменения';
+            }
+        }
+
+        function getCommandName(commandId) {
+            const commands = {
+                'region': '/регион',
+                'transcript': '/transcript',
+                'ticket': '/ticket'
+            };
+            return commands[commandId] || commandId;
+        }
+
+        // Инициализация счетчиков
+        ${availableCommands.map(cmd => `updateSelectedCount('${cmd.id}');`).join('\n        ')}
+    </script>
+</body>
+</html>`;
+}
+
+function createErrorPage(title, message) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ошибка - Haki Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #1a1a1a 0%, #2b2b2b 100%); 
+            color: #ffffff; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .error-container {
+            background: rgba(43, 43, 43, 0.9);
+            padding: 50px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(237, 66, 69, 0.3);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        .error-icon {
+            font-size: 5rem;
+            margin-bottom: 30px;
+            color: #ED4245;
+        }
+        .error-title {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .error-message {
+            color: #b9bbbe;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+        .back-btn {
+            background: linear-gradient(135deg, #5865F2 0%, #4752C4 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+        .back-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.4);
+        }
+        @media (max-width: 768px) {
+            .error-container {
+                padding: 30px 20px;
+            }
+            .error-icon {
+                font-size: 4rem;
+            }
+            .error-title {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">🚫</div>
+        <h1 class="error-title">${title}</h1>
+        <p class="error-message">${message}</p>
+        <a href="/" class="back-btn">
+            <span>🏠</span>
+            Вернуться на главную
+        </a>
+    </div>
+</body>
+</html>`;
+}
 // ==================== СИСТЕМА НАСТРОЕК ТРАНСКРИПТОВ ====================
 
 // Хранилище настроек для каждого сервера
