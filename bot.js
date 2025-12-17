@@ -66,6 +66,8 @@ const transcriptsStorage = new Map();
 const translationMessages = new Map();
 const translationCooldown = new Set();
 const TRANSLATION_COOLDOWN_TIME = 30000;
+const commandPermissions = new Map();
+
 
 // ==================== НАСТРОЙКИ СЛЕШ-КОМАНД ====================
 
@@ -644,7 +646,6 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Транскрипты - Панель управления</title>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
                 background: linear-gradient(135deg, #1a1a1a 0%, #2b2b2b 100%); 
@@ -679,26 +680,6 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
                 border-color: #5865F2;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             }
-            .transcript-info {
-                margin-bottom: 15px;
-            }
-            .transcript-info h3 {
-                color: #fff;
-                margin-bottom: 10px;
-                font-size: 1.2rem;
-            }
-            .transcript-meta {
-                color: #b9bbbe;
-                font-size: 0.9rem;
-                display: flex;
-                flex-direction: column;
-                gap: 5px;
-            }
-            .transcript-actions {
-                display: flex;
-                gap: 10px;
-                margin-top: 15px;
-            }
             .btn {
                 padding: 8px 15px;
                 border-radius: 6px;
@@ -706,8 +687,8 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
                 font-weight: 600;
                 font-size: 0.9rem;
                 transition: all 0.3s ease;
-                flex: 1;
-                text-align: center;
+                display: inline-block;
+                margin: 5px;
             }
             .btn-view {
                 background: #5865F2;
@@ -716,35 +697,6 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
             .btn-view:hover {
                 background: #4752C4;
                 transform: translateY(-2px);
-            }
-            .btn-api {
-                background: #57F287;
-                color: #1a1a1a;
-            }
-            .btn-api:hover {
-                background: #4ad175;
-                transform: translateY(-2px);
-            }
-            .stats {
-                display: flex;
-                justify-content: space-between;
-                background: rgba(64, 68, 75, 0.3);
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-            }
-            .stat-item {
-                text-align: center;
-            }
-            .stat-value {
-                font-size: 2rem;
-                font-weight: bold;
-                color: #5865F2;
-            }
-            .stat-label {
-                color: #b9bbbe;
-                font-size: 0.9rem;
-                margin-top: 5px;
             }
             .back-link {
                 display: inline-block;
@@ -769,34 +721,16 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
                 <p>Все созданные транскрипты доступны для просмотра</p>
             </div>
             
-            <div class="stats">
-                <div class="stat-item">
-                    <div class="stat-value">${transcriptsStorage.size}</div>
-                    <div class="stat-label">Всего транскриптов</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value">${user.username}</div>
-                    <div class="stat-label">Текущий пользователь</div>
-                </div>
-            </div>
-            
             <div class="transcripts-grid">
                 ${transcriptsList.length > 0 ? 
                     transcriptsList.map(transcript => `
                         <div class="transcript-card">
-                            <div class="transcript-info">
-                                <h3>${transcript.channel}</h3>
-                                <div class="transcript-meta">
-                                    <span>🏠 Сервер: ${transcript.server}</span>
-                                    <span>📅 Создан: ${transcript.created}</span>
-                                    <span>💬 Сообщений: ${transcript.messages}</span>
-                                    <span>👥 Участников: ${transcript.participants}</span>
-                                </div>
-                            </div>
-                            <div class="transcript-actions">
-                                <a href="${transcript.url}" target="_blank" class="btn btn-view">📄 Просмотреть</a>
-                                <a href="/api/transcript/${transcript.id}" target="_blank" class="btn btn-api">🔧 API данные</a>
-                            </div>
+                            <h3>${transcript.channel}</h3>
+                            <p>🏠 Сервер: ${transcript.server}</p>
+                            <p>📅 Создан: ${transcript.created}</p>
+                            <p>💬 Сообщений: ${transcript.messages}</p>
+                            <p>👥 Участников: ${transcript.participants}</p>
+                            <a href="${transcript.url}" target="_blank" class="btn btn-view">📄 Просмотреть транскрипт</a>
                         </div>
                     `).join('') : 
                     '<div style="text-align: center; color: #b9bbbe; padding: 40px; grid-column: 1 / -1;">Нет созданных транскриптов</div>'
