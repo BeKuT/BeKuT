@@ -3039,7 +3039,7 @@ if (message.content.startsWith('-translation')) {
 */
 // ==================== ОБРАБОТКА СЛЕШ-КОМАНД ====================
 
-
+client.on('interactionCreate', async (interaction) => {
     // Обработка слеш-команд
     if (interaction.isChatInputCommand()) {
         const { commandName, options, user, member, guild } = interaction;
@@ -3817,7 +3817,6 @@ if (message.content.startsWith('-translation')) {
         }
     }
 });
-
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
 // Проверенные рабочие радиостанции
