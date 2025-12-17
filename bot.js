@@ -390,119 +390,341 @@ function savePermissions() {
     console.log('💾 Permissions saved to memory');
     return permissionsObj;
 }
-// ==================== АВТОРИЗАЦИЯ DISCORD ====================
+// ==================== СТРАНИЦЫ ====================
 
-app.get('/auth/discord', (req, res) => {
-    const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
-    // ДОБАВЬТЕ 'guilds' в scope
-    const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds`;
-    res.redirect(authUrl);
-});
-// Callback от Discord
-app.get('/auth/discord/callback', async (req, res) => {
-    try {
-        const { code, error, error_description } = req.query;
-        
-        if (error) {
-            console.error('❌ Discord OAuth error:', error, error_description);
-            return res.redirect('/?error=discord_oauth_failed');
-        }
-
-        if (!code) {
-            console.error('❌ No code provided in callback');
-            return res.redirect('/?error=no_code');
-        }
-
-        const redirectUri = `${getBaseUrl()}/auth/discord/callback`;
-
-        // Получаем access token
-        const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
-            new URLSearchParams({
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET,
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: redirectUri
-            }), {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                timeout: 10000
-            }
-        );
-
-        const { access_token } = tokenResponse.data;
-
-        // Получаем данные пользователя
-        const userResponse = await axios.get('https://discord.com/api/users/@me', {
-            headers: {
-                Authorization: `Bearer ${access_token}`
-            },
-            timeout: 10000
-        });
-
-        // Получаем сервера пользователя
-        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
-            headers: {
-                Authorization: `Bearer ${access_token}`
-            },
-            timeout: 10000
-        });
-
-        req.session.user = userResponse.data;
-        req.session.guilds = guildsResponse.data;
-        req.session.accessToken = access_token;
-        req.session.isAuthenticated = true;
-
-        console.log('✅ Authentication successful for user:', userResponse.data.username);
-        res.redirect('/');
-        
-    } catch (error) {
-        console.error('❌ Auth callback error:', error.message);
-        res.redirect('/?error=auth_failed&details=' + encodeURIComponent(error.message));
-    }
-});
-
-// Выход
-app.get('/auth/logout', (req, res) => {
-    req.session.destroy();
-    res.redirect('/');
-});
-
-// Middleware проверки авторизации
-function requireAuth(req, res, next) {
-    if (!req.session.isAuthenticated) {
-        return res.redirect('/auth/discord');
-    }
-    next();
-}
-
-// Middleware проверки прав администратора
-function requireAdmin(req, res, next) {
-    if (!req.session.isAuthenticated) {
-        return res.redirect('/auth/discord');
-    }
+app.get('/', (req, res) => {
+    const baseUrl = getBaseUrl();
     
-    const userGuilds = req.session.guilds || [];
-    const adminGuilds = userGuilds.filter(guild => 
+    if (!req.session.isAuthenticated) {
+        return res.send(createUnauthorizedPage(baseUrl));
+    }
+
+    const user = req.session.user;
+    const guilds = req.session.guilds || [];
+    
+    // Фильтруем только те сервера, где пользователь администратор
+    const adminGuilds = guilds.filter(guild => 
         (guild.permissions & 0x8) === 0x8 // ADMINISTRATOR permission
     );
+
+    res.send(createDashboardPage(user, adminGuilds, baseUrl));
+});
+
+app.get('/permissions', requireAdmin, (req, res) => {
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    const userGuilds = req.session.guilds || [];
     
-    if (adminGuilds.length === 0) {
-        return res.status(403).send(createErrorPage('Доступ запрещен', 'Требуются права администратора Discord сервера'));
+    const adminGuilds = userGuilds.filter(guild => 
+        (guild.permissions & 0x8) === 0x8
+    );
+
+    res.send(createPermissionsPage(user, adminGuilds, baseUrl));
+});
+
+app.get('/permissions/:guildId', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    try {
+        // 1. Проверяем, что пользователь состоит в этом сервере и является админом
+        const userGuilds = req.session.guilds || [];
+        const userGuild = userGuilds.find(g => g.id === guildId);
+        
+        if (!userGuild) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Вы не являетесь участником этого сервера.'
+            ));
+        }
+        
+        if ((userGuild.permissions & 0x8) !== 0x8) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Требуются права администратора сервера.'
+            ));
+        }
+        
+        console.log(`🔍 Loading permissions page for guild: ${guildId}, user: ${user.username}`);
+        
+        // 2. Получаем информацию о сервере из данных сессии (уже получены при OAuth)
+        const guild = {
+            id: guildId,
+            name: userGuild.name || `Сервер (${guildId})`,
+            icon: userGuild.icon ? 
+                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
+                null,
+            approximate_member_count: userGuild.approximate_member_count || 0
+        };
+        
+        // 3. Получаем роли через Discord.js бота (если бот на сервере)
+        let roles = [];
+        let botInGuild = false;
+        
+        try {
+            // Проверяем, есть ли бот на сервере через Discord.js
+            const discordGuild = client.guilds.cache.get(guildId);
+            
+            if (discordGuild) {
+                botInGuild = true;
+                console.log(`✅ Бот найден на сервере: ${discordGuild.name}`);
+                
+                // Получаем роли с сервера
+                const guildRoles = discordGuild.roles.cache
+                    .filter(role => role.name !== '@everyone')
+                    .map(role => ({
+                        id: role.id,
+                        name: role.name,
+                        color: role.color,
+                        members: role.members?.size || 0,
+                        position: role.position
+                    }))
+                    .sort((a, b) => b.position - a.position);
+                
+                roles = guildRoles;
+                console.log(`✅ Получено ${roles.length} ролей с сервера`);
+                
+                // Обновляем количество участников
+                guild.approximate_member_count = discordGuild.memberCount;
+            } else {
+                console.log(`⚠️ Бот не найден на сервере ${guildId}`);
+                
+                // Если бота нет на сервере, показываем предупреждение и mock роли
+                const mockRoles = [
+                    { id: 'admin-role', name: 'Администраторы', color: 15158332, members: 0, position: 100 },
+                    { id: 'mod-role', name: 'Модераторы', color: 3066993, members: 0, position: 90 },
+                    { id: 'member-role', name: 'Участники', color: 3447003, members: 0, position: 1 }
+                ];
+                
+                roles = mockRoles;
+            }
+        } catch (botError) {
+            console.error('❌ Ошибка при получении данных через бота:', botError.message);
+            
+            // Fallback: mock роли
+            const mockRoles = [
+                { id: 'role1', name: 'Администраторы', color: 15158332, members: 0, position: 100 },
+                { id: 'role2', name: 'Модераторы', color: 3066993, members: 0, position: 90 },
+                { id: 'role3', name: 'Пользователи', color: 3447003, members: 0, position: 1 }
+            ];
+            
+            roles = mockRoles;
+        }
+        
+        // 4. Получаем текущие разрешения из памяти
+        const permissions = getGuildPermissions(guildId);
+        
+        // 5. Добавляем информацию о боте в данные
+        guild.botInGuild = botInGuild;
+        
+        // 6. Отправляем страницу
+        res.send(createGuildPermissionsPage(user, guild, roles, permissions, baseUrl));
+        
+    } catch (error) {
+        console.error('❌ Critical error in permissions route:', error);
+        
+        res.status(500).send(createErrorPage(
+            'Внутренняя ошибка',
+            'Произошла непредвиденная ошибка при загрузке страницы настроек.'
+        ));
+    }
+});
+
+// API для сохранения разрешений
+app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
+    const guildId = req.params.guildId;
+    const { commandName, roleIds } = req.body;
+    
+    if (!commandName || !Array.isArray(roleIds)) {
+        return res.status(400).json({ error: 'Неверные данные' });
     }
     
-    next();
-}
+    const permissions = getGuildPermissions(guildId);
+    permissions[commandName] = roleIds;
+    
+    // Сохраняем в памяти
+    commandPermissions.set(guildId, permissions);
+    
+    // Можно сохранить в переменную окружения или БД
+    const savedPerms = savePermissions();
+    
+    res.json({ 
+        success: true, 
+        message: 'Разрешения сохранены',
+        permissions: permissions[commandName]
+    });
+});
 
-function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
-    const availableCommands = [
-        { id: 'region', name: '/регион', icon: '🌍', description: 'Управление регионами голосовых серверов' },
-        { id: 'transcript', name: '/transcript', icon: '📄', description: 'Создание транскриптов бесед' },
-        { id: 'ticket', name: '/ticket', icon: '🎫', description: 'Настройка системы тикетов' }
-    ];
+// API для получения текущих разрешений
+app.get('/api/permissions/:guildId', requireAdmin, (req, res) => {
+    const guildId = req.params.guildId;
+    const permissions = getGuildPermissions(guildId);
+    res.json({ permissions });
+});
 
-    return `
+// ==================== API МАРШРУТЫ ====================
+
+// Просмотр транскрипта по ID
+app.get('/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcriptData = transcriptsStorage.get(transcriptId);
+    
+    if (!transcriptData) {
+        return res.status(404).send(createErrorPage(
+            'Транскрипт не найден',
+            `Транскрипт с ID "${transcriptId}" не существует или был удален.`
+        ));
+    }
+    
+    // Отправляем HTML транскрипта
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(transcriptData.html);
+});
+
+// API для получения данных транскрипта
+app.get('/api/transcript/:id', (req, res) => {
+    const transcriptId = req.params.id;
+    const transcriptData = transcriptsStorage.get(transcriptId);
+    
+    if (!transcriptData) {
+        return res.status(404).json({ 
+            error: 'Transcript not found',
+            message: `Transcript with ID "${transcriptId}" does not exist`
+        });
+    }
+    
+    res.json({
+        id: transcriptId,
+        data: transcriptData,
+        permanentStorage: true,
+        accessedAt: new Date().toISOString()
+    });
+});
+
+// Список всех транскриптов (админ)
+app.get('/admin/transcripts', requireAuth, (req, res) => {
+    const user = req.session.user;
+    
+    const transcriptsList = Array.from(transcriptsStorage.entries()).map(([id, data]) => ({
+        id,
+        server: data.ticketInfo?.server || 'Unknown',
+        channel: data.ticketInfo?.channelName || 'Unknown',
+        created: new Date(data.createdAt).toLocaleString('ru-RU'),
+        messages: data.ticketInfo?.messageCount || 0,
+        participants: data.ticketInfo?.participantsCount || 0,
+        url: `${getBaseUrl()}/transcript/${id}`
+    }));
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Транскрипты - Панель управления</title>
+        <style>
+            body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                background: linear-gradient(135deg, #1a1a1a 0%, #2b2b2b 100%); 
+                color: #ffffff; 
+                padding: 20px;
+                min-height: 100vh;
+            }
+            .container { max-width: 1200px; margin: 0 auto; }
+            .header { text-align: center; margin-bottom: 40px; padding: 30px; }
+            .header h1 { 
+                font-size: 2.5rem; 
+                margin-bottom: 10px; 
+                background: linear-gradient(135deg, #5865F2, #57F287);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .transcripts-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 20px;
+                margin-top: 30px;
+            }
+            .transcript-card {
+                background: rgba(43, 43, 43, 0.9);
+                padding: 20px;
+                border-radius: 12px;
+                border: 1px solid #40444b;
+                transition: all 0.3s ease;
+            }
+            .transcript-card:hover {
+                transform: translateY(-5px);
+                border-color: #5865F2;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            }
+            .btn {
+                padding: 8px 15px;
+                border-radius: 6px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 0.9rem;
+                transition: all 0.3s ease;
+                display: inline-block;
+                margin: 5px;
+            }
+            .btn-view {
+                background: #5865F2;
+                color: white;
+            }
+            .btn-view:hover {
+                background: #4752C4;
+                transform: translateY(-2px);
+            }
+            .back-link {
+                display: inline-block;
+                color: #5865F2;
+                text-decoration: none;
+                margin-bottom: 20px;
+                padding: 10px 15px;
+                background: rgba(88, 101, 242, 0.1);
+                border-radius: 6px;
+            }
+            .back-link:hover {
+                background: rgba(88, 101, 242, 0.2);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <a href="/" class="back-link">← Назад к панели управления</a>
+            
+            <div class="header">
+                <h1>📄 Управление транскриптами</h1>
+                <p>Все созданные транскрипты доступны для просмотра</p>
+            </div>
+            
+            <div class="transcripts-grid">
+                ${transcriptsList.length > 0 ? 
+                    transcriptsList.map(transcript => `
+                        <div class="transcript-card">
+                            <h3>${transcript.channel}</h3>
+                            <p>🏠 Сервер: ${transcript.server}</p>
+                            <p>📅 Создан: ${transcript.created}</p>
+                            <p>💬 Сообщений: ${transcript.messages}</p>
+                            <p>👥 Участников: ${transcript.participants}</p>
+                            <a href="${transcript.url}" target="_blank" class="btn btn-view">📄 Просмотреть транскрипт</a>
+                        </div>
+                    `).join('') : 
+                    '<div style="text-align: center; color: #b9bbbe; padding: 40px; grid-column: 1 / -1;">Нет созданных транскриптов</div>'
+                }
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+    
+    res.send(html);
+});
+
+// ==================== HTML ШАБЛОНЫ ====================
+
+  return `
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -681,37 +903,6 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
             font-size: 0.9rem;
             text-transform: uppercase;
             letter-spacing: 1px;
-        }
-        .bot-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            margin-top: 10px;
-        }
-        .bot-status.online {
-            background: rgba(87, 242, 135, 0.1);
-            color: var(--success);
-            border: 1px solid var(--success);
-        }
-        .bot-status.offline {
-            background: rgba(237, 66, 69, 0.1);
-            color: var(--danger);
-            border: 1px solid var(--danger);
-        }
-        .bot-warning {
-            background: linear-gradient(135deg, rgba(254, 231, 92, 0.1) 0%, rgba(254, 231, 92, 0.05) 100%);
-            border: 1px solid var(--warning);
-            color: var(--warning);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
         .permissions-container {
             background: var(--surface);
@@ -1027,7 +1218,7 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
         
         <div class="guild-header">
             ${guild.icon ? 
-                `<img src="${guild.icon}" alt="${guild.name}" class="guild-icon">` :
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="guild-icon">` :
                 `<div class="guild-icon-placeholder">🏰</div>`
             }
             <div class="guild-info">
@@ -1036,43 +1227,20 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
                 
                 <div class="guild-stats">
                     <div class="guild-stat">
-                        <span class="stat-value">${guild.approximate_member_count || '?'}</span>
-                        <span class="stat-label">Участников</span>
-                    </div>
-                    <div class="guild-stat">
                         <span class="stat-value">${roles.length}</span>
                         <span class="stat-label">Ролей</span>
                     </div>
                     <div class="guild-stat">
-                        <span class="stat-value">3</span>
+                        <span class="stat-value">${availableCommands.length}</span>
                         <span class="stat-label">Команд</span>
                     </div>
+                    <div class="guild-stat">
+                        <span class="stat-value">${guild.approximate_member_count || 'N/A'}</span>
+                        <span class="stat-label">Участников</span>
+                    </div>
                 </div>
-                
-                ${guild.botInGuild === false ? `
-                    <div class="bot-status offline">
-                        <span>⚠️</span>
-                        Бот не найден на сервере
-                    </div>
-                ` : `
-                    <div class="bot-status online">
-                        <span>✅</span>
-                        Бот активен на сервере
-                    </div>
-                `}
             </div>
         </div>
-
-        ${guild.botInGuild === false ? `
-            <div class="bot-warning">
-                <span>⚠️</span>
-                <div>
-                    <strong>Внимание:</strong> Бот не найден на этом сервере. 
-                    Для управления правами команд необходимо добавить бота на сервер.
-                    <br><small>После добавления бота обновите страницу.</small>
-                </div>
-            </div>
-        ` : ''}
 
         <div class="permissions-container">
             <div class="permission-tabs" id="permissionTabs">
@@ -1095,48 +1263,32 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
                         </div>
 
                         <div style="color: var(--text-secondary); margin-bottom: 25px; padding: 15px; background: var(--surface-dark); border-radius: 10px;">
-                            💡 Выберите роли, которым будет разрешено использовать команду <strong>${cmd.name}</strong>. 
-                            ${guild.botInGuild === false ? 'Для сохранения настроек необходимо добавить бота на сервер.' : 'Если ни одна роль не выбрана, команду смогут использовать только администраторы сервера.'}
+                            💡 Выберите роли, которым будет разрешено использовать команду <strong>${cmd.name}</strong>. Если ни одна роль не выбрана, команду смогут использовать только администраторы сервера.
                         </div>
 
-                        ${guild.botInGuild === false ? `
-                            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                                <div style="font-size: 3rem; margin-bottom: 20px;">🤖</div>
-                                <h3 style="color: var(--text); margin-bottom: 10px;">Бот не добавлен на сервер</h3>
-                                <p>Добавьте бота на сервер "${guild.name}" для управления правами команд.</p>
-                                <a href="https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8" 
-                                   target="_blank" 
-                                   style="display: inline-block; margin-top: 20px; padding: 12px 24px; background: var(--primary); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
-                                    Добавить бота на сервер
-                                </a>
-                            </div>
-                        ` : `
-                            <div class="roles-list">
-                                ${roles.length > 0 ? roles.map(role => {
-                                    const isChecked = permissions[cmd.id] && permissions[cmd.id].includes(role.id);
-                                    return `
-                                        <div class="role-item" data-role-id="${role.id}">
-                                            <div class="role-color" style="background-color: #${role.color.toString(16).padStart(6, '0') || '5865F2'};"></div>
-                                            <div class="role-name">${role.name}</div>
-                                            <div class="role-members">${role.members || '?'} участников</div>
-                                            <div class="role-checkbox ${isChecked ? 'checked' : ''}" onclick="toggleRole('${cmd.id}', '${role.id}')"></div>
-                                        </div>
-                                    `;
-                                }).join('') : 
-                                '<div style="text-align: center; padding: 30px; color: var(--text-secondary);">Роли не найдены</div>'
-                                }
-                            </div>
+                        <div class="roles-list">
+                            ${roles.filter(role => role.name !== '@everyone').map(role => {
+                                const isChecked = permissions[cmd.id] && permissions[cmd.id].includes(role.id);
+                                return `
+                                    <div class="role-item" data-role-id="${role.id}">
+                                        <div class="role-color" style="background-color: #${role.color.toString(16).padStart(6, '0') || '5865F2'};"></div>
+                                        <div class="role-name">${role.name}</div>
+                                        <div class="role-members">${role.members || '?'} участников</div>
+                                        <div class="role-checkbox ${isChecked ? 'checked' : ''}" onclick="toggleRole('${cmd.id}', '${role.id}')"></div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
 
-                            <div class="save-section">
-                                <div class="save-info">
-                                    Выбрано: <strong id="selected-count-${cmd.id}">${permissions[cmd.id] ? permissions[cmd.id].length : 0}</strong> из ${roles.length} ролей
-                                </div>
-                                <button class="btn-save" onclick="savePermissions('${cmd.id}')" id="save-btn-${cmd.id}">
-                                    <span class="nav-icon">💾</span>
-                                    Сохранить изменения
-                                </button>
+                        <div class="save-section">
+                            <div class="save-info">
+                                Выбрано: <strong id="selected-count-${cmd.id}">${permissions[cmd.id] ? permissions[cmd.id].length : 0}</strong> из ${roles.filter(role => role.name !== '@everyone').length} ролей
                             </div>
-                        `}
+                            <button class="btn-save" onclick="savePermissions('${cmd.id}')" id="save-btn-${cmd.id}">
+                                <span class="nav-icon">💾</span>
+                                Сохранить изменения
+                            </button>
+                        </div>
 
                         <div id="message-${cmd.id}" style="display: none;"></div>
                     </div>
