@@ -616,6 +616,8 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
         url: `${getBaseUrl()}/transcript/${id}`
     }));
 
+  
+function createUnauthorizedPage(baseUrl) {
     const html = `
     <!DOCTYPE html>
     <html lang="ru">
