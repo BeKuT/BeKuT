@@ -326,8 +326,11 @@ async function registerSlashCommands() {
 // ==================== ФУНКЦИИ ====================
 
 function getBaseUrl() {
-    // ЖЕСТКО ЗАДАЕМ ДОМЕН (временное решение)
-    return 'https://panel-haki.up.railway.app';
+    // Используйте RAILWAY_STATIC_URL если он установлен, иначе localhost для разработки
+    if (process.env.NODE_ENV === 'production') {
+        return process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PROJECT_NAME}.up.railway.app`;
+    }
+    return `http://localhost:${PORT}`;
 }
 // Функция для получения разрешений сервера
 function getGuildPermissions(guildId) {
@@ -415,21 +418,31 @@ app.get('/auth/discord', (req, res) => {
     
     console.log(`🔗 OAuth2 Redirect URI: ${redirectUri}`);
     console.log(`📱 Client ID: ${CLIENT_ID ? '✅ Set' : '❌ Missing'}`);
+    console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
+    
+    // Проверка обязательных переменных
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+        console.error('❌ Discord OAuth2 credentials missing!');
+        return res.send(createErrorPage(
+            'Ошибка конфигурации',
+            'Discord OAuth2 не настроен. Проверьте переменные окружения.'
+        ));
+    }
     
     const params = new URLSearchParams({
         client_id: CLIENT_ID,
         redirect_uri: redirectUri,
         response_type: 'code',
         scope: 'identify guilds',
-        state: state
+        state: state,
+        prompt: 'consent'
     });
     
     const oauthUrl = `https://discord.com/oauth2/authorize?${params}`;
-    console.log(`🌐 Full OAuth2 URL: ${oauthUrl}`);
+    console.log(`🌐 Redirecting to OAuth2 URL`);
     
     res.redirect(oauthUrl);
 });
-
 // Callback от Discord
 app.get('/auth/callback', async (req, res) => {
     const { code, state } = req.query;
@@ -466,6 +479,24 @@ app.get('/auth/callback', async (req, res) => {
                 timeout: 10000 // Добавляем timeout
             }
         );
+
+      // Маршрут для выхода
+app.get('/auth/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('Session destroy error:', err);
+        }
+        res.redirect('/');
+    });
+});
+
+// Маршрут для ошибки авторизации
+app.get('/auth/error', (req, res) => {
+    res.send(createErrorPage(
+        'Ошибка авторизации',
+        'Не удалось выполнить вход через Discord. Проверьте настройки OAuth2.'
+    ));
+});
         
         console.log('✅ Token received successfully');
         
