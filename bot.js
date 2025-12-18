@@ -100,6 +100,158 @@ const slashCommands = [
             }
         ]
     },
+  {
+    name: 'ban',
+    description: 'Забанить пользователя',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь для бана',
+            type: 6, // USER
+            required: true
+        },
+        {
+            name: 'причина',
+            description: 'Причина бана',
+            type: 3, // STRING
+            required: false
+        },
+        {
+            name: 'дней',
+            description: 'Удалить сообщения за последние дни',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 0,
+            max_value: 7
+        }
+    ]
+},
+{
+    name: 'kick',
+    description: 'Кикнуть пользователя',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь для кика',
+            type: 6, // USER
+            required: true
+        },
+        {
+            name: 'причина',
+            description: 'Причина кика',
+            type: 3, // STRING
+            required: false
+        }
+    ]
+},
+{
+    name: 'mute',
+    description: 'Заглушить пользователя',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь для мута',
+            type: 6, // USER
+            required: true
+        },
+        {
+            name: 'время',
+            description: 'Время мута (1m, 1h, 1d)',
+            type: 3, // STRING
+            required: true
+        },
+        {
+            name: 'причина',
+            description: 'Причина мута',
+            type: 3, // STRING
+            required: false
+        }
+    ]
+},
+{
+    name: 'unmute',
+    description: 'Снять мут с пользователя',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь для размута',
+            type: 6, // USER
+            required: true
+        },
+        {
+            name: 'причина',
+            description: 'Причина размута',
+            type: 3, // STRING
+            required: false
+        }
+    ]
+},
+{
+    name: 'warn',
+    description: 'Выдать предупреждение',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь для предупреждения',
+            type: 6, // USER
+            required: true
+        },
+        {
+            name: 'причина',
+            description: 'Причина предупреждения',
+            type: 3, // STRING
+            required: true
+        }
+    ]
+},
+{
+    name: 'warnings',
+    description: 'Посмотреть предупреждения пользователя',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь',
+            type: 6, // USER
+            required: true
+        }
+    ]
+},
+{
+    name: 'clearwarns',
+    description: 'Очистить предупреждения',
+    options: [
+        {
+            name: 'пользователь',
+            description: 'Пользователь',
+            type: 6, // USER
+            required: true
+        }
+    ]
+},
+{
+    name: 'modsetup',
+    description: 'Настройка системы модерации',
+    options: [
+        {
+            name: 'канал',
+            description: 'Канал для логов модерации',
+            type: 7, // CHANNEL
+            required: false
+        },
+        {
+            name: 'роль',
+            description: 'Роль для мута',
+            type: 8, // ROLE
+            required: false
+        },
+        {
+            name: 'статус',
+            description: 'Включить/выключить авто-модерацию',
+            type: 5, // BOOLEAN
+            required: false
+        }
+    ]
+},
     {
         name: 'transcriptsettings',
         description: 'Показать текущие настройки транскриптов'
@@ -763,6 +915,89 @@ app.get('/guild/:guildId/settings', requireAdmin, async (req, res) => {
     }
 });
 
+// Добавьте новый маршрут для управления ролями
+app.get('/guild/:guildId/roles', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    try {
+        // 1. Проверяем права администратора
+        const userGuilds = req.session.guilds || [];
+        const userGuild = userGuilds.find(g => g.id === guildId);
+        
+        if (!userGuild || (userGuild.permissions & 0x8) !== 0x8) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Требуются права администратора сервера.'
+            ));
+        }
+        
+        // 2. Получаем информацию о сервере
+        const guildInfo = {
+            id: guildId,
+            name: userGuild.name || `Сервер (${guildId})`,
+            icon: userGuild.icon ? 
+                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
+                null,
+            approximate_member_count: userGuild.approximate_member_count || 0
+        };
+        
+        // 3. Проверяем наличие бота на сервере
+        const discordGuild = client.guilds.cache.get(guildId);
+        let botInGuild = false;
+        let members = [];
+        let roles = [];
+        
+        if (discordGuild) {
+            botInGuild = true;
+            guildInfo.approximate_member_count = discordGuild.memberCount;
+            
+            // Получаем участников (первые 50 для скорости)
+            const guildMembers = await discordGuild.members.fetch({ limit: 50 });
+            members = Array.from(guildMembers.values())
+                .filter(member => !member.user.bot)
+                .map(member => ({
+                    id: member.id,
+                    username: member.user.username,
+                    discriminator: member.user.discriminator,
+                    tag: member.user.tag,
+                    avatar: member.user.displayAvatarURL({ format: 'png', size: 64 }),
+                    roles: member.roles.cache
+                        .filter(role => role.name !== '@everyone')
+                        .map(role => role.id)
+                }));
+            
+            // Получаем роли
+            roles = discordGuild.roles.cache
+                .filter(role => role.name !== '@everyone')
+                .map(role => ({
+                    id: role.id,
+                    name: role.name,
+                    color: role.color,
+                    members: role.members?.size || 0,
+                    position: role.position,
+                    managed: role.managed,
+                    hoist: role.hoist
+                }))
+                .sort((a, b) => b.position - a.position);
+        }
+        
+        // 4. Получаем настройки модерации
+        const modSettings = getModerationSettings(guildId);
+        
+        // 5. Отправляем страницу
+        res.send(createRolesManagementPage(user, guildInfo, members, roles, modSettings, botInGuild, baseUrl));
+        
+    } catch (error) {
+        console.error('❌ Error in roles route:', error);
+        res.status(500).send(createErrorPage(
+            'Внутренняя ошибка',
+            'Произошла непредвиденная ошибка при загрузке страницы.'
+        ));
+    }
+});
+
 // API для сохранения разрешений
 app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
     const guildId = req.params.guildId;
@@ -793,6 +1028,103 @@ app.get('/api/permissions/:guildId', requireAdmin, (req, res) => {
     const guildId = req.params.guildId;
     const permissions = getGuildPermissions(guildId);
     res.json({ permissions });
+});
+// API для выдачи роли
+app.post('/api/guild/:guildId/roles/:userId', requireAdmin, express.json(), async (req, res) => {
+    const { guildId, userId } = req.params;
+    const { roleId, action } = req.body; // action: 'add' или 'remove'
+    
+    if (!roleId || !action) {
+        return res.status(400).json({ error: 'Неверные данные' });
+    }
+    
+    try {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) {
+            return res.status(404).json({ error: 'Сервер не найден' });
+        }
+        
+        const member = await guild.members.fetch(userId);
+        const role = guild.roles.cache.get(roleId);
+        
+        if (!member || !role) {
+            return res.status(404).json({ error: 'Участник или роль не найдены' });
+        }
+        
+        if (action === 'add') {
+            await member.roles.add(role);
+        } else if (action === 'remove') {
+            await member.roles.remove(role);
+        } else {
+            return res.status(400).json({ error: 'Неверное действие' });
+        }
+        
+        res.json({ 
+            success: true, 
+            message: `Роль ${role.name} ${action === 'add' ? 'выдана' : 'снята'} у ${member.user.tag}` 
+        });
+        
+    } catch (error) {
+        console.error('Role management error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API для обновления настроек модерации
+app.post('/api/guild/:guildId/moderation', requireAdmin, express.json(), async (req, res) => {
+    const { guildId } = req.params;
+    const settings = req.body;
+    
+    try {
+        const currentSettings = getModerationSettings(guildId);
+        
+        // Обновляем только разрешенные поля
+        const updatedSettings = {
+            ...currentSettings,
+            enabled: settings.enabled !== undefined ? settings.enabled : currentSettings.enabled,
+            logChannel: settings.logChannel || currentSettings.logChannel,
+            muteRole: settings.muteRole || currentSettings.muteRole,
+            autoMod: {
+                ...currentSettings.autoMod,
+                ...settings.autoMod
+            },
+            autoModThresholds: {
+                ...currentSettings.autoModThresholds,
+                ...settings.autoModThresholds
+            }
+        };
+        
+        saveModerationSettings(guildId, updatedSettings);
+        
+        // Если указана роль мута, настраиваем права
+        if (settings.muteRole) {
+            const guild = client.guilds.cache.get(guildId);
+            if (guild) {
+                const role = guild.roles.cache.get(settings.muteRole);
+                if (role) {
+                    guild.channels.cache.forEach(async channel => {
+                        if (channel.isTextBased() || channel.isVoiceBased()) {
+                            await channel.permissionOverwrites.edit(role, {
+                                SendMessages: false,
+                                Speak: false,
+                                AddReactions: false
+                            });
+                        }
+                    });
+                }
+            }
+        }
+        
+        res.json({ 
+            success: true, 
+            message: 'Настройки модерации сохранены',
+            settings: updatedSettings 
+        });
+        
+    } catch (error) {
+        console.error('Moderation settings error:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // ==================== API МАРШРУТЫ ====================
@@ -3411,6 +3743,844 @@ function createGuildSettingsPage(user, guild, settings, botInGuild, baseUrl) {
 </html>`;
 }
 
+function createRolesManagementPage(user, guild, members, roles, modSettings, botInGuild, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${guild.name} - Управление ролями и модерацией</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        .main-content {
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary);
+        }
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin-right: 20px;
+            border: 3px solid var(--primary);
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: var(--surface-light);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--text);
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
+        }
+        .nav-icon {
+            font-size: 1.3rem;
+            margin-right: 15px;
+            width: 24px;
+            text-align: center;
+        }
+        .guild-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        .guild-icon {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin-right: 30px;
+            border: 4px solid var(--surface-light);
+            object-fit: cover;
+        }
+        .guild-icon-placeholder {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin-right: 30px;
+            color: white;
+            border: 4px solid var(--surface-light);
+        }
+        .guild-info {
+            flex: 1;
+        }
+        .guild-name {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .tabs {
+            display: flex;
+            background: var(--surface-dark);
+            border-radius: 12px;
+            padding: 5px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .tab:hover {
+            background: var(--surface-light);
+            color: var(--text);
+        }
+        .tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 15px rgba(88, 101, 242, 0.3);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .members-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .member-card {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        .member-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .member-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .member-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+        .member-name {
+            flex: 1;
+        }
+        .member-tag {
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 5px;
+        }
+        .member-id {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-family: monospace;
+        }
+        .member-roles {
+            margin-top: 15px;
+        }
+        .role-tag {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin: 2px;
+            background: var(--surface-light);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .role-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .role-select {
+            flex: 1;
+            padding: 8px;
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: inherit;
+        }
+        .btn {
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        .btn-add {
+            background: var(--success);
+            color: var(--background);
+        }
+        .btn-add:hover {
+            background: #4ad175;
+            transform: translateY(-2px);
+        }
+        .btn-remove {
+            background: var(--danger);
+            color: white;
+        }
+        .btn-remove:hover {
+            background: #c93c3e;
+            transform: translateY(-2px);
+        }
+        .moderation-settings {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        .setting-group {
+            margin-bottom: 30px;
+        }
+        .setting-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: var(--surface-light);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border);
+        }
+        .setting-label {
+            font-weight: 600;
+            color: var(--text);
+        }
+        .setting-description {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--surface-dark);
+            transition: .4s;
+            border-radius: 34px;
+            border: 1px solid var(--border);
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: var(--success);
+        }
+        input:checked + .slider:before {
+            transform: translateX(28px);
+        }
+        .save-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+        .save-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.4);
+        }
+        .save-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .message {
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        .message.success {
+            background: linear-gradient(135deg, var(--success) 0%, rgba(87, 242, 135, 0.1) 100%);
+            border: 1px solid var(--success);
+            color: white;
+            display: block;
+        }
+        .message.error {
+            background: linear-gradient(135deg, var(--danger) 0%, rgba(237, 66, 69, 0.1) 100%);
+            border: 1px solid var(--danger);
+            color: white;
+            display: block;
+        }
+        .back-btn {
+            background: linear-gradient(135deg, var(--surface-light) 0%, var(--surface) 100%);
+            color: var(--text);
+            padding: 12px 25px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
+        }
+        .back-btn:hover {
+            border-color: var(--primary);
+            transform: translateX(-5px);
+        }
+        .bot-warning {
+            background: linear-gradient(135deg, var(--warning) 0%, rgba(254, 231, 92, 0.1) 100%);
+            border: 1px solid var(--warning);
+            color: var(--text);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        @media (max-width: 1024px) {
+            .guild-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .guild-icon, .guild-icon-placeholder {
+                margin-right: 0;
+                margin-bottom: 20px;
+            }
+            .members-grid {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            }
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 20px;
+            }
+            .members-grid {
+                grid-template-columns: 1fr;
+            }
+            .setting-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold; font-size: 1.1rem;">${user.global_name || user.username}</div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
+                <div style="color: var(--success); font-size: 0.8rem; margin-top: 5px; font-weight: 600;">✅ Администратор</div>
+            </div>
+        </div>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Навигация</div>
+        
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/permissions/${guild.id}" class="nav-item">
+            <span class="nav-icon">🔐</span>
+            Права команд
+        </a>
+        <a href="/guild/${guild.id}/settings" class="nav-item">
+            <span class="nav-icon">⚙️</span>
+            Настройки сервера
+        </a>
+        <a href="/guild/${guild.id}/roles" class="nav-item active">
+            <span class="nav-icon">👥</span>
+            Управление ролями
+        </a>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
+        
+        <a href="/permissions" class="nav-item">
+            <span class="nav-icon">🏰</span>
+            Все серверы
+        </a>
+
+        <a href="/auth/logout" style="display: flex; align-items: center; padding: 15px; margin: 5px 0; background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%); color: white; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 1rem; transition: all 0.3s ease; border: 1px solid transparent; margin-top: 20px;">
+            <span class="nav-icon">🚪</span>
+            Выйти
+        </a>
+    </div>
+
+    <div class="main-content">
+        <a href="/permissions" class="back-btn">
+            <span class="nav-icon">⬅️</span>
+            Назад к списку серверов
+        </a>
+        
+        ${!botInGuild ? `
+            <div class="bot-warning">
+                <div>⚠️</div>
+                <div>
+                    <strong>Внимание:</strong> Бот не добавлен на этот сервер. 
+                    Для управления ролями добавьте бота на сервер.
+                </div>
+            </div>
+        ` : ''}
+        
+        <div class="guild-header">
+            ${guild.icon ? 
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="guild-icon">` :
+                `<div class="guild-icon-placeholder">🏰</div>`
+            }
+            <div class="guild-info">
+                <h1 class="guild-name">${guild.name}</h1>
+                <p style="color: var(--text-secondary); font-size: 1.1rem;">Управление ролями и настройками модерации</p>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('roles')">👥 Управление ролями</div>
+            <div class="tab" onclick="switchTab('moderation')">🛡️ Настройки модерации</div>
+        </div>
+
+        <div id="roles-tab" class="tab-content active">
+            <h2 style="margin-bottom: 20px; color: var(--text);">Участники сервера</h2>
+            
+            ${members.length === 0 ? `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <div style="font-size: 3rem; margin-bottom: 20px;">👥</div>
+                    <h3>Участники не загружены</h3>
+                    <p>Бот не имеет доступа к участникам сервера или сервер пуст.</p>
+                </div>
+            ` : `
+                <div class="members-grid">
+                    ${members.map(member => `
+                        <div class="member-card">
+                            <div class="member-header">
+                                <img src="${member.avatar}" alt="${member.tag}" class="member-avatar">
+                                <div class="member-name">
+                                    <div class="member-tag">${member.tag}</div>
+                                    <div class="member-id">${member.id}</div>
+                                </div>
+                            </div>
+                            
+                            <div class="member-roles">
+                                <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">Роли:</div>
+                                ${member.roles.length > 0 ? 
+                                    member.roles.map(roleId => {
+                                        const role = roles.find(r => r.id === roleId);
+                                        return role ? `<span class="role-tag" style="border-color: #${role.color.toString(16).padStart(6, '0') || '5865F2'}; background: #${role.color.toString(16).padStart(6, '0')}20;">${role.name}</span>` : '';
+                                    }).join('') : 
+                                    '<span style="color: var(--text-secondary); font-size: 0.9rem;">Нет ролей</span>'
+                                }
+                            </div>
+                            
+                            <div class="role-actions">
+                                <select class="role-select" id="role-select-${member.id}">
+                                    <option value="">Выберите роль</option>
+                                    ${roles.map(role => `
+                                        <option value="${role.id}">${role.name}</option>
+                                    `).join('')}
+                                </select>
+                                <button class="btn btn-add" onclick="addRole('${guild.id}', '${member.id}', '${member.tag}')">
+                                    +
+                                </button>
+                                <button class="btn btn-remove" onclick="removeRole('${guild.id}', '${member.id}', '${member.tag}')">
+                                    -
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px; color: var(--text-secondary);">
+                    Показано ${members.length} участников
+                </div>
+            `}
+        </div>
+
+        <div id="moderation-tab" class="tab-content">
+            <div class="moderation-settings">
+                <div class="setting-group">
+                    <div class="setting-title">Основные настройки</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Включить модерацию</div>
+                            <div class="setting-description">Активировать систему автоматической модерации</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="moderation-enabled" ${modSettings.enabled ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Канал для логов</div>
+                            <div class="setting-description">Канал для записи действий модерации</div>
+                        </div>
+                        <select id="log-channel" style="padding: 8px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text); min-width: 200px;">
+                            <option value="">Не выбран</option>
+                            ${botInGuild ? roles.map(role => role.id).includes(modSettings.muteRole) ? 
+                                `<option value="${modSettings.muteRole}" selected>Роль мута: ${roles.find(r => r.id === modSettings.muteRole)?.name || 'Неизвестная роль'}</option>` : '' : ''}
+                        </select>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Роль для мута</div>
+                            <div class="setting-description">Роль, которая выдаётся при муте</div>
+                        </div>
+                        <select id="mute-role" style="padding: 8px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text); min-width: 200px;">
+                            <option value="">Не выбрана</option>
+                            ${botInGuild ? roles.map(role => `
+                                <option value="${role.id}" ${role.id === modSettings.muteRole ? 'selected' : ''}>${role.name}</option>
+                            `).join('') : ''}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <div class="setting-title">Автоматическая модерация</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Обнаружение спама</div>
+                            <div class="setting-description">Удалять сообщения при слишком быстрой отправке</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-spam" ${modSettings.autoMod.spam ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Обнаружение КАПСА</div>
+                            <div class="setting-description">Удалять сообщения, написанные заглавными буквами</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-caps" ${modSettings.autoMod.caps ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Блокировка приглашений</div>
+                            <div class="setting-description">Удалять приглашения на другие серверы</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-invites" ${modSettings.autoMod.inviteLinks ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <div class="setting-title">Пороговые значения</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Лимит спама (сообщений)</div>
+                            <div class="setting-description">Максимум сообщений за 5 секунд</div>
+                        </div>
+                        <input type="number" id="spam-threshold" value="${modSettings.autoModThresholds.spam}" min="1" max="20" style="padding: 8px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text); width: 80px;">
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Лимит КАПСА (%)</div>
+                            <div class="setting-description">Процент заглавных букв для триггера</div>
+                        </div>
+                        <input type="number" id="caps-threshold" value="${modSettings.autoModThresholds.caps}" min="1" max="100" style="padding: 8px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text); width: 80px;">
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Макс предупреждений до мута</div>
+                            <div class="setting-description">Количество предупреждений для автоматического мута</div>
+                        </div>
+                        <input type="number" id="warnings-threshold" value="${modSettings.autoModThresholds.maxWarnings}" min="1" max="10" style="padding: 8px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text); width: 80px;">
+                    </div>
+                </div>
+
+                <button class="save-btn" onclick="saveModerationSettings('${guild.id}')" id="save-mod-btn">
+                    <span class="nav-icon">💾</span>
+                    Сохранить настройки модерации
+                </button>
+
+                <div id="mod-message" class="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Обновляем активную вкладку
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+
+        async function addRole(guildId, userId, userTag) {
+            const select = document.getElementById('role-select-' + userId);
+            const roleId = select.value;
+            
+            if (!roleId) {
+                alert('Выберите роль!');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/guild/' + guildId + '/roles/' + userId, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        roleId: roleId,
+                        action: 'add'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Роль выдана пользователю ' + userTag);
+                    location.reload(); // Перезагружаем для обновления ролей
+                } else {
+                    alert('❌ Ошибка: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Ошибка при выдаче роли');
+            }
+        }
+
+        async function removeRole(guildId, userId, userTag) {
+            const select = document.getElementById('role-select-' + userId);
+            const roleId = select.value;
+            
+            if (!roleId) {
+                alert('Выберите роль!');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/guild/' + guildId + '/roles/' + userId, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        roleId: roleId,
+                        action: 'remove'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Роль снята у пользователя ' + userTag);
+                    location.reload();
+                } else {
+                    alert('❌ Ошибка: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Ошибка при снятии роли');
+            }
+        }
+
+        async function saveModerationSettings(guildId) {
+            const saveBtn = document.getElementById('save-mod-btn');
+            const messageDiv = document.getElementById('mod-message');
+            
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<div class="loading-spinner"></div> Сохранение...';
+            
+            const settings = {
+                enabled: document.getElementById('moderation-enabled').checked,
+                logChannel: document.getElementById('log-channel').value,
+                muteRole: document.getElementById('mute-role').value,
+                autoMod: {
+                    spam: document.getElementById('auto-spam').checked,
+                    caps: document.getElementById('auto-caps').checked,
+                    inviteLinks: document.getElementById('auto-invites').checked
+                },
+                autoModThresholds: {
+                    spam: parseInt(document.getElementById('spam-threshold').value),
+                    caps: parseInt(document.getElementById('caps-threshold').value),
+                    maxWarnings: parseInt(document.getElementById('warnings-threshold').value)
+                }
+            };
+            
+            try {
+                const response = await fetch('/api/guild/' + guildId + '/moderation', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(settings)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = '✅ Настройки модерации сохранены!';
+                    
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 5000);
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = '❌ Ошибка: ' + error.message;
+                
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<span class="nav-icon">💾</span> Сохранить настройки модерации';
+            }
+        }
+    </script>
+</body>
+</html>`;
+}
+
+
 function createErrorPage(title, message) {
     return `
 <!DOCTYPE html>
@@ -3836,8 +5006,10 @@ client.on('interactionCreate', async interaction => {
         }
         
         await interaction.deferReply({ flags: 64 });
+      
         
         switch(action) {
+            
             case 'set':
                 const voiceChannelId = interaction.options.getString('channel_id');
                 const regionCode = interaction.options.getString('регион');
@@ -4827,6 +5999,556 @@ client.on('interactionCreate', async (interaction) => {
                     const translationSettings = getServerSettings(guild.id);
                     
                     await interaction.deferReply({ flags: 64 });
+
+                   switch(action) {
+                       
+                case 'ban':
+            if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для бана!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToBan = options.getUser('пользователь');
+            const reason = options.getString('причина') || 'Причина не указана';
+            const days = options.getInteger('дни') || 0;
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const memberToBan = await guild.members.fetch(userToBan.id);
+                
+                if (!memberToBan.bannable) {
+                    return interaction.editReply('❌ Я не могу забанить этого пользователя!');
+                }
+                
+                if (memberToBan.roles.highest.position >= member.roles.highest.position) {
+                    return interaction.editReply('❌ Вы не можете забанить пользователя с ролью выше или равной вашей!');
+                }
+                
+                await memberToBan.ban({ 
+                    deleteMessageSeconds: days * 24 * 60 * 60,
+                    reason: `${reason} (Забанено: ${user.tag})`
+                });
+                
+                // Логирование
+                const settings = getModerationSettings(guild.id);
+                if (settings.logChannel) {
+                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                    if (logChannel) {
+                        const embed = new EmbedBuilder()
+                            .setColor('#ED4245')
+                            .setTitle('🔨 Пользователь забанен')
+                            .addFields(
+                                { name: '👤 Пользователь', value: `${userToBan.tag} (${userToBan.id})`, inline: true },
+                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
+                                { name: '📝 Причина', value: reason, inline: false }
+                            )
+                            .setFooter({ text: `Удалено сообщений: ${days} дней` })
+                            .setTimestamp();
+                        
+                        await logChannel.send({ embeds: [embed] });
+                    }
+                }
+                
+                await interaction.editReply(`✅ Пользователь ${userToBan.tag} забанен!`);
+                
+            } catch (error) {
+                console.error('Ban error:', error);
+                await interaction.editReply('❌ Ошибка при бане пользователя!');
+            }
+            break;
+            
+        case 'kick':
+            if (!member.permissions.has(PermissionsBitField.Flags.KickMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для кика!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToKick = options.getUser('пользователь');
+            const kickReason = options.getString('причина') || 'Причина не указана';
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const memberToKick = await guild.members.fetch(userToKick.id);
+                
+                if (!memberToKick.kickable) {
+                    return interaction.editReply('❌ Я не могу кикнуть этого пользователя!');
+                }
+                
+                if (memberToKick.roles.highest.position >= member.roles.highest.position) {
+                    return interaction.editReply('❌ Вы не можете кикнуть пользователя с ролью выше или равной вашей!');
+                }
+                
+                await memberToKick.kick(`${kickReason} (Кикнуто: ${user.tag})`);
+                
+                // Логирование
+                const settings = getModerationSettings(guild.id);
+                if (settings.logChannel) {
+                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                    if (logChannel) {
+                        const embed = new EmbedBuilder()
+                            .setColor('#FEE75C')
+                            .setTitle('👢 Пользователь кикнут')
+                            .addFields(
+                                { name: '👤 Пользователь', value: `${userToKick.tag} (${userToKick.id})`, inline: true },
+                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
+                                { name: '📝 Причина', value: kickReason, inline: false }
+                            )
+                            .setTimestamp();
+                        
+                        await logChannel.send({ embeds: [embed] });
+                    }
+                }
+                
+                await interaction.editReply(`✅ Пользователь ${userToKick.tag} кикнут!`);
+                
+            } catch (error) {
+                console.error('Kick error:', error);
+                await interaction.editReply('❌ Ошибка при кике пользователя!');
+            }
+            break;
+            
+        case 'mute':
+            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для мута!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToMute = options.getUser('пользователь');
+            const muteTime = options.getString('время');
+            const muteReason = options.getString('причина') || 'Причина не указана';
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const memberToMute = await guild.members.fetch(userToMute.id);
+                const settings = getModerationSettings(guild.id);
+                
+                // Получаем роль мута
+                let muteRole = null;
+                if (settings.muteRole) {
+                    muteRole = guild.roles.cache.get(settings.muteRole);
+                }
+                
+                if (!muteRole) {
+                    // Создаем роль мута если нет
+                    muteRole = await guild.roles.create({
+                        name: 'Muted',
+                        color: '#2F3136',
+                        permissions: [],
+                        reason: 'Автоматическое создание роли мута'
+                    });
+                    
+                    // Настраиваем права для всех каналов
+                    guild.channels.cache.forEach(async channel => {
+                        if (channel.isTextBased() || channel.isVoiceBased()) {
+                            await channel.permissionOverwrites.edit(muteRole, {
+                                SendMessages: false,
+                                Speak: false,
+                                AddReactions: false
+                            });
+                        }
+                    });
+                    
+                    settings.muteRole = muteRole.id;
+                    saveModerationSettings(guild.id, settings);
+                }
+                
+                // Парсим время мута
+                let timeMs = 0;
+                const timeMatch = muteTime.match(/^(\d+)([mhd])$/i);
+                
+                if (timeMatch) {
+                    const amount = parseInt(timeMatch[1]);
+                    const unit = timeMatch[2].toLowerCase();
+                    
+                    switch(unit) {
+                        case 'm': timeMs = amount * 60 * 1000; break;
+                        case 'h': timeMs = amount * 60 * 60 * 1000; break;
+                        case 'd': timeMs = amount * 24 * 60 * 60 * 1000; break;
+                    }
+                }
+                
+                if (timeMs === 0 || timeMs > 28 * 24 * 60 * 60 * 1000) {
+                    return interaction.editReply('❌ Неверное время мута! Используйте формат: 1m, 1h, 1d (максимум 28 дней)');
+                }
+                
+                // Выдаем роль мута
+                await memberToMute.roles.add(muteRole, `${muteReason} (Замутил: ${user.tag})`);
+                
+                // Сохраняем время размута
+                const unmuteTime = Date.now() + timeMs;
+                mutedUsers.set(`${guild.id}-${userToMute.id}`, {
+                    userId: userToMute.id,
+                    guildId: guild.id,
+                    unmuteTime: unmuteTime,
+                    moderator: user.id
+                });
+                
+                // Устанавливаем таймер для автоматического размута
+                setTimeout(async () => {
+                    try {
+                        const member = await guild.members.fetch(userToMute.id);
+                        if (member && member.roles.cache.has(muteRole.id)) {
+                            await member.roles.remove(muteRole, 'Автоматический размут');
+                            mutedUsers.delete(`${guild.id}-${userToMute.id}`);
+                        }
+                    } catch (error) {
+                        console.error('Auto unmute error:', error);
+                    }
+                }, timeMs);
+                
+                // Логирование
+                if (settings.logChannel) {
+                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                    if (logChannel) {
+                        const embed = new EmbedBuilder()
+                            .setColor('#FEE75C')
+                            .setTitle('🔇 Пользователь замучен')
+                            .addFields(
+                                { name: '👤 Пользователь', value: `${userToMute.tag} (${userToMute.id})`, inline: true },
+                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '⏰ Время', value: muteTime, inline: true },
+                                { name: '📅 Размут', value: `<t:${Math.floor(unmuteTime / 1000)}:R>`, inline: false },
+                                { name: '📝 Причина', value: muteReason, inline: false }
+                            )
+                            .setTimestamp();
+                        
+                        await logChannel.send({ embeds: [embed] });
+                    }
+                }
+                
+                await interaction.editReply(`✅ Пользователь ${userToMute.tag} замучен на ${muteTime}!`);
+                
+            } catch (error) {
+                console.error('Mute error:', error);
+                await interaction.editReply('❌ Ошибка при муте пользователя!');
+            }
+            break;
+            
+        case 'unmute':
+            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для снятия мута!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToUnmute = options.getUser('пользователь');
+            const unmuteReason = options.getString('причина') || 'Причина не указана';
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const memberToUnmute = await guild.members.fetch(userToUnmute.id);
+                const settings = getModerationSettings(guild.id);
+                
+                if (!settings.muteRole) {
+                    return interaction.editReply('❌ Роль мута не настроена на этом сервере!');
+                }
+                
+                const muteRole = guild.roles.cache.get(settings.muteRole);
+                if (!muteRole) {
+                    return interaction.editReply('❌ Роль мута не найдена!');
+                }
+                
+                if (!memberToUnmute.roles.cache.has(muteRole.id)) {
+                    return interaction.editReply('❌ Этот пользователь не замучен!');
+                }
+                
+                // Снимаем мут
+                await memberToUnmute.roles.remove(muteRole, `${unmuteReason} (Размутил: ${user.tag})`);
+                mutedUsers.delete(`${guild.id}-${userToUnmute.id}`);
+                
+                // Логирование
+                if (settings.logChannel) {
+                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                    if (logChannel) {
+                        const embed = new EmbedBuilder()
+                            .setColor('#57F287')
+                            .setTitle('🔊 Пользователь размучен')
+                            .addFields(
+                                { name: '👤 Пользователь', value: `${userToUnmute.tag} (${userToUnmute.id})`, inline: true },
+                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '📝 Причина', value: unmuteReason, inline: false }
+                            )
+                            .setTimestamp();
+                        
+                        await logChannel.send({ embeds: [embed] });
+                    }
+                }
+                
+                await interaction.editReply(`✅ Пользователь ${userToUnmute.tag} размучен!`);
+                
+            } catch (error) {
+                console.error('Unmute error:', error);
+                await interaction.editReply('❌ Ошибка при размуте пользователя!');
+            }
+            break;
+            
+        case 'warn':
+            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для выдачи предупреждений!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToWarn = options.getUser('пользователь');
+            const warnReason = options.getString('причина');
+            
+            if (!warnReason) {
+                return interaction.reply({ 
+                    content: '❌ Укажите причину предупреждения!', 
+                    flags: 64 
+                });
+            }
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const memberToWarn = await guild.members.fetch(userToWarn.id);
+                const settings = getModerationSettings(guild.id);
+                
+                // Получаем текущие предупреждения
+                if (!settings.warnings.has(userToWarn.id)) {
+                    settings.warnings.set(userToWarn.id, []);
+                }
+                
+                const userWarnings = settings.warnings.get(userToWarn.id);
+                
+                // Добавляем новое предупреждение
+                const warning = {
+                    id: Date.now(),
+                    userId: userToWarn.id,
+                    moderatorId: user.id,
+                    moderatorTag: user.tag,
+                    reason: warnReason,
+                    date: Date.now(),
+                    active: true
+                };
+                
+                userWarnings.push(warning);
+                settings.warnings.set(userToWarn.id, userWarnings);
+                saveModerationSettings(guild.id, settings);
+                
+                // Проверяем, не превышен ли лимит предупреждений
+                const activeWarnings = userWarnings.filter(w => w.active);
+                
+                if (activeWarnings.length >= settings.autoModThresholds.maxWarnings) {
+                    // Автоматический мут при превышении лимита
+                    if (settings.muteRole) {
+                        const muteRole = guild.roles.cache.get(settings.muteRole);
+                        if (muteRole) {
+                            await memberToWarn.roles.add(muteRole, `Автоматический мут за ${activeWarnings.length} предупреждений`);
+                            
+                            // Устанавливаем таймер на 24 часа
+                            const unmuteTime = Date.now() + 24 * 60 * 60 * 1000;
+                            mutedUsers.set(`${guild.id}-${userToWarn.id}`, {
+                                userId: userToWarn.id,
+                                guildId: guild.id,
+                                unmuteTime: unmuteTime,
+                                moderator: 'system'
+                            });
+                            
+                            setTimeout(async () => {
+                                try {
+                                    const member = await guild.members.fetch(userToWarn.id);
+                                    if (member && member.roles.cache.has(muteRole.id)) {
+                                        await member.roles.remove(muteRole, 'Автоматический размут');
+                                        mutedUsers.delete(`${guild.id}-${userToWarn.id}`);
+                                    }
+                                } catch (error) {
+                                    console.error('Auto unmute error:', error);
+                                }
+                            }, 24 * 60 * 60 * 1000);
+                        }
+                    }
+                }
+                
+                // Логирование
+                if (settings.logChannel) {
+                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                    if (logChannel) {
+                        const embed = new EmbedBuilder()
+                            .setColor('#FEE75C')
+                            .setTitle('⚠️ Выдано предупреждение')
+                            .addFields(
+                                { name: '👤 Пользователь', value: `${userToWarn.tag} (${userToWarn.id})`, inline: true },
+                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '📊 Всего предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: true },
+                                { name: '📝 Причина', value: warnReason, inline: false },
+                                { name: 'ℹ️ ID предупреждения', value: `\`${warning.id}\``, inline: false }
+                            )
+                            .setTimestamp();
+                        
+                        await logChannel.send({ embeds: [embed] });
+                    }
+                }
+                
+                await interaction.editReply(`✅ Пользователю ${userToWarn.tag} выдано предупреждение (${activeWarnings.length}/${settings.autoModThresholds.maxWarnings})!`);
+                
+            } catch (error) {
+                console.error('Warn error:', error);
+                await interaction.editReply('❌ Ошибка при выдаче предупреждения!');
+            }
+            break;
+            
+        case 'warnings':
+            const userToCheck = options.getUser('пользователь');
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const settings = getModerationSettings(guild.id);
+                const userWarnings = settings.warnings.get(userToCheck.id) || [];
+                const activeWarnings = userWarnings.filter(w => w.active);
+                
+                if (activeWarnings.length === 0) {
+                    return interaction.editReply(`✅ У пользователя ${userToCheck.tag} нет активных предупреждений.`);
+                }
+                
+                const warningsList = activeWarnings.map(w => 
+                    `**#${w.id}** - <t:${Math.floor(w.date / 1000)}:R>\n👮 **Модератор:** ${w.moderatorTag}\n📝 **Причина:** ${w.reason}`
+                ).join('\n\n');
+                
+                const embed = new EmbedBuilder()
+                    .setColor('#FEE75C')
+                    .setTitle(`⚠️ Предупреждения ${userToCheck.tag}`)
+                    .setDescription(warningsList)
+                    .addFields(
+                        { name: '📊 Активных предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: false }
+                    )
+                    .setFooter({ text: `Используйте /clearwarns для очистки предупреждений` })
+                    .setTimestamp();
+                
+                await interaction.editReply({ embeds: [embed] });
+                
+            } catch (error) {
+                console.error('Warnings check error:', error);
+                await interaction.editReply('❌ Ошибка при получении предупреждений!');
+            }
+            break;
+            
+        case 'clearwarns':
+            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                return interaction.reply({ 
+                    content: '❌ У вас нет прав для очистки предупреждений!', 
+                    flags: 64 
+                });
+            }
+            
+            const userToClear = options.getUser('пользователь');
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const settings = getModerationSettings(guild.id);
+                
+                if (!settings.warnings.has(userToClear.id)) {
+                    return interaction.editReply(`✅ У пользователя ${userToClear.tag} нет предупреждений.`);
+                }
+                
+                const userWarnings = settings.warnings.get(userToClear.id);
+                const clearedCount = userWarnings.filter(w => w.active).length;
+                
+                // Деактивируем все предупреждения
+                userWarnings.forEach(w => w.active = false);
+                settings.warnings.set(userToClear.id, userWarnings);
+                saveModerationSettings(guild.id, settings);
+                
+                // Снимаем мут если был
+                if (settings.muteRole) {
+                    const member = await guild.members.fetch(userToClear.id).catch(() => null);
+                    if (member) {
+                        const muteRole = guild.roles.cache.get(settings.muteRole);
+                        if (muteRole && member.roles.cache.has(muteRole.id)) {
+                            await member.roles.remove(muteRole, 'Очистка предупреждений');
+                            mutedUsers.delete(`${guild.id}-${userToClear.id}`);
+                        }
+                    }
+                }
+                
+                await interaction.editReply(`✅ Очищено ${clearedCount} предупреждений у пользователя ${userToClear.tag}`);
+                
+            } catch (error) {
+                console.error('Clear warns error:', error);
+                await interaction.editReply('❌ Ошибка при очистке предупреждений!');
+            }
+            break;
+            
+        case 'modsetup':
+            if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                return interaction.reply({ 
+                    content: '❌ Только администраторы могут настраивать модерацию!', 
+                    flags: 64 
+                });
+            }
+            
+            const logChannelOption = options.getChannel('канал');
+            const muteRoleOption = options.getRole('роль');
+            const statusOption = options.getBoolean('статус');
+            
+            await interaction.deferReply({ flags: 64 });
+            
+            try {
+                const settings = getModerationSettings(guild.id);
+                
+                if (logChannelOption) {
+                    settings.logChannel = logChannelOption.id;
+                }
+                
+                if (muteRoleOption) {
+                    settings.muteRole = muteRoleOption.id;
+                    
+                    // Настраиваем права для роли мута
+                    guild.channels.cache.forEach(async channel => {
+                        if (channel.isTextBased() || channel.isVoiceBased()) {
+                            await channel.permissionOverwrites.edit(muteRoleOption, {
+                                SendMessages: false,
+                                Speak: false,
+                                AddReactions: false
+                            });
+                        }
+                    });
+                }
+                
+                if (statusOption !== null) {
+                    settings.enabled = statusOption;
+                }
+                
+                saveModerationSettings(guild.id, settings);
+                
+                const embed = new EmbedBuilder()
+                    .setColor('#57F287')
+                    .setTitle('⚙️ Настройки модерации обновлены')
+                    .addFields(
+                        { name: '📝 Канал логов', value: logChannelOption ? `<#${logChannelOption.id}>` : 'Не изменен', inline: true },
+                        { name: '🔇 Роль мута', value: muteRoleOption ? muteRoleOption.name : 'Не изменена', inline: true },
+                        { name: '🔄 Статус', value: statusOption !== null ? (statusOption ? '✅ Включена' : '❌ Выключена') : 'Не изменен', inline: true }
+                    )
+                    .setFooter({ text: 'Используйте /modsetup для дальнейших настроек' })
+                    .setTimestamp();
+                
+                await interaction.editReply({ embeds: [embed] });
+                
+            } catch (error) {
+                console.error('Mod setup error:', error);
+                await interaction.editReply('❌ Ошибка при настройке модерации!');
+            }
+            break;
+    }
+}
+
                     
                     switch(action) {
                         case 'on':
@@ -5420,6 +7142,109 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 });
+
+// ==================== АВТОМАТИЧЕСКАЯ МОДЕРАЦИЯ ====================
+
+const userMessageCache = new Map();
+
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+    
+    const settings = getModerationSettings(message.guild.id);
+    if (!settings.enabled || !settings.autoMod) return;
+    
+    const userId = message.author.id;
+    const now = Date.now();
+    
+    // Проверка на спам
+    if (settings.autoMod.spam) {
+        if (!userMessageCache.has(userId)) {
+            userMessageCache.set(userId, []);
+        }
+        
+        const userMessages = userMessageCache.get(userId);
+        userMessages.push(now);
+        
+        // Оставляем только сообщения за последние 5 секунд
+        const recentMessages = userMessages.filter(time => now - time < 5000);
+        userMessageCache.set(userId, recentMessages);
+        
+        if (recentMessages.length >= settings.autoModThresholds.spam) {
+            await message.delete().catch(() => {});
+            
+            // Выдаем предупреждение
+            if (!settings.warnings.has(userId)) {
+                settings.warnings.set(userId, []);
+            }
+            
+            const warnings = settings.warnings.get(userId);
+            warnings.push({
+                id: Date.now(),
+                userId: userId,
+                moderatorId: client.user.id,
+                moderatorTag: client.user.tag,
+                reason: 'Спам',
+                date: now,
+                active: true
+            });
+            
+            // Уведомляем пользователя
+            try {
+                await message.author.send('⚠️ Пожалуйста, не спамьте! Вам выдано предупреждение за спам.');
+            } catch {}
+            
+            return;
+        }
+    }
+    
+    // Проверка на КАПС
+    if (settings.autoMod.caps && message.content.length > 10) {
+        const capsCount = (message.content.match(/[A-ZА-ЯЁ]/g) || []).length;
+        const capsPercentage = (capsCount / message.content.length) * 100;
+        
+        if (capsPercentage >= settings.autoModThresholds.caps) {
+            await message.delete().catch(() => {});
+            
+            try {
+                await message.author.send('⚠️ Пожалуйста, не пишите заглавными буквами!');
+            } catch {}
+            
+            return;
+        }
+    }
+    
+    // Проверка на приглашения
+    if (settings.autoMod.inviteLinks) {
+        const inviteRegex = /(discord\.(gg|io|me|li)\/.+|discordapp\.com\/invite\/.+)/gi;
+        if (inviteRegex.test(message.content)) {
+            await message.delete().catch(() => {});
+            
+            try {
+                await message.author.send('⚠️ Запрещено отправлять приглашения на другие серверы!');
+            } catch {}
+            
+            return;
+        }
+    }
+    
+    // Проверка на плохие слова
+    if (settings.autoMod.badWords) {
+        const lowerMessage = message.content.toLowerCase();
+        const hasBadWord = BAD_WORDS.some(word => lowerMessage.includes(word));
+        
+        if (hasBadWord) {
+            await message.delete().catch(() => {});
+            
+            try {
+                await message.author.send('⚠️ Пожалуйста, соблюдайте правила общения!');
+            } catch {}
+            
+            return;
+        }
+    }
+});
+
 // ==================== ПРОСТОЙ РАБОЧИЙ КОД РАДИО ====================
 
 // Проверенные рабочие радиостанции
@@ -6997,6 +8822,52 @@ client.on('messageReactionAdd', async (reaction, user) => {
         }
     }
 });
+
+// ==================== СИСТЕМА МОДЕРАЦИИ ====================
+
+const moderationSettings = new Map();
+const mutedUsers = new Map();
+
+// Настройки по умолчанию
+const DEFAULT_MODERATION_SETTINGS = {
+    enabled: true,
+    logChannel: null,
+    muteRole: null,
+    autoMod: {
+        spam: true,
+        caps: true,
+        links: false,
+        inviteLinks: true,
+        badWords: false
+    },
+    autoModThresholds: {
+        spam: 5, // сообщений в 5 секунд
+        caps: 70, // процент заглавных букв
+        maxWarnings: 3 // предупреждений до мута
+    },
+    warnings: new Map()
+};
+
+// Список плохих слов (можно расширить)
+const BAD_WORDS = ['редиска', 'плохой', 'дурак'];
+
+// Функция получения настроек модерации
+function getModerationSettings(guildId) {
+    if (!moderationSettings.has(guildId)) {
+        moderationSettings.set(guildId, {
+            ...JSON.parse(JSON.stringify(DEFAULT_MODERATION_SETTINGS)),
+            warnings: new Map()
+        });
+    }
+    return moderationSettings.get(guildId);
+}
+
+// Функция сохранения настроек
+function saveModerationSettings(guildId, settings) {
+    moderationSettings.set(guildId, settings);
+}
+
+
 // ==================== ЗАПУСК СЕРВЕРА ====================
 
 const server = app.listen(PORT, '0.0.0.0', () => {
