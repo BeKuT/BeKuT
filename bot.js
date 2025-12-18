@@ -6695,9 +6695,7 @@ client.on('interactionCreate', async (interaction) => {
                                 await interaction.editReply('❌ Роль не найдена');
                             }
                             break;
-                    }
-                    break;
-
+                
                 case 'autodelete':
                     if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
                         return interaction.reply({ 
