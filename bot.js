@@ -300,159 +300,160 @@ const slashCommands = [
                 description: 'Код региона (только для изменения)',
                 type: 3, // STRING
                 required: false
+            }
+        ]
+    },
+    // КОМАНДЫ МОДЕРАЦИИ:
+    {
+        name: 'ban',
+        description: 'Забанить пользователя',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь для бана',
+                type: 6, // USER
+                required: true
             },
-          {
-    name: 'ban',
-    description: 'Забанить пользователя',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь для бана',
-            type: 6, // USER
-            required: true
-        },
-        {
-            name: 'причина',
-            description: 'Причина бана',
-            type: 3, // STRING
-            required: false
-        },
-        {
-            name: 'дней',
-            description: 'Удалить сообщения за последние дни',
-            type: 4, // INTEGER
-            required: false,
-            min_value: 0,
-            max_value: 7
-        }
-    ]
-},
-{
-    name: 'kick',
-    description: 'Кикнуть пользователя',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь для кика',
-            type: 6, // USER
-            required: true
-        },
-        {
-            name: 'причина',
-            description: 'Причина кика',
-            type: 3, // STRING
-            required: false
-        }
-    ]
-},
-{
-    name: 'mute',
-    description: 'Заглушить пользователя',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь для мута',
-            type: 6, // USER
-            required: true
-        },
-        {
-            name: 'время',
-            description: 'Время мута (1m, 1h, 1d)',
-            type: 3, // STRING
-            required: true
-        },
-        {
-            name: 'причина',
-            description: 'Причина мута',
-            type: 3, // STRING
-            required: false
-        }
-    ]
-},
-{
-    name: 'unmute',
-    description: 'Снять мут с пользователя',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь для размута',
-            type: 6, // USER
-            required: true
-        },
-        {
-            name: 'причина',
-            description: 'Причина размута',
-            type: 3, // STRING
-            required: false
-        }
-    ]
-},
-{
-    name: 'warn',
-    description: 'Выдать предупреждение',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь для предупреждения',
-            type: 6, // USER
-            required: true
-        },
-        {
-            name: 'причина',
-            description: 'Причина предупреждения',
-            type: 3, // STRING
-            required: true
-        }
-    ]
-},
-{
-    name: 'warnings',
-    description: 'Посмотреть предупреждения пользователя',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь',
-            type: 6, // USER
-            required: true
-        }
-    ]
-},
-{
-    name: 'clearwarns',
-    description: 'Очистить предупреждения',
-    options: [
-        {
-            name: 'пользователь',
-            description: 'Пользователь',
-            type: 6, // USER
-            required: true
-        }
-    ]
-},
-{
-    name: 'modsetup',
-    description: 'Настройка системы модерации',
-    options: [
-        {
-            name: 'канал',
-            description: 'Канал для логов модерации',
-            type: 7, // CHANNEL
-            required: false
-        },
-        {
-            name: 'роль',
-            description: 'Роль для мута',
-            type: 8, // ROLE
-            required: false
-        },
-        {
-            name: 'статус',
-            description: 'Включить/выключить авто-модерацию',
-            type: 5, // BOOLEAN
-            required: false
-        }
-    ]
-}
+            {
+                name: 'причина',
+                description: 'Причина бана',
+                type: 3, // STRING
+                required: false
+            },
+            {
+                name: 'дни',
+                description: 'Удалить сообщения за последние дни',
+                type: 4, // INTEGER
+                required: false,
+                min_value: 0,
+                max_value: 7
+            }
+        ]
+    },
+    {
+        name: 'kick',
+        description: 'Кикнуть пользователя',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь для кика',
+                type: 6, // USER
+                required: true
+            },
+            {
+                name: 'причина',
+                description: 'Причина кика',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'mute',
+        description: 'Заглушить пользователя',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь для мута',
+                type: 6, // USER
+                required: true
+            },
+            {
+                name: 'время',
+                description: 'Время мута (1m, 1h, 1d)',
+                type: 3, // STRING
+                required: true
+            },
+            {
+                name: 'причина',
+                description: 'Причина мута',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'unmute',
+        description: 'Снять мут с пользователя',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь для размута',
+                type: 6, // USER
+                required: true
+            },
+            {
+                name: 'причина',
+                description: 'Причина размута',
+                type: 3, // STRING
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'warn',
+        description: 'Выдать предупреждение',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь для предупреждения',
+                type: 6, // USER
+                required: true
+            },
+            {
+                name: 'причина',
+                description: 'Причина предупреждения',
+                type: 3, // STRING
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'warnings',
+        description: 'Посмотреть предупреждения пользователя',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь',
+                type: 6, // USER
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'clearwarns',
+        description: 'Очистить предупреждения',
+        options: [
+            {
+                name: 'пользователь',
+                description: 'Пользователь',
+                type: 6, // USER
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'modsetup',
+        description: 'Настройка системы модерации',
+        options: [
+            {
+                name: 'канал',
+                description: 'Канал для логов модерации',
+                type: 7, // CHANNEL
+                required: false
+            },
+            {
+                name: 'роль',
+                description: 'Роль для мута',
+                type: 8, // ROLE
+                required: false
+            },
+            {
+                name: 'статус',
+                description: 'Включить/выключить авто-модерацию',
+                type: 5, // BOOLEAN
+                required: false
+            }
         ]
     }
 ];
