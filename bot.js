@@ -696,6 +696,73 @@ app.get('/permissions/:guildId', requireAdmin, async (req, res) => {
     }
 });
 
+app.get('/guild/:guildId/settings', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    try {
+        // 1. Проверяем, что пользователь состоит в этом сервере и является админом
+        const userGuilds = req.session.guilds || [];
+        const userGuild = userGuilds.find(g => g.id === guildId);
+        
+        if (!userGuild) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Вы не являетесь участником этого сервера.'
+            ));
+        }
+        
+        if ((userGuild.permissions & 0x8) !== 0x8) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Требуются права администратора сервера.'
+            ));
+        }
+        
+        console.log(`🔍 Loading settings page for guild: ${guildId}, user: ${user.username}`);
+        
+        // 2. Получаем информацию о сервере
+        const guild = {
+            id: guildId,
+            name: userGuild.name || `Сервер (${guildId})`,
+            icon: userGuild.icon ? 
+                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
+                null,
+            approximate_member_count: userGuild.approximate_member_count || 0
+        };
+        
+        // 3. Проверяем, есть ли бот на сервере
+        let botInGuild = false;
+        let botMember = null;
+        
+        try {
+            const discordGuild = client.guilds.cache.get(guildId);
+            if (discordGuild) {
+                botInGuild = true;
+                botMember = discordGuild.members.me;
+                guild.approximate_member_count = discordGuild.memberCount;
+            }
+        } catch (error) {
+            console.error('Error checking bot presence:', error);
+        }
+        
+        // 4. Получаем настройки сервера
+        const serverSettings = getServerSettings(guildId);
+        
+        // 5. Отправляем страницу настроек
+        res.send(createGuildSettingsPage(user, guild, serverSettings, botInGuild, baseUrl));
+        
+    } catch (error) {
+        console.error('❌ Critical error in guild settings route:', error);
+        
+        res.status(500).send(createErrorPage(
+            'Внутренняя ошибка',
+            'Произошла непредвиденная ошибка при загрузке страницы настроек.'
+        ));
+    }
+});
+
 // API для сохранения разрешений
 app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
     const guildId = req.params.guildId;
@@ -2737,6 +2804,608 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
 
         // Инициализация счетчиков
         ${availableCommands.map(cmd => `updateSelectedCount('${cmd.id}');`).join('\n        ')}
+    </script>
+</body>
+</html>`;
+}
+
+function createGuildSettingsPage(user, guild, settings, botInGuild, baseUrl) {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${guild.name} - Настройки</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            padding: 20px;
+            border-right: 1px solid var(--border);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        .main-content {
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary);
+        }
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin-right: 20px;
+            border: 3px solid var(--primary);
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 5px 0;
+            background: var(--surface-light);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--text);
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
+        }
+        .nav-icon {
+            font-size: 1.3rem;
+            margin-right: 15px;
+            width: 24px;
+            text-align: center;
+        }
+        .logout-btn {
+            background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%);
+            color: white;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            width: 100%;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .logout-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(237, 66, 69, 0.3);
+        }
+        .guild-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        .guild-icon {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin-right: 30px;
+            border: 4px solid var(--surface-light);
+            object-fit: cover;
+        }
+        .guild-icon-placeholder {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin-right: 30px;
+            color: white;
+            border: 4px solid var(--surface-light);
+        }
+        .guild-info {
+            flex: 1;
+        }
+        .guild-name {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .guild-stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .guild-stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text);
+            display: block;
+        }
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .settings-container {
+            background: var(--surface);
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+        .settings-section {
+            padding: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        .settings-section:last-child {
+            border-bottom: none;
+        }
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .section-icon {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .setting-item {
+            background: var(--surface-light);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .setting-info {
+            flex: 1;
+        }
+        .setting-name {
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 5px;
+            font-size: 1.1rem;
+        }
+        .setting-description {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .setting-value {
+            color: var(--success);
+            font-weight: 600;
+            font-size: 1rem;
+            padding: 8px 15px;
+            background: rgba(87, 242, 135, 0.1);
+            border-radius: 8px;
+            border: 1px solid var(--success);
+        }
+        .bot-status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .bot-status.online {
+            background: linear-gradient(135deg, var(--success) 0%, rgba(87, 242, 135, 0.1) 100%);
+            border: 1px solid var(--success);
+        }
+        .bot-status.offline {
+            background: linear-gradient(135deg, var(--danger) 0%, rgba(237, 66, 69, 0.1) 100%);
+            border: 1px solid var(--danger);
+        }
+        .bot-status.warning {
+            background: linear-gradient(135deg, var(--warning) 0%, rgba(254, 231, 92, 0.1) 100%);
+            border: 1px solid var(--warning);
+            color: var(--text);
+        }
+        .bot-icon {
+            font-size: 2rem;
+        }
+        .back-btn {
+            background: linear-gradient(135deg, var(--surface-light) 0%, var(--surface) 100%);
+            color: var(--text);
+            padding: 12px 25px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
+        }
+        .back-btn:hover {
+            border-color: var(--primary);
+            transform: translateX(-5px);
+        }
+        .no-settings {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        .no-settings-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        @media (max-width: 1024px) {
+            .guild-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .guild-icon, .guild-icon-placeholder {
+                margin-right: 0;
+                margin-bottom: 20px;
+            }
+            .guild-stats {
+                justify-content: center;
+            }
+        }
+        @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 80px 20px 30px;
+            }
+            .guild-name {
+                font-size: 2rem;
+            }
+            .settings-section {
+                padding: 20px;
+            }
+        }
+        @media (max-width: 480px) {
+            .guild-stats {
+                flex-direction: column;
+                gap: 15px;
+            }
+            .setting-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            .setting-value {
+                align-self: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+    
+    <div class="sidebar" id="sidebar">
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold; font-size: 1.1rem;">${user.global_name || user.username}</div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
+                <div style="color: var(--success); font-size: 0.8rem; margin-top: 5px; font-weight: 600;">✅ Администратор</div>
+            </div>
+        </div>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Навигация</div>
+        
+        <a href="/" class="nav-item">
+            <span class="nav-icon">🏠</span>
+            Главная
+        </a>
+        <a href="/permissions" class="nav-item">
+            <span class="nav-icon">🔐</span>
+            Управление правами
+        </a>
+
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
+        
+        <a href="/permissions/${guild.id}" class="nav-item">
+            <span class="nav-icon">🔐</span>
+            Права доступа
+        </a>
+        <a href="/guild/${guild.id}/settings" class="nav-item active">
+            <span class="nav-icon">⚙️</span>
+            Настройки сервера
+        </a>
+
+        <a href="/auth/logout" class="logout-btn">
+            <span class="nav-icon">🚪</span>
+            Выйти
+        </a>
+    </div>
+
+    <div class="main-content">
+        <a href="/permissions" class="back-btn">
+            <span class="nav-icon">⬅️</span>
+            Назад к списку серверов
+        </a>
+        
+        <div class="guild-header">
+            ${guild.icon ? 
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="guild-icon">` :
+                `<div class="guild-icon-placeholder">🏰</div>`
+            }
+            <div class="guild-info">
+                <h1 class="guild-name">${guild.name}</h1>
+                <p style="color: var(--text-secondary); font-size: 1.1rem;">Настройки сервера</p>
+                
+                <div class="guild-stats">
+                    <div class="guild-stat">
+                        <span class="stat-value">${botInGuild ? '🤖' : '❌'}</span>
+                        <span class="stat-label">Бот</span>
+                    </div>
+                    <div class="guild-stat">
+                        <span class="stat-value">${guild.approximate_member_count || 'N/A'}</span>
+                        <span class="stat-label">Участников</span>
+                    </div>
+                    <div class="guild-stat">
+                        <span class="stat-value">${Object.keys(settings).filter(k => !k.startsWith('_')).length}</span>
+                        <span class="stat-label">Настроек</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bot-status ${botInGuild ? 'online' : 'offline'}">
+            <div class="bot-icon">${botInGuild ? '🤖' : '❌'}</div>
+            <div>
+                <strong>Статус бота:</strong> ${botInGuild ? '✅ Бот находится на сервере' : '❌ Бот не добавлен на сервер'}
+                ${!botInGuild ? `
+                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                        <a href="https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8&guild_id=${guild.id}" 
+                           target="_blank" 
+                           style="color: var(--primary); text-decoration: underline;">
+                            Пригласить бота на сервер
+                        </a>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+
+        <div class="settings-container">
+            <div class="settings-section">
+                <div class="section-title">
+                    <div class="section-icon">📄</div>
+                    <div>Настройки транскриптов</div>
+                </div>
+                
+                ${settings.transcriptChannelId ? `
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Канал для транскриптов</div>
+                            <div class="setting-description">Канал, в который отправляются созданные транскрипты</div>
+                        </div>
+                        <div class="setting-value">
+                            ${settings.transcriptChannelId === '1430613860473114805' ? 'По умолчанию' : `ID: ${settings.transcriptChannelId}`}
+                        </div>
+                    </div>
+                ` : `
+                    <div class="no-settings">
+                        <div class="no-settings-icon">📄</div>
+                        <h3>Настройки транскриптов не заданы</h3>
+                        <p>Используйте команду <code>/settranscript</code> для настройки</p>
+                    </div>
+                `}
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title">
+                    <div class="section-icon">🌐</div>
+                    <div>Настройки перевода</div>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-name">Автоматический перевод</div>
+                        <div class="setting-description">Включен ли автоматический перевод сообщений по реакциям</div>
+                    </div>
+                    <div class="setting-value">
+                        ${settings.translationEnabled ? '✅ Включен' : '❌ Выключен'}
+                    </div>
+                </div>
+
+                ${settings.disabledTranslationChannels && settings.disabledTranslationChannels.length > 0 ? `
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Отключенные каналы</div>
+                            <div class="setting-description">Каналы, где перевод отключен</div>
+                        </div>
+                        <div class="setting-value">
+                            ${settings.disabledTranslationChannels.length} каналов
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${settings.protectedRoles && settings.protectedRoles.length > 0 ? `
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Защищенные роли</div>
+                            <div class="setting-description">Роли, чьи сообщения не переводятся</div>
+                        </div>
+                        <div class="setting-value">
+                            ${settings.protectedRoles.length} ролей
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title">
+                    <div class="section-icon">⚡</div>
+                    <div>Настройки автоудаления</div>
+                </div>
+                
+                ${settings.enabled !== undefined ? `
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Автоудаление сообщений</div>
+                            <div class="setting-description">Включено ли автоматическое удаление сообщений</div>
+                        </div>
+                        <div class="setting-value">
+                            ${settings.enabled ? '✅ Включено' : '❌ Выключено'}
+                        </div>
+                    </div>
+
+                    ${settings.delay ? `
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Задержка удаления</div>
+                                <div class="setting-description">Время через которое удаляются сообщения</div>
+                            </div>
+                            <div class="setting-value">
+                                ${settings.delay} мс
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${settings.exemptRoles && settings.exemptRoles.length > 0 ? `
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">Исключенные роли</div>
+                                <div class="setting-description">Роли, чьи сообщения не удаляются</div>
+                            </div>
+                            <div class="setting-value">
+                                ${settings.exemptRoles.length} ролей
+                            </div>
+                        </div>
+                    ` : ''}
+                ` : `
+                    <div class="no-settings">
+                        <div class="no-settings-icon">⚡</div>
+                        <h3>Настройки автоудаления не заданы</h3>
+                        <p>Используйте команду <code>/autodelete</code> для настройки</p>
+                    </div>
+                `}
+            </div>
+
+            ${voiceRegionSettings.has(guild.id) ? `
+                <div class="settings-section">
+                    <div class="section-title">
+                        <div class="section-icon">🌍</div>
+                        <div>Настройки региона</div>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-name">Голосовой регион</div>
+                            <div class="setting-description">Настроенный регион голосового сервера</div>
+                        </div>
+                        <div class="setting-value">
+                            ${getRegionName(voiceRegionSettings.get(guild.id).regionCode)}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+
+        <div style="text-align: center; margin-top: 40px; color: var(--text-secondary); font-size: 0.9rem;">
+            <p>💡 Для изменения настроек используйте соответствующие команды в Discord</p>
+            <p><code>/settranscript</code> • <code>/translation</code> • <code>/autodelete</code> • <code>/регион</code></p>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+        }
+        
+        // Закрываем sidebar при клике вне его области на мобильных устройствах
+        document.addEventListener('click', (event) => {
+            const sidebar = document.getElementById('sidebar');
+            const mobileBtn = document.querySelector('.mobile-menu-btn');
+            
+            if (window.innerWidth <= 768 && sidebar.classList.contains('active')) {
+                if (!sidebar.contains(event.target) && !mobileBtn.contains(event.target)) {
+                    sidebar.classList.remove('active');
+                }
+            }
+        });
     </script>
 </body>
 </html>`;
