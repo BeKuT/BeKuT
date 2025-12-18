@@ -320,6 +320,42 @@ async function registerSlashCommands() {
     }
 }
 
+// ==================== MIDDLEWARE ФУНКЦИИ ====================
+
+// Проверка аутентификации
+function requireAuth(req, res, next) {
+    if (req.session.isAuthenticated) {
+        return next();
+    }
+    res.redirect('/');
+}
+
+// Проверка прав администратора
+function requireAdmin(req, res, next) {
+    if (req.session.isAuthenticated) {
+        // Проверяем, является ли пользователь администратором сервера
+        const guildId = req.params.guildId || req.body.guildId;
+        const userGuilds = req.session.guilds || [];
+        
+        // Если запрос связан с конкретным сервером, проверяем права администратора в нем
+        if (guildId) {
+            const userGuild = userGuilds.find(g => g.id === guildId);
+            if (userGuild && (userGuild.permissions & 0x8) === 0x8) {
+                return next();
+            }
+        } else {
+            // Для общих страниц проверяем наличие хотя бы одного сервера с правами администратора
+            const hasAdminGuild = userGuilds.some(g => (g.permissions & 0x8) === 0x8);
+            if (hasAdminGuild) {
+                return next();
+            }
+        }
+    }
+    
+    // Если не прошли проверку - перенаправляем на главную
+    res.redirect('/');
+}
+
 // ==================== EXPRESS СЕРВЕР ====================
 
 const app = express();
@@ -345,51 +381,85 @@ app.use(session({
     store: new session.MemoryStore() // В продакшене используйте Redis
 }));
 
-// ==================== ФУНКЦИИ ====================
-function getBaseUrl() {
-    // Проверяем в порядке приоритета
-    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        const url = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-        console.log('🌐 Using RAILWAY_PUBLIC_DOMAIN:', url);
-        return url;
-    }
-    
-    if (process.env.RAILWAY_STATIC_URL) {
-        let url = process.env.RAILWAY_STATIC_URL;
-        // Убедимся, что URL начинается с https://
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'https://' + url;
-        }
-        console.log('🌐 Using RAILWAY_STATIC_URL:', url);
-        return url;
-    }
-    
-    const localUrl = `http://localhost:${PORT}`;
-    console.log('🌐 Using local URL:', localUrl);
-    return localUrl;
-}
-// Получение разрешений для сервера
-function getGuildPermissions(guildId) {
-    if (!commandPermissions.has(guildId)) {
-        commandPermissions.set(guildId, {
-            'region': [], // Разрешенные роли для команды /регион
-            'transcript': [], // Разрешенные роли для команды /transcript
-            'ticket': [] // Разрешенные роли для команды /ticket
-        });
-    }
-    return commandPermissions.get(guildId);
-}
+// ==================== МАРШРУТЫ АВТОРИЗАЦИИ ====================
 
-// Сохранение разрешений
-function savePermissions() {
-    const permissionsObj = {};
-    for (const [guildId, permissions] of commandPermissions.entries()) {
-        permissionsObj[guildId] = permissions;
+// Маршрут для входа через Discord OAuth2
+app.get('/auth/discord', (req, res) => {
+    const state = Math.random().toString(36).substring(7);
+    req.session.authState = state;
+    
+    const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: `${getBaseUrl()}/auth/callback`,
+        response_type: 'code',
+        scope: 'identify guilds',
+        state: state
+    });
+    
+    res.redirect(`https://discord.com/oauth2/authorize?${params}`);
+});
+
+// Callback от Discord
+app.get('/auth/callback', async (req, res) => {
+    const { code, state } = req.query;
+    
+    if (!code || !state || state !== req.session.authState) {
+        return res.redirect('/');
     }
-    // В реальном проекте сохраняйте в базу данных
-    console.log('💾 Permissions saved to memory');
-    return permissionsObj;
-}
+    
+    try {
+        // Получаем токен
+        const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
+            new URLSearchParams({
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: `${getBaseUrl()}/auth/callback`
+            }), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+        
+        const { access_token, token_type } = tokenResponse.data;
+        
+        // Получаем информацию о пользователе
+        const userResponse = await axios.get('https://discord.com/api/users/@me', {
+            headers: {
+                Authorization: `${token_type} ${access_token}`
+            }
+        });
+        
+        // Получаем сервера пользователя
+        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+            headers: {
+                Authorization: `${token_type} ${access_token}`
+            }
+        });
+        
+        // Сохраняем в сессии
+        req.session.isAuthenticated = true;
+        req.session.user = userResponse.data;
+        req.session.guilds = guildsResponse.data;
+        req.session.accessToken = access_token;
+        req.session.tokenType = token_type;
+        
+        res.redirect('/');
+        
+    } catch (error) {
+        console.error('Auth error:', error.response?.data || error.message);
+        res.redirect('/');
+    }
+});
+
+// Выход
+app.get('/auth/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/');
+});
+
 // ==================== СТРАНИЦЫ ====================
 
 app.get('/', (req, res) => {
@@ -723,7 +793,6 @@ app.get('/admin/transcripts', requireAuth, (req, res) => {
     
     res.send(html);
 });
-
 // ==================== HTML ШАБЛОНЫ ====================
 
 function createUnauthorizedPage(baseUrl) {
