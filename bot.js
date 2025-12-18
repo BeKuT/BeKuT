@@ -6547,9 +6547,6 @@ client.on('interactionCreate', async (interaction) => {
             }
             break;
     }
-}
-
-                    
                     switch(action) {
                         case 'on':
                             translationSettings.translationEnabled = true;
