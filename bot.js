@@ -326,29 +326,72 @@ async function registerSlashCommands() {
 // ==================== ФУНКЦИИ ====================
 
 function getBaseUrl() {
-    // Если есть Railway Static URL
+    // Проверяем разные источники для получения URL
     if (process.env.RAILWAY_STATIC_URL) {
         const url = process.env.RAILWAY_STATIC_URL;
-        if (!url.startsWith('http')) {
-            return `https://${url}`;
+        console.log(`🌐 RAILWAY_STATIC_URL found: ${url}`);
+        
+        // Очищаем URL от возможных пробелов
+        const cleanUrl = url.trim();
+        
+        // Проверяем, содержит ли URL протокол
+        if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
+            console.log(`✅ Using full URL: ${cleanUrl}`);
+            return cleanUrl;
+        } else {
+            // Если нет протокола, добавляем https://
+            const fullUrl = `https://${cleanUrl}`;
+            console.log(`🔗 Added protocol: ${fullUrl}`);
+            return fullUrl;
         }
-        return url;
     }
     
-    // Если есть Railway public URL
+    // Проверяем другие возможные источники
     if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        console.log(`🌐 RAILWAY_PUBLIC_DOMAIN found: ${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}`;
     }
     
-    // В режиме разработки
-    if (process.env.NODE_ENV === 'development') {
-        return `http://localhost:${PORT}`;
+    // Проверяем NODE_ENV
+    if (process.env.NODE_ENV === 'production') {
+        console.log('⚠️ Production mode but no URL found, using fallback');
+        return 'https://ваш-проект.railway.app'; // Замените на ваш фактический домен
     }
     
-    // По умолчанию используем localhost с портом
+    // Для разработки
+    console.log(`🌐 Development mode: http://localhost:${PORT}`);
     return `http://localhost:${PORT}`;
 }
 
+// Альтернативная версия с отладкой
+function getBaseUrlDebug() {
+    console.log('=== DEBUG BASE URL ===');
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
+    console.log('RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
+    console.log('PORT:', PORT);
+    
+    // Пробуем разные варианты
+    const possibleUrls = [
+        process.env.RAILWAY_STATIC_URL,
+        process.env.RAILWAY_PUBLIC_DOMAIN,
+        process.env.VERCEL_URL,
+        process.env.RENDER_EXTERNAL_URL
+    ].filter(Boolean);
+    
+    console.log('Possible URLs:', possibleUrls);
+    
+    if (possibleUrls.length > 0) {
+        let url = possibleUrls[0].trim();
+        if (!url.startsWith('http')) {
+            url = `https://${url}`;
+        }
+        console.log(`Selected URL: ${url}`);
+        return url;
+    }
+    
+    return `http://localhost:${PORT}`;
+}
 // Функция для получения разрешений сервера
 function getGuildPermissions(guildId) {
     const savedPerms = commandPermissions.get(guildId) || {};
@@ -425,32 +468,52 @@ app.use(session({
 }));
 
 // ==================== МАРШРУТЫ АВТОРИЗАЦИИ ====================
-
 // Маршрут для входа через Discord OAuth2
 app.get('/auth/discord', (req, res) => {
     const state = Math.random().toString(36).substring(7);
     req.session.authState = state;
     
+    const baseUrl = getBaseUrl();
+    const redirectUri = `${baseUrl}/auth/callback`;
+    
+    console.log(`🔗 OAuth2 Redirect URI: ${redirectUri}`);
+    console.log(`📱 Client ID: ${CLIENT_ID ? '✅ Set' : '❌ Missing'}`);
+    
     const params = new URLSearchParams({
         client_id: CLIENT_ID,
-        redirect_uri: `${getBaseUrl()}/auth/callback`,
+        redirect_uri: redirectUri,
         response_type: 'code',
         scope: 'identify guilds',
         state: state
     });
     
-    res.redirect(`https://discord.com/oauth2/authorize?${params}`);
+    const oauthUrl = `https://discord.com/oauth2/authorize?${params}`;
+    console.log(`🌐 Full OAuth2 URL: ${oauthUrl}`);
+    
+    res.redirect(oauthUrl);
 });
 
 // Callback от Discord
 app.get('/auth/callback', async (req, res) => {
     const { code, state } = req.query;
     
+    console.log('=== OAuth2 Callback Start ===');
+    console.log('Code:', code ? '✅ Received' : '❌ Missing');
+    console.log('State:', state);
+    console.log('Session state:', req.session.authState);
+    
     if (!code || !state || state !== req.session.authState) {
+        console.log('❌ Invalid OAuth2 callback parameters');
         return res.redirect('/');
     }
     
     try {
+        const baseUrl = getBaseUrl();
+        const redirectUri = `${baseUrl}/auth/callback`;
+        
+        console.log(`🔄 Processing OAuth2 token exchange`);
+        console.log(`📤 Redirect URI: ${redirectUri}`);
+        
         // Получаем токен
         const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', 
             new URLSearchParams({
@@ -458,13 +521,16 @@ app.get('/auth/callback', async (req, res) => {
                 client_secret: CLIENT_SECRET,
                 grant_type: 'authorization_code',
                 code: code,
-                redirect_uri: `${getBaseUrl()}/auth/callback`
+                redirect_uri: redirectUri
             }), {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
-                }
+                },
+                timeout: 10000 // Добавляем timeout
             }
         );
+        
+        console.log('✅ Token received successfully');
         
         const { access_token, token_type } = tokenResponse.data;
         
@@ -489,18 +555,29 @@ app.get('/auth/callback', async (req, res) => {
         req.session.accessToken = access_token;
         req.session.tokenType = token_type;
         
+        console.log(`✅ User authenticated: ${userResponse.data.username}`);
+        console.log(`🏰 User has ${guildsResponse.data.length} guilds`);
+        
+        // Очищаем state из сессии
+        delete req.session.authState;
+        
         res.redirect('/');
         
     } catch (error) {
-        console.error('Auth error:', error.response?.data || error.message);
-        res.redirect('/');
+        console.error('❌ Auth error details:');
+        console.error('Status:', error.response?.status);
+        console.error('Data:', error.response?.data);
+        console.error('Message:', error.message);
+        
+        // Отладочная информация
+        console.log('=== Debug Info ===');
+        console.log('CLIENT_ID:', CLIENT_ID ? 'Set' : 'Missing');
+        console.log('CLIENT_SECRET:', CLIENT_SECRET ? 'Set' : 'Missing');
+        console.log('Base URL:', getBaseUrl());
+        
+        // Перенаправляем на страницу с ошибкой
+        res.redirect('/auth/error');
     }
-});
-
-// Выход
-app.get('/auth/logout', (req, res) => {
-    req.session.destroy();
-    res.redirect('/');
 });
 
 // ==================== СТРАНИЦЫ ====================
