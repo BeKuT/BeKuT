@@ -36,6 +36,9 @@ const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
 const MODERATOR_ROLE_IDS = process.env.MODERATOR_ROLE_IDS?.split(',').map(id => id.trim()) || [];
 const TICKET_CHANNEL_NAME_TEMPLATE = process.env.TICKET_CHANNEL_NAME_TEMPLATE || "ticket-{username}";
 
+// ДОБАВЬТЕ эти переменные для разрешений команд
+const REGION_COMMAND_ALLOWED_ROLES = process.env.REGION_COMMAND_ALLOWED_ROLES?.split(',').map(id => id.trim()) || [];
+
 // Проверка наличия токена
 if (!token) {
     console.error('❌ CRITICAL ERROR: DISCORD_TOKEN not found!');
@@ -320,7 +323,47 @@ async function registerSlashCommands() {
     }
 }
 
-// ==================== MIDDLEWARE ФУНКЦИИ ====================
+// ==================== ФУНКЦИИ ====================
+
+function getBaseUrl() {
+    // Если есть Railway Static URL
+    if (process.env.RAILWAY_STATIC_URL) {
+        const url = process.env.RAILWAY_STATIC_URL;
+        if (!url.startsWith('http')) {
+            return `https://${url}`;
+        }
+        return url;
+    }
+    
+    // Если есть Railway public URL
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
+    
+    // В режиме разработки
+    if (process.env.NODE_ENV === 'development') {
+        return `http://localhost:${PORT}`;
+    }
+    
+    // По умолчанию используем localhost с портом
+    return `http://localhost:${PORT}`;
+}
+
+// Функция для получения разрешений сервера
+function getGuildPermissions(guildId) {
+    const savedPerms = commandPermissions.get(guildId) || {};
+    return savedPerms;
+}
+
+// Функция для сохранения разрешений (здесь можно добавить сохранение в файл/БД)
+function savePermissions() {
+    // Сохраняем в переменную окружения (упрощенный вариант)
+    const perms = {};
+    for (const [guildId, guildPerms] of commandPermissions) {
+        perms[guildId] = guildPerms;
+    }
+    return perms;
+}
 
 // Проверка аутентификации
 function requireAuth(req, res, next) {
