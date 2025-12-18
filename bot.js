@@ -326,11 +326,18 @@ async function registerSlashCommands() {
 // ==================== ФУНКЦИИ ====================
 
 function getBaseUrl() {
-    // Используйте RAILWAY_STATIC_URL если он установлен, иначе localhost для разработки
-    if (process.env.NODE_ENV === 'production') {
-        return process.env.RAILWAY_STATIC_URL || `https://${process.env.RAILWAY_PROJECT_NAME}.up.railway.app`;
-    }
-    return `http://localhost:${PORT}`;
+    // ЖЕСТКО ЗАДАЕМ URL для OAuth2
+    const HARDCODED_URL = 'https://panel-haki.up.railway.app';
+    
+    // Логируем для отладки
+    console.log('========== BASE URL DEBUG ==========');
+    console.log('🚀 Hardcoded URL:', HARDCODED_URL);
+    console.log('🌐 NODE_ENV:', process.env.NODE_ENV);
+    console.log('🚂 RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
+    console.log('📦 RAILWAY_PROJECT_NAME:', process.env.RAILWAY_PROJECT_NAME);
+    console.log('====================================');
+    
+    return HARDCODED_URL;
 }
 // Функция для получения разрешений сервера
 function getGuildPermissions(guildId) {
