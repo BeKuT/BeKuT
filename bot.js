@@ -300,7 +300,7 @@ const slashCommands = [
                 description: 'Код региона (только для изменения)',
                 type: 3, // STRING
                 required: false
-            }
+            },
           {
     name: 'ban',
     description: 'Забанить пользователя',
