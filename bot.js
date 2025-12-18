@@ -326,71 +326,8 @@ async function registerSlashCommands() {
 // ==================== ФУНКЦИИ ====================
 
 function getBaseUrl() {
-    // Проверяем разные источники для получения URL
-    if (process.env.RAILWAY_STATIC_URL) {
-        const url = process.env.RAILWAY_STATIC_URL;
-        console.log(`🌐 RAILWAY_STATIC_URL found: ${url}`);
-        
-        // Очищаем URL от возможных пробелов
-        const cleanUrl = url.trim();
-        
-        // Проверяем, содержит ли URL протокол
-        if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
-            console.log(`✅ Using full URL: ${cleanUrl}`);
-            return cleanUrl;
-        } else {
-            // Если нет протокола, добавляем https://
-            const fullUrl = `https://${cleanUrl}`;
-            console.log(`🔗 Added protocol: ${fullUrl}`);
-            return fullUrl;
-        }
-    }
-    
-    // Проверяем другие возможные источники
-    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-        console.log(`🌐 RAILWAY_PUBLIC_DOMAIN found: ${process.env.RAILWAY_PUBLIC_DOMAIN}`);
-        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}`;
-    }
-    
-    // Проверяем NODE_ENV
-    if (process.env.NODE_ENV === 'production') {
-        console.log('⚠️ Production mode but no URL found, using fallback');
-        return 'https://ваш-проект.railway.app'; // Замените на ваш фактический домен
-    }
-    
-    // Для разработки
-    console.log(`🌐 Development mode: http://localhost:${PORT}`);
-    return `http://localhost:${PORT}`;
-}
-
-// Альтернативная версия с отладкой
-function getBaseUrlDebug() {
-    console.log('=== DEBUG BASE URL ===');
-    console.log('NODE_ENV:', process.env.NODE_ENV);
-    console.log('RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
-    console.log('RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
-    console.log('PORT:', PORT);
-    
-    // Пробуем разные варианты
-    const possibleUrls = [
-        process.env.RAILWAY_STATIC_URL,
-        process.env.RAILWAY_PUBLIC_DOMAIN,
-        process.env.VERCEL_URL,
-        process.env.RENDER_EXTERNAL_URL
-    ].filter(Boolean);
-    
-    console.log('Possible URLs:', possibleUrls);
-    
-    if (possibleUrls.length > 0) {
-        let url = possibleUrls[0].trim();
-        if (!url.startsWith('http')) {
-            url = `https://${url}`;
-        }
-        console.log(`Selected URL: ${url}`);
-        return url;
-    }
-    
-    return `http://localhost:${PORT}`;
+    // ЖЕСТКО ЗАДАЕМ ДОМЕН (временное решение)
+    return 'https://panel-haki.up.railway.app';
 }
 // Функция для получения разрешений сервера
 function getGuildPermissions(guildId) {
