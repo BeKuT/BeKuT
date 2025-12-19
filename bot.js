@@ -5418,8 +5418,7 @@ client.on('interactionCreate', async (interaction) => {
                         });
                     }
                     
-                    const channelId = options.getString('channel_id');
-                    
+                   const transcriptChannelId = interaction.options.getString('channel_id');
                     await interaction.deferReply({ flags: 64 });
                     
                     if (channelId === 'reset') {
@@ -5616,7 +5615,7 @@ case 'ticket':
         });
     }
 
-    const channelId = interaction.options.getString('channel_id');
+    const ticketChannelId = interaction.options.getString('channel_id');
     const categoryId = interaction.options.getString('category_id');
     const roleIds = interaction.options.getString('role_ids').split(',').map(id => id.trim());
 
@@ -6755,7 +6754,7 @@ case 'bans':
                     
                     switch(regionAction) {
                         case 'set':
-                            const channelId = options.getString('channel_id');
+                            const regionChannelId = interaction.options.getString('channel_id');
                             const regionCode = options.getString('регион');
                             
                             if (!channelId || !regionCode) {
