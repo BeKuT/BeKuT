@@ -6291,7 +6291,6 @@ case 'bans':
             }
             break;
     }
-                    switch(action) {
                         case 'on':
                             translationSettings.translationEnabled = true;
                             saveServerSettings(guild.id, translationSettings);
