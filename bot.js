@@ -20,8 +20,7 @@ import axios from 'axios';
 import express from 'express';
 import path from 'path';
 import session from 'express-session';
-
-
+import { setTimeout as setTimeoutAsync } from 'timers/promises';
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
@@ -330,6 +329,20 @@ const slashCommands = [
             }
         ]
     },
+
+{
+    name: 'bans',
+    description: 'Показать список забаненных пользователей',
+    options: [
+        {
+            name: 'страница',
+            description: 'Номер страницы',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 1
+        }
+    ]
+},
     {
         name: 'kick',
         description: 'Кикнуть пользователя',
@@ -432,6 +445,37 @@ const slashCommands = [
             }
         ]
     },
+
+{
+    name: 'clear',
+    description: 'Удалить сообщения в канале',
+    options: [
+        {
+            name: 'количество',
+            description: 'Количество сообщений для удаления (1-100)',
+            type: 4, // INTEGER
+            required: true,
+            min_value: 1,
+            max_value: 100
+        },
+        {
+            name: 'пользователь',
+            description: 'Удалить сообщения только от этого пользователя',
+            type: 6, // USER
+            required: false
+        },
+        {
+            name: 'сообщения_старше',
+            description: 'Удалить сообщения старше указанного времени (в днях)',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 1,
+            max_value: 14
+        }
+    ]
+},
+
+  
     {
         name: 'modsetup',
         description: 'Настройка системы модерации',
@@ -479,18 +523,11 @@ async function registerSlashCommands() {
 // ==================== ФУНКЦИИ ====================
 
 function getBaseUrl() {
-    // ЖЕСТКО ЗАДАЕМ URL для OAuth2
-    const HARDCODED_URL = 'https://panel-haki.up.railway.app';
-    
-    // Логируем для отладки
-    console.log('========== BASE URL DEBUG ==========');
-    console.log('🚀 Hardcoded URL:', HARDCODED_URL);
-    console.log('🌐 NODE_ENV:', process.env.NODE_ENV);
-    console.log('🚂 RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
-    console.log('📦 RAILWAY_PROJECT_NAME:', process.env.RAILWAY_PROJECT_NAME);
-    console.log('====================================');
-    
-    return HARDCODED_URL;
+    // Используем Railway URL если доступен, иначе localhost для разработки
+    return process.env.RAILWAY_STATIC_URL || 
+           process.env.NODE_ENV === 'production' ? 
+           `https://${process.env.RAILWAY_PROJECT_NAME}.up.railway.app` : 
+           `http://localhost:${PORT}`;
 }
 // Функция для получения разрешений сервера
 function getGuildPermissions(guildId) {
@@ -562,9 +599,11 @@ app.use(session({
     cookie: { 
         secure: process.env.NODE_ENV === 'production',
         maxAge: 24 * 60 * 60 * 1000,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+        sameSite: 'lax',
+        httpOnly: true
     },
-    store: new session.MemoryStore() // В продакшене используйте Redis
+    store: new session.MemoryStore(),
+    proxy: process.env.NODE_ENV === 'production' // Важно для Railway
 }));
 
 // ==================== МАРШРУТЫ АВТОРИЗАЦИИ ====================
@@ -6021,6 +6060,172 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.deferReply({ flags: 64 });
 
                 break;
+
+                // Обработчик команды clear
+case 'clear':
+    if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        return interaction.reply({ 
+            content: '❌ У вас нет прав для удаления сообщений!', 
+            flags: 64 
+        });
+    }
+    
+    const amount = options.getInteger('количество');
+    const targetUser = options.getUser('пользователь');
+    const olderThan = options.getInteger('сообщения_старше');
+    
+    await interaction.deferReply({ flags: 64 });
+    
+    try {
+        let messagesDeleted = 0;
+        
+        if (olderThan) {
+            // Удаление сообщений старше указанного времени
+            const cutoffTime = Date.now() - (olderThan * 24 * 60 * 60 * 1000);
+            let lastMessageId = null;
+            
+            while (messagesDeleted < amount) {
+                const fetched = await interaction.channel.messages.fetch({
+                    limit: Math.min(100, amount - messagesDeleted),
+                    before: lastMessageId
+                });
+                
+                if (fetched.size === 0) break;
+                
+                const toDelete = fetched.filter(msg => {
+                    if (msg.createdTimestamp < cutoffTime) {
+                        if (targetUser) {
+                            return msg.author.id === targetUser.id;
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+                
+                if (toDelete.size === 0) break;
+                
+                await interaction.channel.bulkDelete(toDelete, true);
+                messagesDeleted += toDelete.size;
+                lastMessageId = fetched.last().id;
+                
+                if (toDelete.size < 100) break;
+            }
+        } else {
+            // Обычное удаление
+            const fetched = await interaction.channel.messages.fetch({
+                limit: amount
+            });
+            
+            const toDelete = targetUser ? 
+                fetched.filter(msg => msg.author.id === targetUser.id) :
+                fetched;
+            
+            if (toDelete.size > 0) {
+                await interaction.channel.bulkDelete(toDelete, true);
+                messagesDeleted = toDelete.size;
+            }
+        }
+        
+        const embed = new EmbedBuilder()
+            .setColor('#57F287')
+            .setTitle('🗑️ Сообщения удалены')
+            .addFields(
+                { name: '👤 Модератор', value: `${user.tag}`, inline: true },
+                { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
+                { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false }
+            )
+            .setTimestamp();
+        
+        await interaction.editReply({ embeds: [embed] });
+        
+        // Автоматическое удаление сообщения через 5 секунд
+        setTimeout(async () => {
+            try {
+                await interaction.deleteReply();
+            } catch (error) {}
+        }, 5000);
+        
+        // Логирование
+        const settings = getModerationSettings(guild.id);
+        if (settings.logChannel) {
+            const logChannel = guild.channels.cache.get(settings.logChannel);
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('🧹 Очистка сообщений')
+                    .addFields(
+                        { name: '👤 Модератор', value: `${user.tag}`, inline: true },
+                        { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
+                        { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false },
+                        { name: '👤 Целевой пользователь', value: targetUser ? targetUser.tag : 'Все пользователи', inline: false }
+                    )
+                    .setTimestamp();
+                
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+        }
+        
+    } catch (error) {
+        console.error('Clear error:', error);
+        await interaction.editReply('❌ Ошибка при удалении сообщений!');
+    }
+    break;
+
+                // Обработчик команды bans
+case 'bans':
+    if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+        return interaction.reply({ 
+            content: '❌ У вас нет прав для просмотра банов!', 
+            flags: 64 
+        });
+    }
+    
+    const page = options.getInteger('страница') || 1;
+    const perPage = 10;
+    
+    await interaction.deferReply({ flags: 64 });
+    
+    try {
+        const bans = await guild.bans.fetch();
+        const totalBans = bans.size;
+        const totalPages = Math.ceil(totalBans / perPage);
+        
+        if (totalBans === 0) {
+            return interaction.editReply('✅ На этом сервере нет забаненных пользователей.');
+        }
+        
+        if (page > totalPages) {
+            return interaction.editReply(`❌ Страница ${page} не существует. Всего страниц: ${totalPages}`);
+        }
+        
+        const startIndex = (page - 1) * perPage;
+        const endIndex = startIndex + perPage;
+        const pageBans = Array.from(bans.values()).slice(startIndex, endIndex);
+        
+        const bansList = pageBans.map((ban, index) => {
+            const banNumber = startIndex + index + 1;
+            const reason = ban.reason || 'Причина не указана';
+            return `**${banNumber}.** ${ban.user.tag} (${ban.user.id})\n📝 **Причина:** ${reason.substring(0, 100)}${reason.length > 100 ? '...' : ''}`;
+        }).join('\n\n');
+        
+        const embed = new EmbedBuilder()
+            .setColor('#ED4245')
+            .setTitle(`🔨 Список банов - Страница ${page}/${totalPages}`)
+            .setDescription(bansList || 'Нет данных')
+            .addFields(
+                { name: '📊 Всего банов', value: `${totalBans}`, inline: true },
+                { name: '📅 Забанены', value: `${pageBans.length} на этой странице`, inline: true }
+            )
+            .setFooter({ text: `Используйте /bans страница: ${page + 1} для следующей страницы` })
+            .setTimestamp();
+        
+        await interaction.editReply({ embeds: [embed] });
+        
+    } catch (error) {
+        console.error('Bans list error:', error);
+        await interaction.editReply('❌ Ошибка при получении списка банов!');
+    }
+    break;
   
                 case 'ban':
             if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
@@ -7864,6 +8069,9 @@ client.on('ready', async () => {
     // Регистрируем слеш-команды
     await registerSlashCommands();
     
+    // Запускаем проверку мутов
+    startMuteChecker();
+    
     const transcriptChannel = client.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
     if (transcriptChannel) {
         console.log(`✅ Transcript channel found: #${transcriptChannel.name}`);
@@ -7871,6 +8079,51 @@ client.on('ready', async () => {
         console.log(`❌ Transcript channel not found! Check ID: ${TRANSCRIPT_CHANNEL_ID}`);
     }
 });
+
+// Функция проверки и автоматического размута
+async function startMuteChecker() {
+    setInterval(async () => {
+        const now = Date.now();
+        for (const [key, muteData] of mutedUsers.entries()) {
+            if (muteData.unmuteTime <= now) {
+                try {
+                    const guild = client.guilds.cache.get(muteData.guildId);
+                    if (guild) {
+                        const settings = getModerationSettings(guild.id);
+                        if (settings.muteRole) {
+                            const member = await guild.members.fetch(muteData.userId).catch(() => null);
+                            const muteRole = guild.roles.cache.get(settings.muteRole);
+                            
+                            if (member && muteRole && member.roles.cache.has(muteRole.id)) {
+                                await member.roles.remove(muteRole, 'Автоматический размут');
+                                
+                                // Логирование
+                                if (settings.logChannel) {
+                                    const logChannel = guild.channels.cache.get(settings.logChannel);
+                                    if (logChannel) {
+                                        const embed = new EmbedBuilder()
+                                            .setColor('#57F287')
+                                            .setTitle('🔊 Автоматический размут')
+                                            .addFields(
+                                                { name: '👤 Пользователь', value: `${member.user.tag} (${member.user.id})`, inline: true },
+                                                { name: '⏰ Длительность', value: 'Истекло время мута', inline: true }
+                                            )
+                                            .setTimestamp();
+                                        
+                                        await logChannel.send({ embeds: [embed] });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    mutedUsers.delete(key);
+                } catch (error) {
+                    console.error('Auto-unmute error:', error);
+                }
+            }
+        }
+    }, 60000); // Проверяем каждую минуту
+}
 
 function setCustomStatus() {
     const statuses = [
@@ -8870,8 +9123,28 @@ const BAD_WORDS = ['редиска', 'плохой', 'дурак'];
 function getModerationSettings(guildId) {
     if (!moderationSettings.has(guildId)) {
         moderationSettings.set(guildId, {
-            ...JSON.parse(JSON.stringify(DEFAULT_MODERATION_SETTINGS)),
-            warnings: new Map()
+            enabled: true,
+            logChannel: null,
+            muteRole: null,
+            warnings: new Map(),
+            autoMod: {
+                spam: true,
+                caps: true,
+                links: false,
+                inviteLinks: true,
+                badWords: true
+            },
+            autoModThresholds: {
+                spam: 5,
+                caps: 70,
+                maxWarnings: 3,
+                muteDuration: 24 * 60 * 60 * 1000 // 24 часа
+            },
+            warnAutoDelete: true,
+            logBans: true,
+            logKicks: true,
+            logMutes: true,
+            logWarns: true
         });
     }
     return moderationSettings.get(guildId);
