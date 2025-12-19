@@ -526,7 +526,7 @@ function getBaseUrl() {
     // Используем Railway URL если доступен, иначе localhost для разработки
     return process.env.RAILWAY_STATIC_URL || 
            process.env.NODE_ENV === 'production' ? 
-           `https://${process.env.RAILWAY_PROJECT_NAME}.up.railway.app` : 
+           `https://panel-haki.up.railway.app` : 
            `http://localhost:${PORT}`;
 }
 // Функция для получения разрешений сервера
