@@ -2375,54 +2375,71 @@ function createPermissionsPage(user, adminGuilds, baseUrl) {
             }
         });
         
-        function showInviteLink(guildId) {
-            const inviteLink = \`https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8&guild_id=\${guildId}\`;
+       function showInviteLink(guildId) {
+    const inviteLink = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8&guild_id=${guildId}`;
+    
+    const modal = document.createElement('div');
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100%';
+    modal.style.height = '100%';
+    modal.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.zIndex = '2000';
+    
+    // Используем обратные кавычки и экранируем ${} внутри вложенных строк
+    modal.innerHTML = `
+        <div style="background: var(--surface); padding: 30px; border-radius: 15px; max-width: 500px; width: 90%; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0; color: var(--text); font-size: 1.3rem;">🔗 Пригласить бота на сервер</h3>
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">×</button>
+            </div>
             
-            const modal = document.createElement('div');
-            modal.style.position = 'fixed';
-            modal.style.top = '0';
-            modal.style.left = '0';
-            modal.style.width = '100%';
-            modal.style.height = '100%';
-            modal.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            modal.style.display = 'flex';
-            modal.style.alignItems = 'center';
-            modal.style.justifyContent = 'center';
-            modal.style.zIndex = '2000';
+            <div style="color: var(--text-secondary); margin-bottom: 25px;">
+                Для управления правами боту необходимы администраторские права на сервере.
+            </div>
             
-            modal.innerHTML = \`
-                <div style="background: var(--surface); padding: 30px; border-radius: 15px; max-width: 500px; width: 90%; border: 1px solid var(--border);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3 style="margin: 0; color: var(--text); font-size: 1.3rem;">🔗 Пригласить бота на сервер</h3>
-                        <button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">×</button>
-                    </div>
-                    
-                    <div style="color: var(--text-secondary); margin-bottom: 25px;">
-                        Для управления правами боту необходимы администраторские права на сервере.
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px; margin-bottom: 25px;">
-                        <input type="text" value="\${inviteLink}" readonly style="flex: 1; padding: 12px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: monospace; font-size: 0.9rem;">
-                        <button onclick="copyToClipboard('\${inviteLink}')" style="background: var(--primary); color: white; border: none; padding: 0 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Копировать</button>
-                    </div>
-                    
-                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                        <button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: var(--surface-light); color: var(--text); border: 1px solid var(--border); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Закрыть</button>
-                        <a href="\${inviteLink}" target="_blank" style="background: var(--success); color: var(--background); text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease;">Открыть ссылку</a>
-                    </div>
-                </div>
-            \`;
+            <div style="display: flex; gap: 10px; margin-bottom: 25px;">
+                <input type="text" value="${inviteLink}" readonly style="flex: 1; padding: 12px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: monospace; font-size: 0.9rem;">
+                <button onclick="copyToClipboard('${inviteLink.replace(/'/g, "\\'")}')" style="background: var(--primary); color: white; border: none; padding: 0 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Копировать</button>
+            </div>
             
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: var(--surface-light); color: var(--text); border: 1px solid var(--border); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Закрыть</button>
+                <a href="${inviteLink}" target="_blank" style="background: var(--success); color: var(--background); text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease;">Открыть ссылку</a>
+            </div>
+        </div>
+    `;
             document.body.appendChild(modal);
         }
         
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                alert('Ссылка скопирована в буфер обмена!');
-            }).catch(err => {
-                console.error('Ошибка копирования:', err);
-            });
-        }
+       function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Показываем уведомление о копировании
+        const notification = document.createElement('div');
+        notification.style.position = 'fixed';
+        notification.style.top = '20px';
+        notification.style.right = '20px';
+        notification.style.background = 'var(--success)';
+        notification.style.color = 'white';
+        notification.style.padding = '10px 20px';
+        notification.style.borderRadius = '8px';
+        notification.style.zIndex = '3000';
+        notification.textContent = '✅ Ссылка скопирована в буфер обмена!';
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }).catch(err => {
+        console.error('Ошибка копирования:', err);
+        alert('Не удалось скопировать ссылку. Скопируйте вручную: ' + text);
+    });
+}
     </script>
 </body>
 </html>`;
@@ -5418,7 +5435,7 @@ client.on('interactionCreate', async (interaction) => {
                         });
                     }
                     
-                   const transcriptChannelId = interaction.options.getString('channel_id');
+                   const newChannelId = interaction.options.getString('channel_id');
                     await interaction.deferReply({ flags: 64 });
                     
                     if (channelId === 'reset') {
@@ -5615,7 +5632,7 @@ case 'ticket':
         });
     }
 
-    const ticketChannelId = interaction.options.getString('channel_id');
+     const ticketChannelId = interaction.options.getString('channel_id');
     const categoryId = interaction.options.getString('category_id');
     const roleIds = interaction.options.getString('role_ids').split(',').map(id => id.trim());
 
