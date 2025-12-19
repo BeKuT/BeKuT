@@ -5036,296 +5036,6 @@ function getRegionName(regionCode) {
 
 // Обработчик слеш-команды /регион
 client.on('interactionCreate', async interaction => {
-    if (interaction.isChatInputCommand() && interaction.commandName === 'регион') {
-        const action = interaction.options.getString('действие');
-        
-        // Проверяем доступ
-        if (!checkRegionAccess(interaction.member)) {
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setTitle('❌ Доступ запрещен')
-                .setDescription('У вас нет прав для использования этой команды.')
-                .addFields(
-                    { 
-                        name: 'Требуемые роли', 
-                        value: REGION_COMMAND_ALLOWED_ROLES.length > 0 ? 
-                            REGION_COMMAND_ALLOWED_ROLES.map(id => {
-                                const role = interaction.guild.roles.cache.get(id);
-                                return role ? `• ${role.name}` : `• ${id}`;
-                            }).join('\n') : 'Не настроены', 
-                        inline: false 
-                    }
-                );
-            
-            await interaction.reply({ embeds: [errorEmbed], flags: 64 });
-            return;
-        }
-        
-        // Сначала реплаим, потом деферим
-        try {
-            await interaction.deferReply({ flags: 64 });
-        } catch (deferError) {
-            console.log('Defer error, trying direct reply:', deferError.message);
-            try {
-                await interaction.reply({ content: '🔄 Обрабатываю команду...', flags: 64 });
-            } catch (replyError) {
-                console.error('Both defer and reply failed:', replyError.message);
-                return;
-            }
-        }
-        
-        // Теперь обрабатываем команду
-        try {
-            switch(action) {
-            
-            case 'set':
-                const voiceChannelId = interaction.options.getString('channel_id');
-                const regionCode = interaction.options.getString('регион');
-                
-                if (!voiceChannelId || !regionCode) {
-                    const helpEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
-                        .setTitle('🌍 Управление регионами Discord')
-                        .setDescription(`
-**Использование:**
-\`/регион set channel_id: <ID_голосового_канала> регион: <код_региона>\`
-
-**Примеры:**
-\`/регион set channel_id: 123456789012345678 регион: russia\`
-\`/регион set channel_id: 123456789012345678 регион: europe\`
-\`/регион set channel_id: 123456789012345678 региon: us-central\`
-
-**Доступные регионы:**
-${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`).join('\n')}
-
-**Как получить ID голосового канала:**
-1. Включите режим разработчика в Discord
-2. ПКМ по голосовому каналу → "Копировать ID"
-                        `);
-                    
-                    return interaction.editReply({ embeds: [helpEmbed] });
-                }
-
-                const regionCodeLower = regionCode.toLowerCase();
-
-                if (!availableRegions.includes(regionCodeLower)) {
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor('#ED4245')
-                        .setTitle('❌ Неверный регион')
-                        .setDescription(`Регион \`${regionCode}\` не найден.`)
-                        .addFields(
-                            { name: 'Доступные регионы', value: availableRegions.map(r => `\`${r}\``).join(', '), inline: false }
-                        );
-                    
-                    return interaction.editReply({ embeds: [errorEmbed] });
-                }
-
-                try {
-                    const guild = interaction.guild;
-                    const voiceChannel = await guild.channels.fetch(voiceChannelId);
-                    
-                    if (!voiceChannel) {
-                        return interaction.editReply('❌ Голосовой канал не найден! Проверьте ID.');
-                    }
-
-                    if (voiceChannel.type !== ChannelType.GuildVoice) {
-                        return interaction.editReply('❌ Указанный канал не является голосовым!');
-                    }
-
-                    // Для automatic используем null
-                    const regionToSet = regionCodeLower === 'automatic' ? null : regionCodeLower;
-
-                    // Меняем регион голосового сервера
-                    await voiceChannel.setRTCRegion(regionToSet);
-
-                    // Сохраняем настройки
-                    voiceRegionSettings.set(guild.id, {
-                        voiceChannelId: voiceChannelId,
-                        regionCode: regionCodeLower,
-                        guildId: guild.id,
-                        lastUpdated: new Date()
-                    });
-
-                    const successEmbed = new EmbedBuilder()
-                        .setColor('#57F287')
-                        .setTitle('✅ Регион изменен')
-                        .setDescription(`Регион голосового сервера изменен на: **${getRegionName(regionCodeLower)}**`)
-                        .addFields(
-                            { name: 'Канал', value: `<#${voiceChannelId}>`, inline: true },
-                            { name: 'Регион', value: getRegionName(regionCodeLower), inline: true },
-                            { name: 'Статус', value: '✅ Успешно применен', inline: false }
-                        )
-                        .setFooter({ text: 'Изменения вступят в силу немедленно' })
-                        .setTimestamp();
-
-                    await interaction.editReply({ embeds: [successEmbed] });
-                    console.log(`✅ Voice region changed to: ${regionCodeLower} in ${guild.name}`);
-
-                } catch (error) {
-                    console.error('Voice region change error:', error);
-                    
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor('#ED4245')
-                        .setTitle('❌ Ошибка изменения региона')
-                        .setDescription(`Не удалось изменить регион: ${error.message}`)
-                        .addFields(
-                            { name: 'Возможные причины', value: '• Недостаточно прав\n• Регион недоступен\n• Ошибка Discord API', inline: false }
-                        );
-                    
-                    await interaction.editReply({ embeds: [errorEmbed] });
-                }
-                break;
-                
-            case 'статус':
-                const settings = voiceRegionSettings.get(interaction.guild.id);
-                
-                if (!settings) {
-                    const noSettingsEmbed = new EmbedBuilder()
-                        .setColor('#FEE75C')
-                        .setTitle('ℹ️ Настройки региона')
-                        .setDescription('Регион голосового сервера еще не настроен.')
-                        .addFields(
-                            { name: 'Использование', value: '`/регион set channel_id: <ID_канала> регион: <регион>`', inline: false }
-                        );
-                    
-                    return interaction.editReply({ embeds: [noSettingsEmbed] });
-                }
-
-                try {
-                    const voiceChannel = await interaction.guild.channels.fetch(settings.voiceChannelId);
-                    const currentRegion = voiceChannel.rtcRegion;
-                    
-                    const statusEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
-                        .setTitle('🌍 Текущие настройки региона')
-                        .addFields(
-                            { name: 'Голосовой канал', value: `<#${settings.voiceChannelId}>`, inline: true },
-                            { name: 'Установленный регион', value: getRegionName(settings.regionCode), inline: true },
-                            { name: 'Текущий регион', value: currentRegion ? getRegionName(currentRegion) : 'авто', inline: true },
-                            { name: 'Статус', value: voiceChannel ? '✅ Активен' : '❌ Канал не найден', inline: true },
-                            { name: 'Последнее обновление', value: `<t:${Math.floor(settings.lastUpdated.getTime() / 1000)}:R>`, inline: false }
-                        )
-                        .setFooter({ text: 'Используйте /регион set для изменения настроек' })
-                        .setTimestamp();
-
-                    return interaction.editReply({ embeds: [statusEmbed] });
-
-                } catch (error) {
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor('#ED4245')
-                        .setTitle('❌ Ошибка проверки')
-                        .setDescription('Не удалось проверить настройки региона.');
-                    
-                    return interaction.editReply({ embeds: [errorEmbed] });
-                }
-                
-            case 'сброс':
-                const resetSettings = voiceRegionSettings.get(interaction.guild.id);
-                
-                if (!resetSettings) {
-                    return interaction.editReply('❌ Настройки региона не найдены для сброса.');
-                }
-
-                try {
-                    const voiceChannel = await interaction.guild.channels.fetch(resetSettings.voiceChannelId);
-                    
-                    // Сбрасываем регион (null = автоматический выбор)
-                    await voiceChannel.setRTCRegion(null);
-
-                    // Удаляем настройки
-                    voiceRegionSettings.delete(interaction.guild.id);
-
-                    const resetEmbed = new EmbedBuilder()
-                        .setColor('#57F287')
-                        .setTitle('✅ Регион сброшен')
-                        .setDescription('Регион голосового сервера сброшен на автоматический выбор.')
-                        .addFields(
-                            { name: 'Канал', value: `<#${resetSettings.voiceChannelId}>`, inline: true },
-                            { name: 'Статус', value: 'Автоматический выбор региона', inline: true }
-                        )
-                        .setTimestamp();
-
-                    await interaction.editReply({ embeds: [resetEmbed] });
-                    console.log(`✅ Voice region reset to auto for guild: ${interaction.guild.name}`);
-
-                } catch (error) {
-                    console.error('Voice region reset error:', error);
-                    await interaction.editReply('❌ Ошибка при сбросе региона.');
-                }
-                break;
-                
-            case 'список':
-                const regionsList = availableRegions.map(region => 
-                    `• \`${region}\` - ${getRegionName(region)}`
-                ).join('\n');
-
-                const listEmbed = new EmbedBuilder()
-                    .setColor('#5865F2')
-                    .setTitle('🌍 Доступные регионы Discord')
-                    .setDescription(regionsList)
-                    .setFooter({ text: 'Используйте: /регион set channel_id: <ID_канала> регион: <код_региона>' })
-                    .setTimestamp();
-
-                await interaction.editReply({ embeds: [listEmbed] });
-                break;
-                
-            case 'доступ':
-                const hasAccess = checkRegionAccess(interaction.member);
-                const userRoles = interaction.member.roles.cache.map(role => role.name).join(', ');
-                
-                const accessEmbed = new EmbedBuilder()
-                    .setColor(hasAccess ? '#57F287' : '#ED4245')
-                    .setTitle('🔐 Проверка доступа к командам региона')
-                    .addFields(
-                        { name: 'Статус доступа', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
-                        { name: 'Ваши роли', value: userRoles.length > 100 ? userRoles.substring(0, 100) + '...' : userRoles || 'Нет ролей', inline: false }
-                    );
-                
-                if (REGION_COMMAND_ALLOWED_ROLES.length > 0) {
-                    const allowedRolesInfo = REGION_COMMAND_ALLOWED_ROLES.map(id => {
-                        const role = interaction.guild.roles.cache.get(id);
-                        return role ? `• ${role.name}` : `• ${id}`;
-                    }).join('\n');
-                    
-                    accessEmbed.addFields({ name: 'Требуемые роли', value: allowedRolesInfo, inline: false });
-                }
-                
-                await interaction.editReply({ embeds: [accessEmbed] });
-                break;
-                
-            default:
-                    const defaultHelpEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
-                        .setTitle('🌍 Команда /регион')
-                        .setDescription(`
-**Доступные действия:**
-
-\`/регион set\` - Изменить регион голосового канала
-\`/регион статус\` - Показать текущие настройки региона
-\`/регион сброс\` - Сбросить регион на автоматический выбор
-\`/регион список\` - Показать список доступных регионов
-\`/регион доступ\` - Проверить права доступа
-
-**Пример использования:**
-\`/регион set channel_id: 123456789012345678 регион: russia\`
-                        `);
-                    
-                    await interaction.editReply({ embeds: [defaultHelpEmbed] });
-            }
-        } catch (error) {
-            console.error('Error in region command:', error);
-            if (interaction.deferred) {
-                await interaction.editReply(`❌ Ошибка: ${error.message}`);
-            } else {
-                await interaction.reply({ content: `❌ Ошибка: ${error.message}`, flags: 64 });
-            }
-        }
-    }
-});
-
-// ==================== ОБРАБОТКА СЛЕШ-КОМАНД ====================
-
-client.on('interactionCreate', async (interaction) => {
     // Обработка слеш-команд
     if (interaction.isChatInputCommand()) {
         const { commandName, options, user, member, guild } = interaction;
@@ -5434,10 +5144,10 @@ client.on('interactionCreate', async (interaction) => {
                         });
                     }
                     
-                   const newChannelId = interaction.options.getString('channel_id');
+                    const newChannelId = options.getString('channel_id');
                     await interaction.deferReply({ flags: 64 });
                     
-                    if (channelId === 'reset') {
+                    if (newChannelId === 'reset') {
                         const settings = getServerSettings(guild.id);
                         settings.transcriptChannelId = TRANSCRIPT_CHANNEL_ID;
                         saveServerSettings(guild.id, settings);
@@ -5448,12 +5158,12 @@ client.on('interactionCreate', async (interaction) => {
                         return;
                     }
 
-                    if (!/^\d{17,20}$/.test(channelId)) {
+                    if (!/^\d{17,20}$/.test(newChannelId)) {
                         return interaction.editReply('❌ Укажите корректный ID канала (17-20 цифр)');
                     }
 
                     try {
-                        const channel = await guild.channels.fetch(channelId);
+                        const channel = await guild.channels.fetch(newChannelId);
                         if (!channel) {
                             throw new Error('Канал не найден');
                         }
@@ -5464,11 +5174,11 @@ client.on('interactionCreate', async (interaction) => {
                         }
 
                         const settings = getServerSettings(guild.id);
-                        settings.transcriptChannelId = channelId;
+                        settings.transcriptChannelId = newChannelId;
                         saveServerSettings(guild.id, settings);
 
                         await interaction.editReply({
-                            content: `✅ Канал для транскриптов установлен: <#${channelId}>`
+                            content: `✅ Канал для транскриптов установлен: <#${newChannelId}>`
                         });
                         
                     } catch (error) {
@@ -5510,803 +5220,7 @@ client.on('interactionCreate', async (interaction) => {
                     
                     await interaction.deferReply({ flags: 64 });
 
-                break;
-
-                // Обработчик команды clear
-case 'clear':
-    if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-        return interaction.reply({ 
-            content: '❌ У вас нет прав для удаления сообщений!', 
-            flags: 64 
-        });
-    }
-    
-    const amount = options.getInteger('количество');
-    const targetUser = options.getUser('пользователь');
-    const olderThan = options.getInteger('сообщения_старше');
-    
-    await interaction.deferReply({ flags: 64 });
-    
-    try {
-        let messagesDeleted = 0;
-        
-        if (olderThan) {
-            // Удаление сообщений старше указанного времени
-            const cutoffTime = Date.now() - (olderThan * 24 * 60 * 60 * 1000);
-            let lastMessageId = null;
-            
-            while (messagesDeleted < amount) {
-                const fetched = await interaction.channel.messages.fetch({
-                    limit: Math.min(100, amount - messagesDeleted),
-                    before: lastMessageId
-                });
-                
-                if (fetched.size === 0) break;
-                
-                const toDelete = fetched.filter(msg => {
-                    if (msg.createdTimestamp < cutoffTime) {
-                        if (targetUser) {
-                            return msg.author.id === targetUser.id;
-                        }
-                        return true;
-                    }
-                    return false;
-                });
-                
-                if (toDelete.size === 0) break;
-                
-                await interaction.channel.bulkDelete(toDelete, true);
-                messagesDeleted += toDelete.size;
-                lastMessageId = fetched.last().id;
-                
-                if (toDelete.size < 100) break;
-            }
-        } else {
-            // Обычное удаление
-            const fetched = await interaction.channel.messages.fetch({
-                limit: amount
-            });
-            
-            const toDelete = targetUser ? 
-                fetched.filter(msg => msg.author.id === targetUser.id) :
-                fetched;
-            
-            if (toDelete.size > 0) {
-                await interaction.channel.bulkDelete(toDelete, true);
-                messagesDeleted = toDelete.size;
-            }
-        }
-        
-        const embed = new EmbedBuilder()
-            .setColor('#57F287')
-            .setTitle('🗑️ Сообщения удалены')
-            .addFields(
-                { name: '👤 Модератор', value: `${user.tag}`, inline: true },
-                { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
-                { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false }
-            )
-            .setTimestamp();
-        
-        await interaction.editReply({ embeds: [embed] });
-        
-        // Автоматическое удаление сообщения через 5 секунд
-        setTimeout(async () => {
-            try {
-                await interaction.deleteReply();
-            } catch (error) {}
-        }, 5000);
-        
-        // Логирование
-        const settings = getModerationSettings(guild.id);
-        if (settings.logChannel) {
-            const logChannel = guild.channels.cache.get(settings.logChannel);
-            if (logChannel) {
-                const logEmbed = new EmbedBuilder()
-                    .setColor('#5865F2')
-                    .setTitle('🧹 Очистка сообщений')
-                    .addFields(
-                        { name: '👤 Модератор', value: `${user.tag}`, inline: true },
-                        { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
-                        { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false },
-                        { name: '👤 Целевой пользователь', value: targetUser ? targetUser.tag : 'Все пользователи', inline: false }
-                    )
-                    .setTimestamp();
-                
-                await logChannel.send({ embeds: [logEmbed] });
-            }
-        }
-        
-    } catch (error) {
-        console.error('Clear error:', error);
-        await interaction.editReply('❌ Ошибка при удалении сообщений!');
-    }
-    break;
-
-case 'ticket':
-    // Проверяем права администратора
-    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return interaction.reply({ 
-            content: '❌ Только администраторы могут настраивать систему тикетов!', 
-            flags: 64 
-        });
-    }
-
-     const ticketChannelId = interaction.options.getString('channel_id');
-    const categoryId = interaction.options.getString('category_id');
-    const roleIds = interaction.options.getString('role_ids').split(',').map(id => id.trim());
-
-    await interaction.deferReply({ flags: 64 });
-
-    try {
-        const guild = interaction.guild;
-        const targetChannel = await guild.channels.fetch(channelId);
-        const category = await guild.channels.fetch(categoryId);
-        
-        if (!targetChannel || !category) {
-            return interaction.editReply('❌ Канал или категория не найдены! Проверьте ID.');
-        }
-
-        // Проверяем роли
-        const validRoles = [];
-        for (const roleId of roleIds) {
-            try {
-                const role = await guild.roles.fetch(roleId);
-                if (role) validRoles.push(roleId);
-            } catch (error) {
-                console.log(`Роль ${roleId} не найдена`);
-            }
-        }
-
-        if (validRoles.length === 0) {
-            return interaction.editReply('❌ Не найдено ни одной валидной роли!');
-        }
-
-        // Сохраняем настройки
-        ticketSettings.set(guild.id, {
-            channelId,
-            categoryId,
-            roleIds: validRoles,
-            guildId: guild.id
-        });
-
-        // Создаем сообщение с кнопкой (в вашем стиле)
-        const button = new ButtonBuilder()
-            .setCustomId("create_regiment_request")
-            .setLabel("Создать заявку в полк")
-            .setStyle(ButtonStyle.Primary);
-
-        const row = new ActionRowBuilder().addComponents(button);
-
-        const embed = new EmbedBuilder()
-            .setTitle("Заявка в полк | Application to the regiment")
-            .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\nTo create a request, click the button below.")
-            .setColor(3447003)
-            .setTimestamp();
-
-        await targetChannel.send({ embeds: [embed], components: [row] });
-
-        // Сообщение об успешной настройке
-        const successEmbed = new EmbedBuilder()
-            .setColor('#727070')
-            .setTitle(':white_check_mark: Система заявок настроена')
-            .setDescription(`
-**Канал с кнопкой:** <#${channelId}>
-**Категория заявок:** <#${categoryId}>
-**Роли офицеров:** ${validRoles.length} ролей
-
-Теперь пользователи могут создавать заявки в полк!
-            `);
-
-        await interaction.editReply({ embeds: [successEmbed] });
-        console.log(`✅ Ticket system configured for guild: ${guild.name}`);
-
-    } catch (error) {
-        console.error('Ticket setup error:', error);
-        await interaction.editReply('❌ Ошибка при настройке! Проверьте ID и права бота.');
-    }
-    break;
-                
-  // Обработчик команды bans
-case 'bans':
-    if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-        return interaction.reply({ 
-            content: '❌ У вас нет прав для просмотра банов!', 
-            flags: 64 
-        });
-    }
-    
-    const page = options.getInteger('страница') || 1;
-    const perPage = 10;
-    
-    await interaction.deferReply({ flags: 64 });
-    
-    try {
-        const bans = await guild.bans.fetch();
-        const totalBans = bans.size;
-        const totalPages = Math.ceil(totalBans / perPage);
-        
-        if (totalBans === 0) {
-            return interaction.editReply('✅ На этом сервере нет забаненных пользователей.');
-        }
-        
-        if (page > totalPages) {
-            return interaction.editReply(`❌ Страница ${page} не существует. Всего страниц: ${totalPages}`);
-        }
-        
-        const startIndex = (page - 1) * perPage;
-        const endIndex = startIndex + perPage;
-        const pageBans = Array.from(bans.values()).slice(startIndex, endIndex);
-        
-        const bansList = pageBans.map((ban, index) => {
-            const banNumber = startIndex + index + 1;
-            const reason = ban.reason || 'Причина не указана';
-            return `**${banNumber}.** ${ban.user.tag} (${ban.user.id})\n📝 **Причина:** ${reason.substring(0, 100)}${reason.length > 100 ? '...' : ''}`;
-        }).join('\n\n');
-        
-        const embed = new EmbedBuilder()
-            .setColor('#ED4245')
-            .setTitle(`🔨 Список банов - Страница ${page}/${totalPages}`)
-            .setDescription(bansList || 'Нет данных')
-            .addFields(
-                { name: '📊 Всего банов', value: `${totalBans}`, inline: true },
-                { name: '📅 Забанены', value: `${pageBans.length} на этой странице`, inline: true }
-            )
-            .setFooter({ text: `Используйте /bans страница: ${page + 1} для следующей страницы` })
-            .setTimestamp();
-        
-        await interaction.editReply({ embeds: [embed] });
-        
-    } catch (error) {
-        console.error('Bans list error:', error);
-        await interaction.editReply('❌ Ошибка при получении списка банов!');
-    }
-    break;
-  
-                case 'ban':
-            if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для бана!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToBan = options.getUser('пользователь');
-            const reason = options.getString('причина') || 'Причина не указана';
-            const days = options.getInteger('дни') || 0;
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const memberToBan = await guild.members.fetch(userToBan.id);
-                
-                if (!memberToBan.bannable) {
-                    return interaction.editReply('❌ Я не могу забанить этого пользователя!');
-                }
-                
-                if (memberToBan.roles.highest.position >= member.roles.highest.position) {
-                    return interaction.editReply('❌ Вы не можете забанить пользователя с ролью выше или равной вашей!');
-                }
-                
-                await memberToBan.ban({ 
-                    deleteMessageSeconds: days * 24 * 60 * 60,
-                    reason: `${reason} (Забанено: ${user.tag})`
-                });
-                
-                // Логирование
-                const settings = getModerationSettings(guild.id);
-                if (settings.logChannel) {
-                    const logChannel = guild.channels.cache.get(settings.logChannel);
-                    if (logChannel) {
-                        const embed = new EmbedBuilder()
-                            .setColor('#ED4245')
-                            .setTitle('🔨 Пользователь забанен')
-                            .addFields(
-                                { name: '👤 Пользователь', value: `${userToBan.tag} (${userToBan.id})`, inline: true },
-                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
-                                { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
-                                { name: '📝 Причина', value: reason, inline: false }
-                            )
-                            .setFooter({ text: `Удалено сообщений: ${days} дней` })
-                            .setTimestamp();
-                        
-                        await logChannel.send({ embeds: [embed] });
-                    }
-                }
-                
-                await interaction.editReply(`✅ Пользователь ${userToBan.tag} забанен!`);
-                
-            } catch (error) {
-                console.error('Ban error:', error);
-                await interaction.editReply('❌ Ошибка при бане пользователя!');
-            }
-            break;
-            
-        case 'kick':
-            if (!member.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для кика!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToKick = options.getUser('пользователь');
-            const kickReason = options.getString('причина') || 'Причина не указана';
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const memberToKick = await guild.members.fetch(userToKick.id);
-                
-                if (!memberToKick.kickable) {
-                    return interaction.editReply('❌ Я не могу кикнуть этого пользователя!');
-                }
-                
-                if (memberToKick.roles.highest.position >= member.roles.highest.position) {
-                    return interaction.editReply('❌ Вы не можете кикнуть пользователя с ролью выше или равной вашей!');
-                }
-                
-                await memberToKick.kick(`${kickReason} (Кикнуто: ${user.tag})`);
-                
-                // Логирование
-                const settings = getModerationSettings(guild.id);
-                if (settings.logChannel) {
-                    const logChannel = guild.channels.cache.get(settings.logChannel);
-                    if (logChannel) {
-                        const embed = new EmbedBuilder()
-                            .setColor('#FEE75C')
-                            .setTitle('👢 Пользователь кикнут')
-                            .addFields(
-                                { name: '👤 Пользователь', value: `${userToKick.tag} (${userToKick.id})`, inline: true },
-                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
-                                { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
-                                { name: '📝 Причина', value: kickReason, inline: false }
-                            )
-                            .setTimestamp();
-                        
-                        await logChannel.send({ embeds: [embed] });
-                    }
-                }
-                
-                await interaction.editReply(`✅ Пользователь ${userToKick.tag} кикнут!`);
-                
-            } catch (error) {
-                console.error('Kick error:', error);
-                await interaction.editReply('❌ Ошибка при кике пользователя!');
-            }
-            break;
-            
-        case 'mute':
-            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для мута!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToMute = options.getUser('пользователь');
-            const muteTime = options.getString('время');
-            const muteReason = options.getString('причина') || 'Причина не указана';
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const memberToMute = await guild.members.fetch(userToMute.id);
-                const settings = getModerationSettings(guild.id);
-                
-                // Получаем роль мута
-                let muteRole = null;
-                if (settings.muteRole) {
-                    muteRole = guild.roles.cache.get(settings.muteRole);
-                }
-                
-                if (!muteRole) {
-                    // Создаем роль мута если нет
-                    muteRole = await guild.roles.create({
-                        name: 'Muted',
-                        color: '#2F3136',
-                        permissions: [],
-                        reason: 'Автоматическое создание роли мута'
-                    });
-                    
-                    // Настраиваем права для всех каналов
-                    guild.channels.cache.forEach(async channel => {
-                        if (channel.isTextBased() || channel.isVoiceBased()) {
-                            await channel.permissionOverwrites.edit(muteRole, {
-                                SendMessages: false,
-                                Speak: false,
-                                AddReactions: false
-                            });
-                        }
-                    });
-                    
-                    settings.muteRole = muteRole.id;
-                    saveModerationSettings(guild.id, settings);
-                }
-                
-                // Парсим время мута
-                let timeMs = 0;
-                const timeMatch = muteTime.match(/^(\d+)([mhd])$/i);
-                
-                if (timeMatch) {
-                    const amount = parseInt(timeMatch[1]);
-                    const unit = timeMatch[2].toLowerCase();
-                    
-                    switch(unit) {
-                        case 'm': timeMs = amount * 60 * 1000; break;
-                        case 'h': timeMs = amount * 60 * 60 * 1000; break;
-                        case 'd': timeMs = amount * 24 * 60 * 60 * 1000; break;
-                    }
-                }
-                
-                if (timeMs === 0 || timeMs > 28 * 24 * 60 * 60 * 1000) {
-                    return interaction.editReply('❌ Неверное время мута! Используйте формат: 1m, 1h, 1d (максимум 28 дней)');
-                }
-                
-                // Выдаем роль мута
-                await memberToMute.roles.add(muteRole, `${muteReason} (Замутил: ${user.tag})`);
-                
-                // Сохраняем время размута
-                const unmuteTime = Date.now() + timeMs;
-                mutedUsers.set(`${guild.id}-${userToMute.id}`, {
-                    userId: userToMute.id,
-                    guildId: guild.id,
-                    unmuteTime: unmuteTime,
-                    moderator: user.id
-                });
-                
-                // Устанавливаем таймер для автоматического размута
-                setTimeout(async () => {
-                    try {
-                        const member = await guild.members.fetch(userToMute.id);
-                        if (member && member.roles.cache.has(muteRole.id)) {
-                            await member.roles.remove(muteRole, 'Автоматический размут');
-                            mutedUsers.delete(`${guild.id}-${userToMute.id}`);
-                        }
-                    } catch (error) {
-                        console.error('Auto unmute error:', error);
-                    }
-                }, timeMs);
-                
-                // Логирование
-                if (settings.logChannel) {
-                    const logChannel = guild.channels.cache.get(settings.logChannel);
-                    if (logChannel) {
-                        const embed = new EmbedBuilder()
-                            .setColor('#FEE75C')
-                            .setTitle('🔇 Пользователь замучен')
-                            .addFields(
-                                { name: '👤 Пользователь', value: `${userToMute.tag} (${userToMute.id})`, inline: true },
-                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
-                                { name: '⏰ Время', value: muteTime, inline: true },
-                                { name: '📅 Размут', value: `<t:${Math.floor(unmuteTime / 1000)}:R>`, inline: false },
-                                { name: '📝 Причина', value: muteReason, inline: false }
-                            )
-                            .setTimestamp();
-                        
-                        await logChannel.send({ embeds: [embed] });
-                    }
-                }
-                
-                await interaction.editReply(`✅ Пользователь ${userToMute.tag} замучен на ${muteTime}!`);
-                
-            } catch (error) {
-                console.error('Mute error:', error);
-                await interaction.editReply('❌ Ошибка при муте пользователя!');
-            }
-            break;
-            
-        case 'unmute':
-            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для снятия мута!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToUnmute = options.getUser('пользователь');
-            const unmuteReason = options.getString('причина') || 'Причина не указана';
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const memberToUnmute = await guild.members.fetch(userToUnmute.id);
-                const settings = getModerationSettings(guild.id);
-                
-                if (!settings.muteRole) {
-                    return interaction.editReply('❌ Роль мута не настроена на этом сервере!');
-                }
-                
-                const muteRole = guild.roles.cache.get(settings.muteRole);
-                if (!muteRole) {
-                    return interaction.editReply('❌ Роль мута не найдена!');
-                }
-                
-                if (!memberToUnmute.roles.cache.has(muteRole.id)) {
-                    return interaction.editReply('❌ Этот пользователь не замучен!');
-                }
-                
-                // Снимаем мут
-                await memberToUnmute.roles.remove(muteRole, `${unmuteReason} (Размутил: ${user.tag})`);
-                mutedUsers.delete(`${guild.id}-${userToUnmute.id}`);
-                
-                // Логирование
-                if (settings.logChannel) {
-                    const logChannel = guild.channels.cache.get(settings.logChannel);
-                    if (logChannel) {
-                        const embed = new EmbedBuilder()
-                            .setColor('#57F287')
-                            .setTitle('🔊 Пользователь размучен')
-                            .addFields(
-                                { name: '👤 Пользователь', value: `${userToUnmute.tag} (${userToUnmute.id})`, inline: true },
-                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
-                                { name: '📝 Причина', value: unmuteReason, inline: false }
-                            )
-                            .setTimestamp();
-                        
-                        await logChannel.send({ embeds: [embed] });
-                    }
-                }
-                
-                await interaction.editReply(`✅ Пользователь ${userToUnmute.tag} размучен!`);
-                
-            } catch (error) {
-                console.error('Unmute error:', error);
-                await interaction.editReply('❌ Ошибка при размуте пользователя!');
-            }
-            break;
-            
-        case 'warn':
-            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для выдачи предупреждений!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToWarn = options.getUser('пользователь');
-            const warnReason = options.getString('причина');
-            
-            if (!warnReason) {
-                return interaction.reply({ 
-                    content: '❌ Укажите причину предупреждения!', 
-                    flags: 64 
-                });
-            }
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const memberToWarn = await guild.members.fetch(userToWarn.id);
-                const settings = getModerationSettings(guild.id);
-                
-                // Получаем текущие предупреждения
-                if (!settings.warnings.has(userToWarn.id)) {
-                    settings.warnings.set(userToWarn.id, []);
-                }
-                
-                const userWarnings = settings.warnings.get(userToWarn.id);
-                
-                // Добавляем новое предупреждение
-                const warning = {
-                    id: Date.now(),
-                    userId: userToWarn.id,
-                    moderatorId: user.id,
-                    moderatorTag: user.tag,
-                    reason: warnReason,
-                    date: Date.now(),
-                    active: true
-                };
-                
-                userWarnings.push(warning);
-                settings.warnings.set(userToWarn.id, userWarnings);
-                saveModerationSettings(guild.id, settings);
-                
-                // Проверяем, не превышен ли лимит предупреждений
-                const activeWarnings = userWarnings.filter(w => w.active);
-                
-                if (activeWarnings.length >= settings.autoModThresholds.maxWarnings) {
-                    // Автоматический мут при превышении лимита
-                    if (settings.muteRole) {
-                        const muteRole = guild.roles.cache.get(settings.muteRole);
-                        if (muteRole) {
-                            await memberToWarn.roles.add(muteRole, `Автоматический мут за ${activeWarnings.length} предупреждений`);
-                            
-                            // Устанавливаем таймер на 24 часа
-                            const unmuteTime = Date.now() + 24 * 60 * 60 * 1000;
-                            mutedUsers.set(`${guild.id}-${userToWarn.id}`, {
-                                userId: userToWarn.id,
-                                guildId: guild.id,
-                                unmuteTime: unmuteTime,
-                                moderator: 'system'
-                            });
-                            
-                            setTimeout(async () => {
-                                try {
-                                    const member = await guild.members.fetch(userToWarn.id);
-                                    if (member && member.roles.cache.has(muteRole.id)) {
-                                        await member.roles.remove(muteRole, 'Автоматический размут');
-                                        mutedUsers.delete(`${guild.id}-${userToWarn.id}`);
-                                    }
-                                } catch (error) {
-                                    console.error('Auto unmute error:', error);
-                                }
-                            }, 24 * 60 * 60 * 1000);
-                        }
-                    }
-                }
-                
-                // Логирование
-                if (settings.logChannel) {
-                    const logChannel = guild.channels.cache.get(settings.logChannel);
-                    if (logChannel) {
-                        const embed = new EmbedBuilder()
-                            .setColor('#FEE75C')
-                            .setTitle('⚠️ Выдано предупреждение')
-                            .addFields(
-                                { name: '👤 Пользователь', value: `${userToWarn.tag} (${userToWarn.id})`, inline: true },
-                                { name: '👮 Модератор', value: `${user.tag}`, inline: true },
-                                { name: '📊 Всего предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: true },
-                                { name: '📝 Причина', value: warnReason, inline: false },
-                                { name: 'ℹ️ ID предупреждения', value: `\`${warning.id}\``, inline: false }
-                            )
-                            .setTimestamp();
-                        
-                        await logChannel.send({ embeds: [embed] });
-                    }
-                }
-                
-                await interaction.editReply(`✅ Пользователю ${userToWarn.tag} выдано предупреждение (${activeWarnings.length}/${settings.autoModThresholds.maxWarnings})!`);
-                
-            } catch (error) {
-                console.error('Warn error:', error);
-                await interaction.editReply('❌ Ошибка при выдаче предупреждения!');
-            }
-            break;
-            
-        case 'warnings':
-            const userToCheck = options.getUser('пользователь');
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const settings = getModerationSettings(guild.id);
-                const userWarnings = settings.warnings.get(userToCheck.id) || [];
-                const activeWarnings = userWarnings.filter(w => w.active);
-                
-                if (activeWarnings.length === 0) {
-                    return interaction.editReply(`✅ У пользователя ${userToCheck.tag} нет активных предупреждений.`);
-                }
-                
-                const warningsList = activeWarnings.map(w => 
-                    `**#${w.id}** - <t:${Math.floor(w.date / 1000)}:R>\n👮 **Модератор:** ${w.moderatorTag}\n📝 **Причина:** ${w.reason}`
-                ).join('\n\n');
-                
-                const embed = new EmbedBuilder()
-                    .setColor('#FEE75C')
-                    .setTitle(`⚠️ Предупреждения ${userToCheck.tag}`)
-                    .setDescription(warningsList)
-                    .addFields(
-                        { name: '📊 Активных предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: false }
-                    )
-                    .setFooter({ text: `Используйте /clearwarns для очистки предупреждений` })
-                    .setTimestamp();
-                
-                await interaction.editReply({ embeds: [embed] });
-                
-            } catch (error) {
-                console.error('Warnings check error:', error);
-                await interaction.editReply('❌ Ошибка при получении предупреждений!');
-            }
-            break;
-            
-        case 'clearwarns':
-            if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return interaction.reply({ 
-                    content: '❌ У вас нет прав для очистки предупреждений!', 
-                    flags: 64 
-                });
-            }
-            
-            const userToClear = options.getUser('пользователь');
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const settings = getModerationSettings(guild.id);
-                
-                if (!settings.warnings.has(userToClear.id)) {
-                    return interaction.editReply(`✅ У пользователя ${userToClear.tag} нет предупреждений.`);
-                }
-                
-                const userWarnings = settings.warnings.get(userToClear.id);
-                const clearedCount = userWarnings.filter(w => w.active).length;
-                
-                // Деактивируем все предупреждения
-                userWarnings.forEach(w => w.active = false);
-                settings.warnings.set(userToClear.id, userWarnings);
-                saveModerationSettings(guild.id, settings);
-                
-                // Снимаем мут если был
-                if (settings.muteRole) {
-                    const member = await guild.members.fetch(userToClear.id).catch(() => null);
-                    if (member) {
-                        const muteRole = guild.roles.cache.get(settings.muteRole);
-                        if (muteRole && member.roles.cache.has(muteRole.id)) {
-                            await member.roles.remove(muteRole, 'Очистка предупреждений');
-                            mutedUsers.delete(`${guild.id}-${userToClear.id}`);
-                        }
-                    }
-                }
-                
-                await interaction.editReply(`✅ Очищено ${clearedCount} предупреждений у пользователя ${userToClear.tag}`);
-                
-            } catch (error) {
-                console.error('Clear warns error:', error);
-                await interaction.editReply('❌ Ошибка при очистке предупреждений!');
-            }
-            break;
-            
-        case 'modsetup':
-            if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return interaction.reply({ 
-                    content: '❌ Только администраторы могут настраивать модерацию!', 
-                    flags: 64 
-                });
-            }
-            
-            const logChannelOption = options.getChannel('канал');
-            const muteRoleOption = options.getRole('роль');
-            const statusOption = options.getBoolean('статус');
-            
-            await interaction.deferReply({ flags: 64 });
-            
-            try {
-                const settings = getModerationSettings(guild.id);
-                
-                if (logChannelOption) {
-                    settings.logChannel = logChannelOption.id;
-                }
-                
-                if (muteRoleOption) {
-                    settings.muteRole = muteRoleOption.id;
-                    
-                    // Настраиваем права для роли мута
-                    guild.channels.cache.forEach(async channel => {
-                        if (channel.isTextBased() || channel.isVoiceBased()) {
-                            await channel.permissionOverwrites.edit(muteRoleOption, {
-                                SendMessages: false,
-                                Speak: false,
-                                AddReactions: false
-                            });
-                        }
-                    });
-                }
-                
-                if (statusOption !== null) {
-                    settings.enabled = statusOption;
-                }
-                
-                saveModerationSettings(guild.id, settings);
-                
-                const embed = new EmbedBuilder()
-                    .setColor('#57F287')
-                    .setTitle('⚙️ Настройки модерации обновлены')
-                    .addFields(
-                        { name: '📝 Канал логов', value: logChannelOption ? `<#${logChannelOption.id}>` : 'Не изменен', inline: true },
-                        { name: '🔇 Роль мута', value: muteRoleOption ? muteRoleOption.name : 'Не изменена', inline: true },
-                        { name: '🔄 Статус', value: statusOption !== null ? (statusOption ? '✅ Включена' : '❌ Выключена') : 'Не изменен', inline: true }
-                    )
-                    .setFooter({ text: 'Используйте /modsetup для дальнейших настроек' })
-                    .setTimestamp();
-                
-                await interaction.editReply({ embeds: [embed] });
-                
-            } catch (error) {
-                console.error('Mod setup error:', error);
-                await interaction.editReply('❌ Ошибка при настройке модерации!');
-            }
-            break;
-    }
+                    switch(action) {
                         case 'on':
                             translationSettings.translationEnabled = true;
                             saveServerSettings(guild.id, translationSettings);
@@ -6454,178 +5368,799 @@ case 'bans':
                                 await interaction.editReply('❌ Роль не найдена');
                             }
                             break;
-                
-                case 'autodelete':
+                    }
+                    break;
+
+                case 'clear':
                     if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
                         return interaction.reply({ 
-                            content: '❌ У вас нет прав для управления автоудалением!', 
+                            content: '❌ У вас нет прав для удаления сообщений!', 
                             flags: 64 
                         });
                     }
                     
-                    const autodeleteAction = options.getString('action');
-                    const autodeleteValue = options.getString('value');
-                    const autodeleteSettings = getSettings(guild.id);
+                    const amount = options.getInteger('количество');
+                    const targetUser = options.getUser('пользователь');
+                    const olderThan = options.getInteger('сообщения_старше');
                     
                     await interaction.deferReply({ flags: 64 });
                     
-                    switch(autodeleteAction) {
-                        case 'on':
-                            autodeleteSettings.enabled = true;
-                            await interaction.editReply('✅ Автоудаление включено');
-                            break;
+                    try {
+                        let messagesDeleted = 0;
+                        
+                        if (olderThan) {
+                            // Удаление сообщений старше указанного времени
+                            const cutoffTime = Date.now() - (olderThan * 24 * 60 * 60 * 1000);
+                            let lastMessageId = null;
                             
-                        case 'off':
-                            autodeleteSettings.enabled = false;
-                            await interaction.editReply('❌ Автоудаление выключено');
-                            break;
-                            
-                        case 'status':
-                            const statusText = autodeleteSettings.enabled ? '✅ ВКЛЮЧЕНО' : '❌ ВЫКЛЮЧЕНО';
-                            const channelsInfo = autodeleteSettings.targetChannels.length === 0 ? 
-                                'Все каналы' : 
-                                autodeleteSettings.targetChannels.map(id => {
-                                    const ch = guild.channels.cache.get(id);
-                                    return ch ? `#${ch.name}` : id;
-                                }).join(', ');
-                            
-                            const exemptRolesInfo = autodeleteSettings.exemptRoles.length === 0 ? 
-                                'Нет' : 
-                                autodeleteSettings.exemptRoles.map(id => {
-                                    const role = guild.roles.cache.get(id);
-                                    return role ? role.name : id;
-                                }).join(', ');
-                            
-                            const statusEmbed = new EmbedBuilder()
-                                .setColor(autodeleteSettings.enabled ? 0x57F287 : 0xED4245)
-                                .setTitle('⚡ Статус автоудаления')
-                                .setDescription(`
-**${statusText}**
-⏰ **Задержка:** ${autodeleteSettings.delay}мс
-🎯 **Каналы:** ${channelsInfo}
-🛡️ **Исключенные роли:** ${exemptRolesInfo}
-                                `);
-                            
-                            await interaction.editReply({ embeds: [statusEmbed] });
-                            break;
-                            
-                        case 'delay':
-                            const delay = parseInt(autodeleteValue);
-                            if (delay && delay >= 1000 && delay <= 30000) {
-                                autodeleteSettings.delay = delay;
-                                await interaction.editReply(`⏰ Задержка установлена: **${delay}мс**`);
-                            } else {
-                                await interaction.editReply('❌ Укажите задержку от 1000 до 30000 мс');
+                            while (messagesDeleted < amount) {
+                                const fetched = await interaction.channel.messages.fetch({
+                                    limit: Math.min(100, amount - messagesDeleted),
+                                    before: lastMessageId
+                                });
+                                
+                                if (fetched.size === 0) break;
+                                
+                                const toDelete = fetched.filter(msg => {
+                                    if (msg.createdTimestamp < cutoffTime) {
+                                        if (targetUser) {
+                                            return msg.author.id === targetUser.id;
+                                        }
+                                        return true;
+                                    }
+                                    return false;
+                                });
+                                
+                                if (toDelete.size === 0) break;
+                                
+                                await interaction.channel.bulkDelete(toDelete, true);
+                                messagesDeleted += toDelete.size;
+                                lastMessageId = fetched.last().id;
+                                
+                                if (toDelete.size < 100) break;
                             }
-                            break;
+                        } else {
+                            // Обычное удаление
+                            const fetched = await interaction.channel.messages.fetch({
+                                limit: amount
+                            });
                             
-                        case 'addchannel':
-                            if (!autodeleteValue) {
-                                return interaction.editReply('❌ Укажите канал!');
+                            const toDelete = targetUser ? 
+                                fetched.filter(msg => msg.author.id === targetUser.id) :
+                                fetched;
+                            
+                            if (toDelete.size > 0) {
+                                await interaction.channel.bulkDelete(toDelete, true);
+                                messagesDeleted = toDelete.size;
                             }
-                            
-                            let channelToAdd = guild.channels.cache.get(autodeleteValue.replace(/[<#>]/g, ''));
-                            if (!channelToAdd) {
-                                channelToAdd = guild.channels.cache.find(ch => 
-                                    ch.name.toLowerCase().includes(autodeleteValue.toLowerCase())
-                                );
+                        }
+                        
+                        const embed = new EmbedBuilder()
+                            .setColor('#57F287')
+                            .setTitle('🗑️ Сообщения удалены')
+                            .addFields(
+                                { name: '👤 Модератор', value: `${user.tag}`, inline: true },
+                                { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
+                                { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false }
+                            )
+                            .setTimestamp();
+                        
+                        await interaction.editReply({ embeds: [embed] });
+                        
+                        // Автоматическое удаление сообщения через 5 секунд
+                        setTimeout(async () => {
+                            try {
+                                await interaction.deleteReply();
+                            } catch (error) {}
+                        }, 5000);
+                        
+                        // Логирование
+                        const modSettings = getModerationSettings(guild.id);
+                        if (modSettings.logChannel) {
+                            const logChannel = guild.channels.cache.get(modSettings.logChannel);
+                            if (logChannel) {
+                                const logEmbed = new EmbedBuilder()
+                                    .setColor('#5865F2')
+                                    .setTitle('🧹 Очистка сообщений')
+                                    .addFields(
+                                        { name: '👤 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '📊 Удалено', value: `${messagesDeleted} сообщений`, inline: true },
+                                        { name: '📅 Канал', value: `<#${interaction.channel.id}>`, inline: false },
+                                        { name: '👤 Целевой пользователь', value: targetUser ? targetUser.tag : 'Все пользователи', inline: false }
+                                    )
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [logEmbed] });
                             }
+                        }
+                        
+                    } catch (error) {
+                        console.error('Clear error:', error);
+                        await interaction.editReply('❌ Ошибка при удалении сообщений!');
+                    }
+                    break;
+
+                case 'bans':
+                    if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для просмотра банов!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const page = options.getInteger('страница') || 1;
+                    const perPage = 10;
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const bans = await guild.bans.fetch();
+                        const totalBans = bans.size;
+                        const totalPages = Math.ceil(totalBans / perPage);
+                        
+                        if (totalBans === 0) {
+                            return interaction.editReply('✅ На этом сервере нет забаненных пользователей.');
+                        }
+                        
+                        if (page > totalPages) {
+                            return interaction.editReply(`❌ Страница ${page} не существует. Всего страниц: ${totalPages}`);
+                        }
+                        
+                        const startIndex = (page - 1) * perPage;
+                        const endIndex = startIndex + perPage;
+                        const pageBans = Array.from(bans.values()).slice(startIndex, endIndex);
+                        
+                        const bansList = pageBans.map((ban, index) => {
+                            const banNumber = startIndex + index + 1;
+                            const reason = ban.reason || 'Причина не указана';
+                            return `**${banNumber}.** ${ban.user.tag} (${ban.user.id})\n📝 **Причина:** ${reason.substring(0, 100)}${reason.length > 100 ? '...' : ''}`;
+                        }).join('\n\n');
+                        
+                        const bansEmbed = new EmbedBuilder()
+                            .setColor('#ED4245')
+                            .setTitle(`🔨 Список банов - Страница ${page}/${totalPages}`)
+                            .setDescription(bansList || 'Нет данных')
+                            .addFields(
+                                { name: '📊 Всего банов', value: `${totalBans}`, inline: true },
+                                { name: '📅 Забанены', value: `${pageBans.length} на этой странице`, inline: true }
+                            )
+                            .setFooter({ text: `Используйте /bans страница: ${page + 1} для следующей страницы` })
+                            .setTimestamp();
+                        
+                        await interaction.editReply({ embeds: [bansEmbed] });
+                        
+                    } catch (error) {
+                        console.error('Bans list error:', error);
+                        await interaction.editReply('❌ Ошибка при получении списка банов!');
+                    }
+                    break;
+
+                case 'ban':
+                    if (!member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для бана!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToBan = options.getUser('пользователь');
+                    const reason = options.getString('причина') || 'Причина не указана';
+                    const days = options.getInteger('дни') || 0;
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const memberToBan = await guild.members.fetch(userToBan.id);
+                        
+                        if (!memberToBan.bannable) {
+                            return interaction.editReply('❌ Я не могу забанить этого пользователя!');
+                        }
+                        
+                        if (memberToBan.roles.highest.position >= member.roles.highest.position) {
+                            return interaction.editReply('❌ Вы не можете забанить пользователя с ролью выше или равной вашей!');
+                        }
+                        
+                        await memberToBan.ban({ 
+                            deleteMessageSeconds: days * 24 * 60 * 60,
+                            reason: `${reason} (Забанено: ${user.tag})`
+                        });
+                        
+                        // Логирование
+                        const modSettings = getModerationSettings(guild.id);
+                        if (modSettings.logChannel) {
+                            const logChannel = guild.channels.cache.get(modSettings.logChannel);
+                            if (logChannel) {
+                                const banLogEmbed = new EmbedBuilder()
+                                    .setColor('#ED4245')
+                                    .setTitle('🔨 Пользователь забанен')
+                                    .addFields(
+                                        { name: '👤 Пользователь', value: `${userToBan.tag} (${userToBan.id})`, inline: true },
+                                        { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
+                                        { name: '📝 Причина', value: reason, inline: false }
+                                    )
+                                    .setFooter({ text: `Удалено сообщений: ${days} дней` })
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [banLogEmbed] });
+                            }
+                        }
+                        
+                        await interaction.editReply(`✅ Пользователь ${userToBan.tag} забанен!`);
+                        
+                    } catch (error) {
+                        console.error('Ban error:', error);
+                        await interaction.editReply('❌ Ошибка при бане пользователя!');
+                    }
+                    break;
+
+                case 'kick':
+                    if (!member.permissions.has(PermissionsBitField.Flags.KickMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для кика!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToKick = options.getUser('пользователь');
+                    const kickReason = options.getString('причина') || 'Причина не указана';
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const memberToKick = await guild.members.fetch(userToKick.id);
+                        
+                        if (!memberToKick.kickable) {
+                            return interaction.editReply('❌ Я не могу кикнуть этого пользователя!');
+                        }
+                        
+                        if (memberToKick.roles.highest.position >= member.roles.highest.position) {
+                            return interaction.editReply('❌ Вы не можете кикнуть пользователя с ролью выше или равной вашей!');
+                        }
+                        
+                        await memberToKick.kick(`${kickReason} (Кикнуто: ${user.tag})`);
+                        
+                        // Логирование
+                        const modSettings = getModerationSettings(guild.id);
+                        if (modSettings.logChannel) {
+                            const logChannel = guild.channels.cache.get(modSettings.logChannel);
+                            if (logChannel) {
+                                const kickLogEmbed = new EmbedBuilder()
+                                    .setColor('#FEE75C')
+                                    .setTitle('👢 Пользователь кикнут')
+                                    .addFields(
+                                        { name: '👤 Пользователь', value: `${userToKick.tag} (${userToKick.id})`, inline: true },
+                                        { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '📅 Дата', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false },
+                                        { name: '📝 Причина', value: kickReason, inline: false }
+                                    )
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [kickLogEmbed] });
+                            }
+                        }
+                        
+                        await interaction.editReply(`✅ Пользователь ${userToKick.tag} кикнут!`);
+                        
+                    } catch (error) {
+                        console.error('Kick error:', error);
+                        await interaction.editReply('❌ Ошибка при кике пользователя!');
+                    }
+                    break;
+
+                case 'mute':
+                    if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для мута!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToMute = options.getUser('пользователь');
+                    const muteTime = options.getString('время');
+                    const muteReason = options.getString('причина') || 'Причина не указана';
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const memberToMute = await guild.members.fetch(userToMute.id);
+                        const settings = getModerationSettings(guild.id);
+                        
+                        // Получаем роль мута
+                        let muteRole = null;
+                        if (settings.muteRole) {
+                            muteRole = guild.roles.cache.get(settings.muteRole);
+                        }
+                        
+                        if (!muteRole) {
+                            // Создаем роль мута если нет
+                            muteRole = await guild.roles.create({
+                                name: 'Muted',
+                                color: '#2F3136',
+                                permissions: [],
+                                reason: 'Автоматическое создание роли мута'
+                            });
                             
-                            if (channelToAdd) {
-                                if (!autodeleteSettings.targetChannels.includes(channelToAdd.id)) {
-                                    autodeleteSettings.targetChannels.push(channelToAdd.id);
-                                    await interaction.editReply(`✅ Канал **#${channelToAdd.name}** добавлен в автоудаление`);
-                                } else {
-                                    await interaction.editReply(`ℹ️ Канал **#${channelToAdd.name}** уже в списке`);
+                            // Настраиваем права для всех каналов
+                            guild.channels.cache.forEach(async channel => {
+                                if (channel.isTextBased() || channel.isVoiceBased()) {
+                                    await channel.permissionOverwrites.edit(muteRole, {
+                                        SendMessages: false,
+                                        Speak: false,
+                                        AddReactions: false
+                                    });
                                 }
-                            } else {
-                                await interaction.editReply('❌ Канал не найден');
-                            }
-                            break;
+                            });
                             
-                        case 'removechannel':
-                            if (!autodeleteValue) {
-                                return interaction.editReply('❌ Укажите канал!');
-                            }
+                            settings.muteRole = muteRole.id;
+                            saveModerationSettings(guild.id, settings);
+                        }
+                        
+                        // Парсим время мута
+                        let timeMs = 0;
+                        const timeMatch = muteTime.match(/^(\d+)([mhd])$/i);
+                        
+                        if (timeMatch) {
+                            const amount = parseInt(timeMatch[1]);
+                            const unit = timeMatch[2].toLowerCase();
                             
-                            let channelToRemove = guild.channels.cache.get(autodeleteValue.replace(/[<#>]/g, ''));
-                            if (!channelToRemove) {
-                                channelToRemove = guild.channels.cache.find(ch => 
-                                    ch.name.toLowerCase().includes(autodeleteValue.toLowerCase())
-                                );
+                            switch(unit) {
+                                case 'm': timeMs = amount * 60 * 1000; break;
+                                case 'h': timeMs = amount * 60 * 60 * 1000; break;
+                                case 'd': timeMs = amount * 24 * 60 * 60 * 1000; break;
                             }
-                            
-                            if (channelToRemove) {
-                                const index = autodeleteSettings.targetChannels.indexOf(channelToRemove.id);
-                                if (index > -1) {
-                                    autodeleteSettings.targetChannels.splice(index, 1);
-                                    await interaction.editReply(`✅ Канал **#${channelToRemove.name}** удален из автоудаления`);
-                                } else {
-                                    await interaction.editReply(`ℹ️ Канал **#${channelToRemove.name}** не найден в списке`);
+                        }
+                        
+                        if (timeMs === 0 || timeMs > 28 * 24 * 60 * 60 * 1000) {
+                            return interaction.editReply('❌ Неверное время мута! Используйте формат: 1m, 1h, 1d (максимум 28 дней)');
+                        }
+                        
+                        // Выдаем роль мута
+                        await memberToMute.roles.add(muteRole, `${muteReason} (Замутил: ${user.tag})`);
+                        
+                        // Сохраняем время размута
+                        const unmuteTime = Date.now() + timeMs;
+                        mutedUsers.set(`${guild.id}-${userToMute.id}`, {
+                            userId: userToMute.id,
+                            guildId: guild.id,
+                            unmuteTime: unmuteTime,
+                            moderator: user.id
+                        });
+                        
+                        // Устанавливаем таймер для автоматического размута
+                        setTimeout(async () => {
+                            try {
+                                const member = await guild.members.fetch(userToMute.id);
+                                if (member && member.roles.cache.has(muteRole.id)) {
+                                    await member.roles.remove(muteRole, 'Автоматический размут');
+                                    mutedUsers.delete(`${guild.id}-${userToMute.id}`);
                                 }
-                            } else {
-                                await interaction.editReply('❌ Канал не найден');
+                            } catch (error) {
+                                console.error('Auto unmute error:', error);
                             }
-                            break;
-                            
-                        case 'addrole':
-                            if (!autodeleteValue) {
-                                return interaction.editReply('❌ Укажите роль!');
+                        }, timeMs);
+                        
+                        // Логирование
+                        if (settings.logChannel) {
+                            const logChannel = guild.channels.cache.get(settings.logChannel);
+                            if (logChannel) {
+                                const muteLogEmbed = new EmbedBuilder()
+                                    .setColor('#FEE75C')
+                                    .setTitle('🔇 Пользователь замучен')
+                                    .addFields(
+                                        { name: '👤 Пользователь', value: `${userToMute.tag} (${userToMute.id})`, inline: true },
+                                        { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '⏰ Время', value: muteTime, inline: true },
+                                        { name: '📅 Размут', value: `<t:${Math.floor(unmuteTime / 1000)}:R>`, inline: false },
+                                        { name: '📝 Причина', value: muteReason, inline: false }
+                                    )
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [muteLogEmbed] });
                             }
-                            
-                            let roleToAdd = guild.roles.cache.get(autodeleteValue.replace(/[<@&>]/g, ''));
-                            if (!roleToAdd) {
-                                roleToAdd = guild.roles.cache.find(role => 
-                                    role.name.toLowerCase().includes(autodeleteValue.toLowerCase())
-                                );
+                        }
+                        
+                        await interaction.editReply(`✅ Пользователь ${userToMute.tag} замучен на ${muteTime}!`);
+                        
+                    } catch (error) {
+                        console.error('Mute error:', error);
+                        await interaction.editReply('❌ Ошибка при муте пользователя!');
+                    }
+                    break;
+
+                case 'unmute':
+                    if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для снятия мута!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToUnmute = options.getUser('пользователь');
+                    const unmuteReason = options.getString('причина') || 'Причина не указана';
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const memberToUnmute = await guild.members.fetch(userToUnmute.id);
+                        const settings = getModerationSettings(guild.id);
+                        
+                        if (!settings.muteRole) {
+                            return interaction.editReply('❌ Роль мута не настроена на этом сервере!');
+                        }
+                        
+                        const muteRole = guild.roles.cache.get(settings.muteRole);
+                        if (!muteRole) {
+                            return interaction.editReply('❌ Роль мута не найдена!');
+                        }
+                        
+                        if (!memberToUnmute.roles.cache.has(muteRole.id)) {
+                            return interaction.editReply('❌ Этот пользователь не замучен!');
+                        }
+                        
+                        // Снимаем мут
+                        await memberToUnmute.roles.remove(muteRole, `${unmuteReason} (Размутил: ${user.tag})`);
+                        mutedUsers.delete(`${guild.id}-${userToUnmute.id}`);
+                        
+                        // Логирование
+                        if (settings.logChannel) {
+                            const logChannel = guild.channels.cache.get(settings.logChannel);
+                            if (logChannel) {
+                                const unmuteLogEmbed = new EmbedBuilder()
+                                    .setColor('#57F287')
+                                    .setTitle('🔊 Пользователь размучен')
+                                    .addFields(
+                                        { name: '👤 Пользователь', value: `${userToUnmute.tag} (${userToUnmute.id})`, inline: true },
+                                        { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '📝 Причина', value: unmuteReason, inline: false }
+                                    )
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [unmuteLogEmbed] });
                             }
-                            
-                            if (roleToAdd) {
-                                if (!autodeleteSettings.exemptRoles.includes(roleToAdd.id)) {
-                                    autodeleteSettings.exemptRoles.push(roleToAdd.id);
-                                    await interaction.editReply(`🛡️ Роль **${roleToAdd.name}** добавлена в исключения`);
-                                } else {
-                                    await interaction.editReply(`ℹ️ Роль **${roleToAdd.name}** уже в списке исключений`);
+                        }
+                        
+                        await interaction.editReply(`✅ Пользователь ${userToUnmute.tag} размучен!`);
+                        
+                    } catch (error) {
+                        console.error('Unmute error:', error);
+                        await interaction.editReply('❌ Ошибка при размуте пользователя!');
+                    }
+                    break;
+
+                case 'warn':
+                    if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для выдачи предупреждений!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToWarn = options.getUser('пользователь');
+                    const warnReason = options.getString('причина');
+                    
+                    if (!warnReason) {
+                        return interaction.reply({ 
+                            content: '❌ Укажите причину предупреждения!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const memberToWarn = await guild.members.fetch(userToWarn.id);
+                        const settings = getModerationSettings(guild.id);
+                        
+                        // Получаем текущие предупреждения
+                        if (!settings.warnings.has(userToWarn.id)) {
+                            settings.warnings.set(userToWarn.id, []);
+                        }
+                        
+                        const userWarnings = settings.warnings.get(userToWarn.id);
+                        
+                        // Добавляем новое предупреждение
+                        const warning = {
+                            id: Date.now(),
+                            userId: userToWarn.id,
+                            moderatorId: user.id,
+                            moderatorTag: user.tag,
+                            reason: warnReason,
+                            date: Date.now(),
+                            active: true
+                        };
+                        
+                        userWarnings.push(warning);
+                        settings.warnings.set(userToWarn.id, userWarnings);
+                        saveModerationSettings(guild.id, settings);
+                        
+                        // Проверяем, не превышен ли лимит предупреждений
+                        const activeWarnings = userWarnings.filter(w => w.active);
+                        
+                        if (activeWarnings.length >= settings.autoModThresholds.maxWarnings) {
+                            // Автоматический мут при превышении лимита
+                            if (settings.muteRole) {
+                                const muteRole = guild.roles.cache.get(settings.muteRole);
+                                if (muteRole) {
+                                    await memberToWarn.roles.add(muteRole, `Автоматический мут за ${activeWarnings.length} предупреждений`);
+                                    
+                                    // Устанавливаем таймер на 24 часа
+                                    const unmuteTime = Date.now() + 24 * 60 * 60 * 1000;
+                                    mutedUsers.set(`${guild.id}-${userToWarn.id}`, {
+                                        userId: userToWarn.id,
+                                        guildId: guild.id,
+                                        unmuteTime: unmuteTime,
+                                        moderator: 'system'
+                                    });
+                                    
+                                    setTimeout(async () => {
+                                        try {
+                                            const member = await guild.members.fetch(userToWarn.id);
+                                            if (member && member.roles.cache.has(muteRole.id)) {
+                                                await member.roles.remove(muteRole, 'Автоматический размут');
+                                                mutedUsers.delete(`${guild.id}-${userToWarn.id}`);
+                                            }
+                                        } catch (error) {
+                                            console.error('Auto unmute error:', error);
+                                        }
+                                    }, 24 * 60 * 60 * 1000);
                                 }
-                            } else {
-                                await interaction.editReply('❌ Роль не найдена');
                             }
-                            break;
-                            
-                        case 'removerole':
-                            if (!autodeleteValue) {
-                                return interaction.editReply('❌ Укажите роль!');
+                        }
+                        
+                        // Логирование
+                        if (settings.logChannel) {
+                            const logChannel = guild.channels.cache.get(settings.logChannel);
+                            if (logChannel) {
+                                const warnLogEmbed = new EmbedBuilder()
+                                    .setColor('#FEE75C')
+                                    .setTitle('⚠️ Выдано предупреждение')
+                                    .addFields(
+                                        { name: '👤 Пользователь', value: `${userToWarn.tag} (${userToWarn.id})`, inline: true },
+                                        { name: '👮 Модератор', value: `${user.tag}`, inline: true },
+                                        { name: '📊 Всего предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: true },
+                                        { name: '📝 Причина', value: warnReason, inline: false },
+                                        { name: 'ℹ️ ID предупреждения', value: `\`${warning.id}\``, inline: false }
+                                    )
+                                    .setTimestamp();
+                                
+                                await logChannel.send({ embeds: [warnLogEmbed] });
                             }
-                            
-                            let roleToRemove = guild.roles.cache.get(autodeleteValue.replace(/[<@&>]/g, ''));
-                            if (!roleToRemove) {
-                                roleToRemove = guild.roles.cache.find(role => 
-                                    role.name.toLowerCase().includes(autodeleteValue.toLowerCase())
-                                );
-                            }
-                            
-                            if (roleToRemove) {
-                                const index = autodeleteSettings.exemptRoles.indexOf(roleToRemove.id);
-                                if (index > -1) {
-                                    autodeleteSettings.exemptRoles.splice(index, 1);
-                                    await interaction.editReply(`✅ Роль **${roleToRemove.name}** удалена из исключений`);
-                                } else {
-                                    await interaction.editReply(`ℹ️ Роль **${roleToRemove.name}** не найдена в списке исключений`);
+                        }
+                        
+                        await interaction.editReply(`✅ Пользователю ${userToWarn.tag} выдано предупреждение (${activeWarnings.length}/${settings.autoModThresholds.maxWarnings})!`);
+                        
+                    } catch (error) {
+                        console.error('Warn error:', error);
+                        await interaction.editReply('❌ Ошибка при выдаче предупреждения!');
+                    }
+                    break;
+
+                case 'warnings':
+                    const userToCheck = options.getUser('пользователь');
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const settings = getModerationSettings(guild.id);
+                        const userWarnings = settings.warnings.get(userToCheck.id) || [];
+                        const activeWarnings = userWarnings.filter(w => w.active);
+                        
+                        if (activeWarnings.length === 0) {
+                            return interaction.editReply(`✅ У пользователя ${userToCheck.tag} нет активных предупреждений.`);
+                        }
+                        
+                        const warningsList = activeWarnings.map(w => 
+                            `**#${w.id}** - <t:${Math.floor(w.date / 1000)}:R>\n👮 **Модератор:** ${w.moderatorTag}\n📝 **Причина:** ${w.reason}`
+                        ).join('\n\n');
+                        
+                        const warningsEmbed = new EmbedBuilder()
+                            .setColor('#FEE75C')
+                            .setTitle(`⚠️ Предупреждения ${userToCheck.tag}`)
+                            .setDescription(warningsList)
+                            .addFields(
+                                { name: '📊 Активных предупреждений', value: `${activeWarnings.length}/${settings.autoModThresholds.maxWarnings}`, inline: false }
+                            )
+                            .setFooter({ text: `Используйте /clearwarns для очистки предупреждений` })
+                            .setTimestamp();
+                        
+                        await interaction.editReply({ embeds: [warningsEmbed] });
+                        
+                    } catch (error) {
+                        console.error('Warnings check error:', error);
+                        await interaction.editReply('❌ Ошибка при получении предупреждений!');
+                    }
+                    break;
+
+                case 'clearwarns':
+                    if (!member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для очистки предупреждений!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const userToClear = options.getUser('пользователь');
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const settings = getModerationSettings(guild.id);
+                        
+                        if (!settings.warnings.has(userToClear.id)) {
+                            return interaction.editReply(`✅ У пользователя ${userToClear.tag} нет предупреждений.`);
+                        }
+                        
+                        const userWarnings = settings.warnings.get(userToClear.id);
+                        const clearedCount = userWarnings.filter(w => w.active).length;
+                        
+                        // Деактивируем все предупреждения
+                        userWarnings.forEach(w => w.active = false);
+                        settings.warnings.set(userToClear.id, userWarnings);
+                        saveModerationSettings(guild.id, settings);
+                        
+                        // Снимаем мут если был
+                        if (settings.muteRole) {
+                            const member = await guild.members.fetch(userToClear.id).catch(() => null);
+                            if (member) {
+                                const muteRole = guild.roles.cache.get(settings.muteRole);
+                                if (muteRole && member.roles.cache.has(muteRole.id)) {
+                                    await member.roles.remove(muteRole, 'Очистка предупреждений');
+                                    mutedUsers.delete(`${guild.id}-${userToClear.id}`);
                                 }
-                            } else {
-                                await interaction.editReply('❌ Роль не найдена');
                             }
-                            break;
+                        }
+                        
+                        await interaction.editReply(`✅ Очищено ${clearedCount} предупреждений у пользователя ${userToClear.tag}`);
+                        
+                    } catch (error) {
+                        console.error('Clear warns error:', error);
+                        await interaction.editReply('❌ Ошибка при очистке предупреждений!');
+                    }
+                    break;
+
+                case 'modsetup':
+                    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                        return interaction.reply({ 
+                            content: '❌ Только администраторы могут настраивать модерацию!', 
+                            flags: 64 
+                        });
+                    }
+                    
+                    const logChannelOption = options.getChannel('канал');
+                    const muteRoleOption = options.getRole('роль');
+                    const statusOption = options.getBoolean('статус');
+                    
+                    await interaction.deferReply({ flags: 64 });
+                    
+                    try {
+                        const settings = getModerationSettings(guild.id);
+                        
+                        if (logChannelOption) {
+                            settings.logChannel = logChannelOption.id;
+                        }
+                        
+                        if (muteRoleOption) {
+                            settings.muteRole = muteRoleOption.id;
                             
-                        case 'test':
-                            const testMessage = await interaction.channel.send('🧪 Тестовое сообщение для проверки автоудаления');
-                            setTimeout(async () => {
-                                if (testMessage.deletable) {
-                                    await testMessage.delete();
+                            // Настраиваем права для роли мута
+                            guild.channels.cache.forEach(async channel => {
+                                if (channel.isTextBased() || channel.isVoiceBased()) {
+                                    await channel.permissionOverwrites.edit(muteRoleOption, {
+                                        SendMessages: false,
+                                        Speak: false,
+                                        AddReactions: false
+                                    });
                                 }
-                            }, 3000);
-                            await interaction.editReply('🧪 Тестовое сообщение отправлено (удалится через 3 сек)');
-                            break;
+                            });
+                        }
+                        
+                        if (statusOption !== null) {
+                            settings.enabled = statusOption;
+                        }
+                        
+                        saveModerationSettings(guild.id, settings);
+                        
+                        const modSetupEmbed = new EmbedBuilder()
+                            .setColor('#57F287')
+                            .setTitle('⚙️ Настройки модерации обновлены')
+                            .addFields(
+                                { name: '📝 Канал логов', value: logChannelOption ? `<#${logChannelOption.id}>` : 'Не изменен', inline: true },
+                                { name: '🔇 Роль мута', value: muteRoleOption ? muteRoleOption.name : 'Не изменена', inline: true },
+                                { name: '🔄 Статус', value: statusOption !== null ? (statusOption ? '✅ Включена' : '❌ Выключена') : 'Не изменен', inline: true }
+                            )
+                            .setFooter({ text: 'Используйте /modsetup для дальнейших настроек' })
+                            .setTimestamp();
+                        
+                        await interaction.editReply({ embeds: [modSetupEmbed] });
+                        
+                    } catch (error) {
+                        console.error('Mod setup error:', error);
+                        await interaction.editReply('❌ Ошибка при настройке модерации!');
+                    }
+                    break;
+
+                case 'ticket':
+                    // Проверяем права администратора
+                    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                        return interaction.reply({ 
+                            content: '❌ Только администраторы могут настраивать систему тикетов!', 
+                            flags: 64 
+                        });
+                    }
+
+                    const ticketChannelId = options.getString('channel_id');
+                    const categoryId = options.getString('category_id');
+                    const roleIds = options.getString('role_ids').split(',').map(id => id.trim());
+
+                    await interaction.deferReply({ flags: 64 });
+
+                    try {
+                        const guild = interaction.guild;
+                        const targetChannel = await guild.channels.fetch(ticketChannelId);
+                        const category = await guild.channels.fetch(categoryId);
+                        
+                        if (!targetChannel || !category) {
+                            return interaction.editReply('❌ Канал или категория не найдены! Проверьте ID.');
+                        }
+
+                        // Проверяем роли
+                        const validRoles = [];
+                        for (const roleId of roleIds) {
+                            try {
+                                const role = await guild.roles.fetch(roleId);
+                                if (role) validRoles.push(roleId);
+                            } catch (error) {
+                                console.log(`Роль ${roleId} не найдена`);
+                            }
+                        }
+
+                        if (validRoles.length === 0) {
+                            return interaction.editReply('❌ Не найдено ни одной валидной роли!');
+                        }
+
+                        // Сохраняем настройки
+                        ticketSettings.set(guild.id, {
+                            channelId: ticketChannelId,
+                            categoryId: categoryId,
+                            roleIds: validRoles,
+                            guildId: guild.id
+                        });
+
+                        // Создаем сообщение с кнопкой
+                        const button = new ButtonBuilder()
+                            .setCustomId("create_regiment_request")
+                            .setLabel("Создать заявку в полк")
+                            .setStyle(ButtonStyle.Primary);
+
+                        const row = new ActionRowBuilder().addComponents(button);
+
+                        const ticketEmbed = new EmbedBuilder()
+                            .setTitle("Заявка в полк | Application to the regiment")
+                            .setDescription("Чтобы создать заявку нажмите ниже на кнопку \"Создать заявку в полк\"\nTo create a request, click the button below.")
+                            .setColor(3447003)
+                            .setTimestamp();
+
+                        await targetChannel.send({ embeds: [ticketEmbed], components: [row] });
+
+                        // Сообщение об успешной настройке
+                        const successEmbed = new EmbedBuilder()
+                            .setColor('#727070')
+                            .setTitle(':white_check_mark: Система заявок настроена')
+                            .setDescription(`
+**Канал с кнопкой:** <#${ticketChannelId}>
+**Категория заявок:** <#${categoryId}>
+**Роли офицеров:** ${validRoles.length} ролей
+
+Теперь пользователи могут создавать заявки в полк!
+                            `);
+
+                        await interaction.editReply({ embeds: [successEmbed] });
+                        console.log(`✅ Ticket system configured for guild: ${guild.name}`);
+
+                    } catch (error) {
+                        console.error('Ticket setup error:', error);
+                        await interaction.editReply('❌ Ошибка при настройке! Проверьте ID и права бота.');
                     }
                     break;
 
@@ -6732,10 +6267,6 @@ case 'bans':
                     
                     try {
                         // Ваш код для получения статистики War Thunder
-                        // Например:
-                        // const stats = await getWarThunderStats(nickname);
-                        // await interaction.editReply(stats);
-                        
                         await interaction.editReply(`📊 Статистика для ${nickname} - функция в разработке`);
                     } catch (error) {
                         await interaction.editReply(`❌ Ошибка получения статистики: ${error.message}`);
@@ -6755,125 +6286,8 @@ case 'bans':
                     break;
 
                 case 'регион':
-                    const regionAction = options.getString('действие');
-                    
-                    // Проверяем доступ к команде региона
-                    if (!checkRegionAccess(interaction.member)) {
-                        return interaction.reply({ 
-                            content: '❌ У вас нет прав для использования этой команды!', 
-                            flags: 64 
-                        });
-                    }
-                    
-                    await interaction.deferReply({ flags: 64 });
-                    
-                    switch(regionAction) {
-                        case 'set':
-                            const regionChannelId = interaction.options.getString('channel_id');
-                            const regionCode = options.getString('регион');
-                            
-                            if (!channelId || !regionCode) {
-                                return interaction.editReply('❌ Укажите ID канала и код региона!');
-                            }
-                            
-                            if (!availableRegions.includes(regionCode)) {
-                                return interaction.editReply(`❌ Неверный регион. Используйте /регион список для просмотра доступных`);
-                            }
-                            
-                            try {
-                                const voiceChannel = await guild.channels.fetch(channelId);
-                                
-                                if (!voiceChannel) {
-                                    return interaction.editReply('❌ Голосовой канал не найден!');
-                                }
-                                
-                                if (voiceChannel.type !== ChannelType.GuildVoice) {
-                                    return interaction.editReply('❌ Указанный канал не является голосовым!');
-                                }
-                                
-                                const regionToSet = regionCode === 'automatic' ? null : regionCode;
-                                await voiceChannel.setRTCRegion(regionToSet);
-                                
-                                voiceRegionSettings.set(guild.id, {
-                                    voiceChannelId: channelId,
-                                    regionCode: regionCode,
-                                    guildId: guild.id,
-                                    lastUpdated: new Date()
-                                });
-                                
-                                await interaction.editReply(`✅ Регион изменен на: **${getRegionName(regionCode)}**`);
-                            } catch (error) {
-                                await interaction.editReply(`❌ Ошибка: ${error.message}`);
-                            }
-                            break;
-                            
-                        case 'статус':
-                            const regionSettings = voiceRegionSettings.get(guild.id);
-                            
-                            if (!regionSettings) {
-                                return interaction.editReply('ℹ️ Регион голосового сервера еще не настроен');
-                            }
-                            
-                            try {
-                                const voiceChannel = await guild.channels.fetch(regionSettings.voiceChannelId);
-                                const currentRegion = voiceChannel.rtcRegion;
-                                
-                                const statusEmbed = new EmbedBuilder()
-                                    .setColor('#5865F2')
-                                    .setTitle('🌍 Текущие настройки региона')
-                                    .addFields(
-                                        { name: 'Голосовой канал', value: `<#${regionSettings.voiceChannelId}>`, inline: true },
-                                        { name: 'Установленный регион', value: getRegionName(regionSettings.regionCode), inline: true },
-                                        { name: 'Текущий регион', value: currentRegion ? getRegionName(currentRegion) : 'авто', inline: true }
-                                    );
-                                
-                                await interaction.editReply({ embeds: [statusEmbed] });
-                            } catch (error) {
-                                await interaction.editReply('❌ Ошибка проверки настроек региона');
-                            }
-                            break;
-                            
-                        case 'сброс':
-                            const resetSettings = voiceRegionSettings.get(guild.id);
-                            
-                            if (!resetSettings) {
-                                return interaction.editReply('❌ Настройки региона не найдены для сброса');
-                            }
-                            
-                            try {
-                                const voiceChannel = await guild.channels.fetch(resetSettings.voiceChannelId);
-                                await voiceChannel.setRTCRegion(null);
-                                voiceRegionSettings.delete(guild.id);
-                                
-                                await interaction.editReply('✅ Регион сброшен на автоматический выбор');
-                            } catch (error) {
-                                await interaction.editReply('❌ Ошибка при сбросе региона');
-                            }
-                            break;
-                            
-                        case 'список':
-                            const regionsList = availableRegions.map(region => 
-                                `• \`${region}\` - ${getRegionName(region)}`
-                            ).join('\n');
-                            
-                            await interaction.editReply(`🌍 **Доступные регионы:**\n${regionsList}`);
-                            break;
-                            
-                        case 'доступ':
-                            const hasAccess = checkRegionAccess(member);
-                            const userRoles = member.roles.cache.map(role => role.name).join(', ');
-                            
-                            const accessEmbed = new EmbedBuilder()
-                                .setColor(hasAccess ? '#57F287' : '#ED4245')
-                                .setTitle('🔐 Проверка доступа к командам региона')
-                                .addFields(
-                                    { name: 'Статус доступа', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
-                                    { name: 'Ваши роли', value: userRoles || 'Нет ролей', inline: false }
-                                );
-                            
-                            await interaction.editReply({ embeds: [accessEmbed] });
-                            break;
-                    }
+                    // Используется отдельный обработчик для команды /регион
+                    // Этот код перемещен в начало файла
                     break;
 
                 default:
