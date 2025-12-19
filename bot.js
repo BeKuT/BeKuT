@@ -5006,10 +5006,22 @@ client.on('interactionCreate', async interaction => {
             return;
         }
         
-        await interaction.deferReply({ flags: 64 });
-      
+        // Сначала реплаим, потом деферим
+        try {
+            await interaction.deferReply({ flags: 64 });
+        } catch (deferError) {
+            console.log('Defer error, trying direct reply:', deferError.message);
+            try {
+                await interaction.reply({ content: '🔄 Обрабатываю команду...', flags: 64 });
+            } catch (replyError) {
+                console.error('Both defer and reply failed:', replyError.message);
+                return;
+            }
+        }
         
-        switch(action) {
+        // Теперь обрабатываем команду
+        try {
+            switch(action) {
             
             case 'set':
                 const voiceChannelId = interaction.options.getString('channel_id');
@@ -5227,10 +5239,10 @@ ${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`)
                 break;
                 
             default:
-                const defaultHelpEmbed = new EmbedBuilder()
-                    .setColor('#5865F2')
-                    .setTitle('🌍 Команда /регион')
-                    .setDescription(`
+                    const defaultHelpEmbed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('🌍 Команда /регион')
+                        .setDescription(`
 **Доступные действия:**
 
 \`/регион set\` - Изменить регион голосового канала
@@ -5241,13 +5253,20 @@ ${availableRegions.map(region => `• \`${region}\` - ${getRegionName(region)}`)
 
 **Пример использования:**
 \`/регион set channel_id: 123456789012345678 регион: russia\`
-                    `);
-                
-                await interaction.editReply({ embeds: [defaultHelpEmbed] });
+                        `);
+                    
+                    await interaction.editReply({ embeds: [defaultHelpEmbed] });
+            }
+        } catch (error) {
+            console.error('Error in region command:', error);
+            if (interaction.deferred) {
+                await interaction.editReply(`❌ Ошибка: ${error.message}`);
+            } else {
+                await interaction.reply({ content: `❌ Ошибка: ${error.message}`, flags: 64 });
+            }
         }
     }
 });
-
 // ==================== ОБНОВЛЕННЫЕ КОМАНДЫ СТАТУСА И СБРОСА ====================
 
 /* client.on('messageCreate', async (message) => {
