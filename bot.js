@@ -1826,22 +1826,11 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
         <a href="/" class="nav-item active">
             <span class="nav-icon">🏠</span>
             Главная
+              </a>
+        <a href="/permissions" class="nav-item">
+            <span class="nav-icon">🔐</span>
+            Управление правами
         </a>
-        <div class="guild-actions">
-    <a href="/permissions/${guild.id}" class="btn btn-primary">
-        <span class="nav-icon">🔐</span>
-        Права
-    </a>
-    <a href="/guild/${guild.id}/settings" class="btn btn-secondary">
-        <span class="nav-icon">⚙️</span>
-        Настройки
-    </a>
-    <a href="/guild/${guild.id}/moderation" class="btn btn-secondary" style="background: #FEE75C; color: #000;">
-        <span class="nav-icon">🛡️</span>
-        Модерация
-    </a>
-</div>
-
         <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
         
         <a href="/admin/transcripts" class="nav-item">
@@ -1905,16 +1894,20 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
                                 <div class="guild-members">${guild.approximate_member_count || 'Неизвестно'} участников</div>
                             </div>
                         </div>
-                        <div class="guild-actions">
-                            <a href="/permissions/${guild.id}" class="btn btn-primary">
-                                <span class="nav-icon">🔐</span>
-                                Права
-                            </a>
-                            <a href="/guild/${guild.id}/settings" class="btn btn-secondary">
-                                <span class="nav-icon">⚙️</span>
-                                Настройки
-                            </a>
-                        </div>
+<div class="guild-actions">
+                    <a href="/permissions/${server.id}" class="btn btn-primary">
+                        <span class="nav-icon">🔐</span>
+                        Права
+                    </a>
+                    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
+                        <span class="nav-icon">⚙️</span>
+                        Настройки
+                    </a>
+                    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
+                        <span class="nav-icon">🛡️</span>
+                        Модерация
+                    </a>
+                </div>
                     </div>
                 `).join('') : 
                 `<div class="no-guilds">
