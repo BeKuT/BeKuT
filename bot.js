@@ -1827,10 +1827,20 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
             <span class="nav-icon">🏠</span>
             Главная
         </a>
-        <a href="/permissions" class="nav-item">
-            <span class="nav-icon">🔐</span>
-            Управление правами
-        </a>
+        <div class="guild-actions">
+    <a href="/permissions/${guild.id}" class="btn btn-primary">
+        <span class="nav-icon">🔐</span>
+        Права
+    </a>
+    <a href="/guild/${guild.id}/settings" class="btn btn-secondary">
+        <span class="nav-icon">⚙️</span>
+        Настройки
+    </a>
+    <a href="/guild/${guild.id}/moderation" class="btn btn-secondary" style="background: #FEE75C; color: #000;">
+        <span class="nav-icon">🛡️</span>
+        Модерация
+    </a>
+</div>
 
         <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
         
@@ -3008,12 +3018,19 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
         </a>
 
         <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
-        
-        <a href="/permissions" class="nav-item">
-            <span class="nav-icon">🏰</span>
-            Все серверы
-        </a>
 
+<a href="/permissions" class="nav-item">
+    <span class="nav-icon">🏰</span>
+    Все серверы
+</a>
+<a href="/guild/${guild.id}/moderation" class="nav-item">
+    <span class="nav-icon">🛡️</span>
+    Настройки модерации
+</a>
+<a href="/guild/${guild.id}/roles" class="nav-item">
+    <span class="nav-icon">👥</span>
+    Управление ролями
+</a>
         <a href="/auth/logout" class="logout-btn">
             <span class="nav-icon">🚪</span>
             Выйти
@@ -3262,6 +3279,11 @@ function createGuildPermissionsPage(user, guild, roles, permissions, baseUrl) {
 }
 
 function createGuildSettingsPage(user, guild, settings, botInGuild, baseUrl) {
+    // Убедимся, что settings существует
+    if (!settings) {
+        settings = getServerSettings(guild.id);
+    }
+    
     return `
 <!DOCTYPE html>
 <html lang="ru">
@@ -3636,15 +3658,24 @@ function createGuildSettingsPage(user, guild, settings, botInGuild, baseUrl) {
 
         <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
         
-        <a href="/permissions/${guild.id}" class="nav-item">
-            <span class="nav-icon">🔐</span>
-            Права доступа
-        </a>
-        <a href="/guild/${guild.id}/settings" class="nav-item active">
-            <span class="nav-icon">⚙️</span>
-            Настройки сервера
-        </a>
+        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
 
+<a href="/permissions/${guild.id}" class="nav-item">
+    <span class="nav-icon">🔐</span>
+    Права доступа
+</a>
+<a href="/guild/${guild.id}/settings" class="nav-item active">
+    <span class="nav-icon">⚙️</span>
+    Настройки сервера
+</a>
+<a href="/guild/${guild.id}/moderation" class="nav-item">
+    <span class="nav-icon">🛡️</span>
+    Настройки модерации
+</a>
+<a href="/guild/${guild.id}/roles" class="nav-item">
+    <span class="nav-icon">👥</span>
+    Управление ролями
+</a>
         <a href="/auth/logout" class="logout-btn">
             <span class="nav-icon">🚪</span>
             Выйти
@@ -5053,20 +5084,28 @@ function createRolesManagementPage(user, guild, members, roles, modSettings, bot
             Права команд
         </a>
         <a href="/guild/${guild.id}/settings" class="nav-item">
-            <span class="nav-icon">⚙️</span>
-            Настройки сервера
-        </a>
-        <a href="/guild/${guild.id}/roles" class="nav-item active">
-            <span class="nav-icon">👥</span>
-            Управление ролями
-        </a>
+    <span class="nav-icon">⚙️</span>
+    Настройки сервера
+</a>
+<a href="/guild/${guild.id}/roles" class="nav-item active">
+    <span class="nav-icon">👥</span>
+    Управление ролями
+</a>
+<a href="/guild/${guild.id}/moderation" class="nav-item">
+    <span class="nav-icon">🛡️</span>
+    Настройки модерации
+</a>
 
-        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
-        
-        <a href="/permissions" class="nav-item">
-            <span class="nav-icon">🏰</span>
-            Все серверы
-        </a>
+       <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
+
+<a href="/permissions" class="nav-item">
+    <span class="nav-icon">🏰</span>
+    Все серверы
+</a>
+<a href="/guild/${guild.id}/moderation" class="nav-item">
+    <span class="nav-icon">🛡️</span>
+    Настройки модерации
+</a>
 
         <a href="/auth/logout" style="display: flex; align-items: center; padding: 15px; margin: 5px 0; background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%); color: white; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 1rem; transition: all 0.3s ease; border: 1px solid transparent; margin-top: 20px;">
             <span class="nav-icon">🚪</span>
@@ -5516,6 +5555,31 @@ function createErrorPage(title, message) {
 
 // Хранилище настроек для каждого сервера
 const serverSettings = new Map();
+
+// Функция для получения настроек сервера
+function getServerSettings(guildId) {
+    if (!serverSettings.has(guildId)) {
+        serverSettings.set(guildId, {
+            transcriptChannelId: TRANSCRIPT_CHANNEL_ID,
+            translationEnabled: true,
+            disabledTranslationChannels: [],
+            protectedRoles: [],
+            autoDeleteSettings: {
+                enabled: false,
+                delay: 5000,
+                targetChannels: [],
+                exemptRoles: []
+            },
+            voiceRegion: null,
+            ticketSettings: {
+                enabled: false,
+                categoryId: null,
+                moderatorRoles: []
+            }
+        });
+    }
+    return serverSettings.get(guildId);
+}
 
 // Функция для сохранения настроек
 function saveServerSettings(guildId, settings) {
