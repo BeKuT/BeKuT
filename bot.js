@@ -1038,7 +1038,87 @@ app.get('/guild/:guildId/roles', requireAdmin, async (req, res) => {
     }
 });
 
-
+app.get('/guild/:guildId/moderation', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    try {
+        // Проверка прав
+        const userGuilds = req.session.guilds || [];
+        const userGuild = userGuilds.find(g => g.id === guildId);
+        
+        if (!userGuild || (userGuild.permissions & 0x8) !== 0x8) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Требуются права администратора сервера.'
+            ));
+        }
+        
+        // Получаем информацию о сервере
+        const guildInfo = {
+            id: guildId,
+            name: userGuild.name || `Сервер (${guildId})`,
+            icon: userGuild.icon ? 
+                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
+                null
+        };
+        
+        // Проверяем наличие бота
+        const discordGuild = client.guilds.cache.get(guildId);
+        let botInGuild = false;
+        let roles = [];
+        let channels = [];
+        
+        if (discordGuild) {
+            botInGuild = true;
+            
+            // Получаем роли
+            roles = discordGuild.roles.cache
+                .filter(role => role.name !== '@everyone')
+                .map(role => ({
+                    id: role.id,
+                    name: role.name,
+                    color: role.color,
+                    members: role.members?.size || 0,
+                    position: role.position
+                }))
+                .sort((a, b) => b.position - a.position);
+            
+            // Получаем текстовые каналы
+            channels = discordGuild.channels.cache
+                .filter(ch => ch.type === ChannelType.GuildText)
+                .map(channel => ({
+                    id: channel.id,
+                    name: channel.name,
+                    parent: channel.parent?.name || null
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        
+        // Получаем настройки модерации
+        const modSettings = getModerationSettings(guildId);
+        
+        // Создаем HTML страницу настроек модерации
+        const html = createModerationSettingsPage(
+            user, 
+            guildInfo, 
+            modSettings, 
+            roles, 
+            channels, 
+            botInGuild, 
+            baseUrl
+        );
+        res.send(html);
+        
+    } catch (error) {
+        console.error('Error in moderation route:', error);
+        res.status(500).send(createErrorPage(
+            'Внутренняя ошибка',
+            'Произошла непредвиденная ошибка при загрузке страницы.'
+        ));
+    }
+});
 
 // API для сохранения разрешений
 app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
@@ -1150,61 +1230,6 @@ app.post('/api/guild/:guildId/moderation', requireAdmin, express.json(), async (
     }
 });
 
-app.get('/guild/:guildId/moderation', requireAdmin, async (req, res) => {
-    const guildId = req.params.guildId;
-    const baseUrl = getBaseUrl();
-    const user = req.session.user;
-    
-    try {
-        // Проверка прав
-        const userGuilds = req.session.guilds || [];
-        const userGuild = userGuilds.find(g => g.id === guildId);
-        
-        if (!userGuild || (userGuild.permissions & 0x8) !== 0x8) {
-            return res.status(403).send(createErrorPage('Доступ запрещен', 'Требуются права администратора.'));
-        }
-        
-        // Получаем информацию о сервере
-        const guildInfo = {
-            id: guildId,
-            name: userGuild.name || `Сервер (${guildId})`,
-            icon: userGuild.icon ? 
-                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
-                null
-        };
-        
-        // Проверяем наличие бота
-        const discordGuild = client.guilds.cache.get(guildId);
-        let botInGuild = false;
-        let roles = [];
-        
-        if (discordGuild) {
-            botInGuild = true;
-            // Получаем роли
-            roles = discordGuild.roles.cache
-                .filter(role => role.name !== '@everyone')
-                .map(role => ({
-                    id: role.id,
-                    name: role.name,
-                    color: role.color,
-                    members: role.members?.size || 0,
-                    position: role.position
-                }))
-                .sort((a, b) => b.position - a.position);
-        }
-        
-        // Получаем настройки модерации
-        const modSettings = getModerationSettings(guildId);
-        
-        // Создаем HTML страницу настроек модерации
-        const html = createModerationSettingsPage(user, guildInfo, roles, modSettings, botInGuild, baseUrl);
-        res.send(html);
-        
-    } catch (error) {
-        console.error('Error in moderation route:', error);
-        res.status(500).send(createErrorPage('Внутренняя ошибка', error.message));
-    }
-});
 
 // ==================== API МАРШРУТЫ ====================
 
