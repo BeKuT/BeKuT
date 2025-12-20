@@ -5492,19 +5492,6 @@ function createErrorPage(title, message) {
 // Хранилище настроек для каждого сервера
 const serverSettings = new Map();
 
-// Функция для получения настроек сервера
-function getServerSettings(guildId) {
-    if (!serverSettings.has(guildId)) {
-        serverSettings.set(guildId, {
-            transcriptChannelId: TRANSCRIPT_CHANNEL_ID, // значение по умолчанию
-            translationEnabled: true, // авто-перевод включен по умолчанию
-            disabledTranslationChannels: [], // каналы где перевод ОТКЛЮЧЕН
-            protectedRoles: [] // роли, чьи сообщения не переводятся
-        });
-    }
-    return serverSettings.get(guildId);
-}
-
 // Функция для сохранения настроек
 function saveServerSettings(guildId, settings) {
     serverSettings.set(guildId, settings);
