@@ -1895,19 +1895,19 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
                             </div>
                         </div>
 <div class="guild-actions">
-                    <a href="/permissions/${server.id}" class="btn btn-primary">
-                        <span class="nav-icon">🔐</span>
-                        Права
-                    </a>
-                    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
-                        <span class="nav-icon">⚙️</span>
-                        Настройки
-                    </a>
-                    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
-                        <span class="nav-icon">🛡️</span>
-                        Модерация
-                    </a>
-                </div>
+    <a href="/permissions/${server.id}" class="btn btn-primary">
+        <span class="nav-icon">🔐</span>
+        Права
+    </a>
+    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
+        <span class="nav-icon">⚙️</span>
+        Настройки
+    </a>
+    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
+        <span class="nav-icon">🛡️</span>
+        Модерация
+    </a>
+</div>
                     </div>
                 `).join('') : 
                 `<div class="no-guilds">
