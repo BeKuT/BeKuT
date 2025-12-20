@@ -9043,30 +9043,6 @@ function shouldAutoModerate(guildId) {
     return settings.enabled && settings.autoMod?.enabled;
 }
 
-// Функция получения настроек сервера (другие настройки)
-function getServerSettings(guildId) {
-    if (!serverSettings.has(guildId)) {
-        serverSettings.set(guildId, {
-            transcriptChannelId: TRANSCRIPT_CHANNEL_ID,
-            translationEnabled: true,
-            disabledTranslationChannels: [],
-            protectedRoles: [],
-            autoDeleteSettings: {
-                enabled: false,
-                delay: 5000,
-                targetChannels: [],
-                exemptRoles: []
-            },
-            voiceRegion: null,
-            ticketSettings: {
-                enabled: false,
-                categoryId: null,
-                moderatorRoles: []
-            }
-        });
-    }
-    return serverSettings.get(guildId);
-}
 
 // ==================== ЗАПУСК СЕРВЕРА ====================
 
