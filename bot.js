@@ -1150,13 +1150,6 @@ app.post('/api/guild/:guildId/moderation', requireAdmin, express.json(), async (
     }
 });
 
-// Функция сохранения настроек
-function saveModerationSettings(guildId, settings) {
-    moderationSettings.set(guildId, settings);
-    console.log(`💾 Moderation settings saved for guild ${guildId}`);
-    return settings;
-}
-
 app.get('/guild/:guildId/moderation', requireAdmin, async (req, res) => {
     const guildId = req.params.guildId;
     const baseUrl = getBaseUrl();
