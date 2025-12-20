@@ -647,6 +647,7 @@ app.get('/auth/callback', async (req, res) => {
     const { code, state } = req.query;
     
     console.log('=== OAuth2 Callback Start ===');
+    await new Promise(resolve => setTimeout(resolve, 1000));
     console.log('Code:', code ? '✅ Received' : '❌ Missing');
     console.log('State:', state);
     console.log('Session state:', req.session.authState);
