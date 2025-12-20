@@ -3889,6 +3889,11 @@ function createGuildSettingsPage(user, guild, settings, botInGuild, baseUrl) {
 }
 
 function createModerationSettingsPage(user, guild, modSettings, roles, channels, botInGuild, baseUrl) {
+    console.log('=== CREATING MODERATION PAGE HTML ===');
+    console.log('Guild:', guild.name);
+    console.log('Roles count:', roles.length);
+    console.log('Channels count:', channels.length);
+    console.log('ModSettings:', JSON.stringify(modSettings, null, 2));
     // Убедимся, что autoMod существует
     const autoMod = modSettings.autoMod || {
         enabled: false,
