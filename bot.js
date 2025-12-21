@@ -1882,45 +1882,45 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
         </div>
 
         <div class="guilds-grid">
-            ${adminGuilds.length > 0 ? 
-                adminGuilds.map(guild => `
-                    <div class="guild-card">
-                        <div class="guild-header">
-                            ${guild.icon ? 
-                                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="guild-icon">` :
-                                `<div class="guild-icon-placeholder">🏰</div>`
-                            }
-                            <div class="guild-info">
-                                <div class="guild-name">${guild.name}</div>
-                                <div class="guild-members">${guild.approximate_member_count || 'Неизвестно'} участников</div>
-                            </div>
-                        </div>
-<div class="guild-actions">
-    <a href="/permissions/${server.id}" class="btn btn-primary">
-        <span class="nav-icon">🔐</span>
-        Права
-    </a>
-    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
-        <span class="nav-icon">⚙️</span>
-        Настройки
-    </a>
-    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
-        <span class="nav-icon">🛡️</span>
-        Модерация
-    </a>
+    ${adminGuilds.length > 0 ? 
+        adminGuilds.map(server => `
+            <div class="guild-card">
+                <div class="guild-header">
+                    ${server.icon ? 
+                        `<img src="https://cdn.discordapp.com/icons/${server.id}/${server.icon}.png?size=256" alt="${server.name}" class="guild-icon">` :
+                        `<div class="guild-icon-placeholder">🏰</div>`
+                    }
+                    <div class="guild-info">
+                        <div class="guild-name">${server.name}</div>
+                        <div class="guild-members">${server.approximate_member_count || 'Неизвестно'} участников</div>
+                    </div>
+                </div>
+                <div class="guild-actions">
+                    <a href="/permissions/${server.id}" class="btn btn-primary">
+                        <span class="nav-icon">🔐</span>
+                        Права
+                    </a>
+                    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
+                        <span class="nav-icon">⚙️</span>
+                        Настройки
+                    </a>
+                    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
+                        <span class="nav-icon">🛡️</span>
+                        Модерация
+                    </a>
+                </div>
+            </div>
+        `).join('') : 
+        `<div class="no-guilds">
+            <div class="no-guilds-icon">🏰</div>
+            <h3>Нет доступных серверов</h3>
+            <p>У вас нет прав администратора ни на одном сервере, где присутствует бот.</p>
+            <div style="margin-top: 20px; color: var(--text-secondary); font-size: 0.9rem;">
+                Требуются права администратора для управления настройками бота.
+            </div>
+        </div>`
+    }
 </div>
-                    </div>
-                `).join('') : 
-                `<div class="no-guilds">
-                    <div class="no-guilds-icon">🏰</div>
-                    <h3>Нет доступных серверов</h3>
-                    <p>У вас нет прав администратора ни на одном сервере, где присутствует бот.</p>
-                    <div style="margin-top: 20px; color: var(--text-secondary); font-size: 0.9rem;">
-                        Требуются права администратора для управления настройками бота.
-                    </div>
-                </div>`
-            }
-        </div>
     </div>
 
     <script>
