@@ -1121,6 +1121,375 @@ app.get('/guild/:guildId/moderation', requireAdmin, async (req, res) => {
     }
 });
 
+// Страница управления сервером
+app.get('/server/:guildId/manage', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
+    const user = req.session.user;
+    
+    try {
+        // Проверка прав
+        const userGuilds = req.session.guilds || [];
+        const userGuild = userGuilds.find(g => g.id === guildId);
+        
+        if (!userGuild || (userGuild.permissions & 0x8) !== 0x8) {
+            return res.status(403).send(createErrorPage(
+                'Доступ запрещен',
+                'Требуются права администратора сервера.'
+            ));
+        }
+        
+        // Получаем информацию о сервере
+        const guild = {
+            id: guildId,
+            name: userGuild.name || `Сервер (${guildId})`,
+            icon: userGuild.icon ? 
+                `https://cdn.discordapp.com/icons/${guildId}/${userGuild.icon}.png?size=256` : 
+                null,
+            approximate_member_count: userGuild.approximate_member_count || 0
+        };
+        
+        res.send(createServerManagementPage(user, guild, baseUrl));
+        
+    } catch (error) {
+        console.error('Error in server management route:', error);
+        res.status(500).send(createErrorPage(
+            'Внутренняя ошибка',
+            'Произошла непредвиденная ошибка.'
+        ));
+    }
+});
+
+// Страница управления правами
+app.get('/server/:guildId/manage/permissions', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    const user = req.session.user;
+    
+    try {
+        // Получаем роли сервера
+        const discordGuild = client.guilds.cache.get(guildId);
+        let roles = [];
+        
+        if (discordGuild) {
+            roles = discordGuild.roles.cache
+                .filter(role => role.name !== '@everyone')
+                .map(role => ({
+                    id: role.id,
+                    name: role.name,
+                    color: role.color,
+                    members: role.members?.size || 0,
+                    position: role.position
+                }))
+                .sort((a, b) => b.position - a.position);
+        }
+        
+        // Получаем текущие разрешения
+        const permissions = getGuildPermissions(guildId);
+        
+        // Доступные команды для настройки
+        const availableCommands = [
+            { id: 'region', name: '/регион', icon: '🌍', description: 'Управление регионами голосовых серверов' },
+            { id: 'transcript', name: '/transcript', icon: '📄', description: 'Создание транскриптов каналов' },
+            { id: 'ticket', name: '/ticket', icon: '🎫', description: 'Настройка системы тикетов' }
+        ];
+        
+        // HTML для страницы прав
+        const html = `
+            <div style="background: var(--surface); border-radius: 15px; border: 1px solid var(--border); padding: 30px;">
+                <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
+                    <div style="font-size: 2.5rem;">🔐</div>
+                    <div>
+                        <h2 style="font-size: 1.8rem; color: var(--text); margin-bottom: 5px;">Управление правами</h2>
+                        <p style="color: var(--text-secondary);">Настройте доступ к командам бота на этом сервере</p>
+                    </div>
+                </div>
+                
+                <div class="permissions-container">
+                    <div class="permission-tabs" id="permissionTabs">
+                        ${availableCommands.map((cmd, index) => `
+                            <button class="permission-tab ${index === 0 ? 'active' : ''}" data-command="${cmd.id}">
+                                ${cmd.icon} ${cmd.name}
+                            </button>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="permission-content">
+                        ${availableCommands.map((cmd, index) => `
+                            <div class="command-content" id="content-${cmd.id}" style="display: ${index === 0 ? 'block' : 'none'};">
+                                <div style="margin-bottom: 30px;">
+                                    <h3 style="font-size: 1.5rem; color: var(--text); margin-bottom: 10px;">${cmd.icon} ${cmd.name}</h3>
+                                    <p style="color: var(--text-secondary);">${cmd.description}</p>
+                                </div>
+                                
+                                <div style="margin-bottom: 25px; padding: 15px; background: var(--surface-dark); border-radius: 10px; color: var(--text-secondary);">
+                                    💡 Выберите роли, которым будет разрешено использовать команду <strong>${cmd.name}</strong>. Если ни одна роль не выбрана, команду смогут использовать только администраторы сервера.
+                                </div>
+                                
+                                <div style="max-height: 400px; overflow-y: auto; margin-bottom: 30px; padding-right: 10px;">
+                                    ${roles.length > 0 ? roles.map(role => {
+                                        const isChecked = permissions[cmd.id] && permissions[cmd.id].includes(role.id);
+                                        return `
+                                            <div style="display: flex; align-items: center; padding: 15px; margin-bottom: 10px; background: var(--surface-light); border-radius: 10px; border: 1px solid var(--border);">
+                                                <div style="width: 20px; height: 20px; border-radius: 50%; background-color: #${role.color.toString(16).padStart(6, '0') || '5865F2'}; margin-right: 15px;"></div>
+                                                <div style="flex: 1; font-weight: 600; color: var(--text);">${role.name}</div>
+                                                <div style="color: var(--text-secondary); margin-right: 20px; font-size: 0.9rem;">${role.members} участников</div>
+                                                <div style="width: 24px; height: 24px; border-radius: 6px; border: 2px solid var(--border); background: ${isChecked ? 'var(--primary)' : 'var(--surface-dark)'}; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;" 
+                                                    onclick="toggleRole('${cmd.id}', '${role.id}')">
+                                                    ${isChecked ? '✓' : ''}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('') : '<p style="text-align: center; color: var(--text-secondary); padding: 30px;">Роли не найдены</p>'}
+                                </div>
+                                
+                                <div style="background: var(--surface-dark); padding: 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <div style="color: var(--text-secondary);">
+                                        Выбрано: <strong id="selected-count-${cmd.id}">${permissions[cmd.id] ? permissions[cmd.id].length : 0}</strong> из ${roles.length} ролей
+                                    </div>
+                                    <button style="background: var(--success); color: white; padding: 12px 25px; border-radius: 10px; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 10px;" 
+                                            onclick="savePermissions('${cmd.id}', '${guildId}')">
+                                        💾 Сохранить
+                                    </button>
+                                </div>
+                                
+                                <div id="message-${cmd.id}" style="margin-top: 20px;"></div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+                // Хранилище выбранных ролей
+                const selectedRoles = {
+                    ${availableCommands.map(cmd => `'${cmd.id}': ${JSON.stringify(permissions[cmd.id] || [])}`).join(',\n                    ')}
+                };
+                
+                function toggleRole(commandId, roleId) {
+                    const index = selectedRoles[commandId].indexOf(roleId);
+                    if (index === -1) {
+                        selectedRoles[commandId].push(roleId);
+                    } else {
+                        selectedRoles[commandId].splice(index, 1);
+                    }
+                    updateSelectedCount(commandId);
+                    location.reload();
+                }
+                
+                function updateSelectedCount(commandId) {
+                    const countElement = document.getElementById('selected-count-' + commandId);
+                    countElement.textContent = selectedRoles[commandId].length;
+                }
+                
+                async function savePermissions(commandId, guildId) {
+                    try {
+                        const response = await fetch('/api/permissions/' + guildId, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                commandName: commandId,
+                                roleIds: selectedRoles[commandId]
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            alert('✅ Настройки сохранены!');
+                        } else {
+                            alert('❌ Ошибка сохранения');
+                        }
+                    } catch (error) {
+                        alert('❌ Ошибка: ' + error.message);
+                    }
+                }
+                
+                // Инициализация
+                ${availableCommands.map(cmd => `updateSelectedCount('${cmd.id}');`).join('\n                ')}
+            </script>
+        `;
+        
+        res.send(html);
+        
+    } catch (error) {
+        console.error('Permissions page error:', error);
+        res.status(500).send('<div style="color: var(--danger); text-align: center; padding: 40px;">Ошибка загрузки страницы</div>');
+    }
+});
+
+// Страница модерации
+app.get('/server/:guildId/manage/moderation', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    
+    try {
+        const discordGuild = client.guilds.cache.get(guildId);
+        let roles = [];
+        let channels = [];
+        
+        if (discordGuild) {
+            roles = discordGuild.roles.cache
+                .filter(role => role.name !== '@everyone')
+                .map(role => ({
+                    id: role.id,
+                    name: role.name,
+                    color: role.color,
+                    members: role.members?.size || 0,
+                    position: role.position
+                }))
+                .sort((a, b) => b.position - a.position);
+            
+            channels = discordGuild.channels.cache
+                .filter(ch => ch.type === ChannelType.GuildText)
+                .map(channel => ({
+                    id: channel.id,
+                    name: channel.name,
+                    parent: channel.parent?.name || null
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        
+        const modSettings = getModerationSettings(guildId);
+        
+        const html = `
+            <div style="background: var(--surface); border-radius: 15px; border: 1px solid var(--border); padding: 30px;">
+                <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
+                    <div style="font-size: 2.5rem;">🛡️</div>
+                    <div>
+                        <h2 style="font-size: 1.8rem; color: var(--text); margin-bottom: 5px;">Настройки модерации</h2>
+                        <p style="color: var(--text-secondary);">Управление автоматической модерацией и настройками</p>
+                    </div>
+                </div>
+                
+                <form id="moderation-form">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 25px; margin-bottom: 30px;">
+                        <!-- Основные настройки -->
+                        <div style="background: var(--surface-light); padding: 25px; border-radius: 12px; border: 1px solid var(--border);">
+                            <h3 style="color: var(--text); margin-bottom: 20px;">⚙️ Основные настройки</h3>
+                            
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; color: var(--text); margin-bottom: 8px; font-weight: 600;">Включить модерацию</label>
+                                <label style="display: inline-flex; align-items: center; cursor: pointer;">
+                                    <input type="checkbox" id="mod-enabled" ${modSettings.enabled ? 'checked' : ''} style="margin-right: 10px;">
+                                    <span style="color: var(--text-secondary);">Активировать систему модерации</span>
+                                </label>
+                            </div>
+                            
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; color: var(--text); margin-bottom: 8px; font-weight: 600;">Канал для логов</label>
+                                <select id="log-channel" style="width: 100%; padding: 10px; background: var(--surface-dark); border: 1px solid var(--border); border-radius: 8px; color: var(--text);">
+                                    <option value="">Не выбран</option>
+                                    ${channels.map(ch => `<option value="${ch.id}" ${ch.id === modSettings.logChannel ? 'selected' : ''}>#${ch.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label style="display: block; color: var(--text); margin-bottom: 8px; font-weight: 600;">Роль для мута</label>
+                                <select id="mute-role" style="width: 100%; padding: 10px; background: var(--surface-dark); border: 1px solid var(--border); border-radius: 8px; color: var(--text);">
+                                    <option value="">Не выбрана</option>
+                                    ${roles.map(role => `<option value="${role.id}" ${role.id === modSettings.muteRole ? 'selected' : ''}>${role.name}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Авто-модерация -->
+                        <div style="background: var(--surface-light); padding: 25px; border-radius: 12px; border: 1px solid var(--border);">
+                            <h3 style="color: var(--text); margin-bottom: 20px;">🤖 Авто-модерация</h3>
+                            
+                            ${Object.entries({
+                                'auto-spam': 'Обнаружение спама',
+                                'auto-caps': 'Обнаружение КАПСА',
+                                'auto-invites': 'Блокировка приглашений',
+                                'auto-bad-words': 'Фильтр плохих слов'
+                            }).map(([id, label]) => `
+                                <div style="margin-bottom: 15px;">
+                                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                                        <span style="color: var(--text);">${label}</span>
+                                        <input type="checkbox" id="${id}" ${modSettings.autoMod && modSettings.autoMod[id.replace('auto-', '')] ? 'checked' : ''} 
+                                               style="transform: scale(1.2);">
+                                    </label>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <div style="background: var(--surface-dark); padding: 25px; border-radius: 12px; text-align: center;">
+                        <button type="button" onclick="saveModerationSettings('${guildId}')" 
+                                style="background: var(--success); color: white; padding: 15px 35px; border-radius: 10px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 10px;">
+                            💾 Сохранить настройки
+                        </button>
+                    </div>
+                </form>
+                
+                <div id="mod-message" style="margin-top: 20px;"></div>
+            </div>
+            
+            <script>
+                async function saveModerationSettings(guildId) {
+                    const settings = {
+                        enabled: document.getElementById('mod-enabled').checked,
+                        logChannel: document.getElementById('log-channel').value,
+                        muteRole: document.getElementById('mute-role').value,
+                        autoMod: {
+                            enabled: true,
+                            spam: document.getElementById('auto-spam').checked,
+                            caps: document.getElementById('auto-caps').checked,
+                            inviteLinks: document.getElementById('auto-invites').checked,
+                            badWords: document.getElementById('auto-bad-words').checked
+                        }
+                    };
+                    
+                    try {
+                        const response = await fetch('/api/guild/' + guildId + '/moderation', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(settings)
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            alert('✅ Настройки модерации сохранены!');
+                        } else {
+                            alert('❌ Ошибка: ' + data.error);
+                        }
+                    } catch (error) {
+                        alert('❌ Ошибка: ' + error.message);
+                    }
+                }
+            </script>
+        `;
+        
+        res.send(html);
+        
+    } catch (error) {
+        console.error('Moderation page error:', error);
+        res.status(500).send('<div style="color: var(--danger); text-align: center; padding: 40px;">Ошибка загрузки страницы</div>');
+    }
+});
+
+// Страница настройки команд
+app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
+    const guildId = req.params.guildId;
+    
+    const html = `
+        <div style="background: var(--surface); border-radius: 15px; border: 1px solid var(--border); padding: 30px;">
+            <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
+                <div style="font-size: 2.5rem;">⚙️</div>
+                <div>
+                    <h2 style="font-size: 1.8rem; color: var(--text); margin-bottom: 5px;">Настройка команд</h2>
+                    <p style="color: var(--text-secondary);">Конфигурация команд бота на этом сервере</p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; padding: 50px; color: var(--text-secondary);">
+                <div style="font-size: 4rem; margin-bottom: 20px; opacity: 0.5;">🚧</div>
+                <h3 style="font-size: 1.5rem; color: var(--text); margin-bottom: 15px;">Раздел в разработке</h3>
+                <p>Настройка команд будет доступна в ближайшем обновлении</p>
+            </div>
+        </div>
+    `;
+    
+    res.send(html);
+});
+
 // API для сохранения разрешений
 app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
     const guildId = req.params.guildId;
@@ -1521,6 +1890,631 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
             line-height: 1.6;
             min-height: 100vh;
         }
+        .header {
+            background: var(--surface);
+            padding: 25px;
+            border-bottom: 1px solid var(--border);
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        .user-info {
+            display: inline-flex;
+            align-items: center;
+            gap: 15px;
+            background: var(--surface-light);
+            padding: 10px 20px;
+            border-radius: 12px;
+            margin-top: 10px;
+        }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+        }
+        .logout-btn {
+            background: var(--danger);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            margin-left: 10px;
+        }
+        .logout-btn:hover {
+            background: #c93c3e;
+            transform: translateY(-2px);
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        .page-title {
+            font-size: 2rem;
+            color: var(--text);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .servers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 50px;
+        }
+        .server-card {
+            background: var(--surface);
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        .server-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--primary);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+        .server-header {
+            padding: 25px;
+            background: var(--surface-light);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .server-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid var(--surface);
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .server-icon-placeholder {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+            border: 3px solid var(--surface);
+            flex-shrink: 0;
+        }
+        .server-info {
+            flex: 1;
+        }
+        .server-name {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        .server-members {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+        .server-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+        .bot-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+        .bot-status.online {
+            background: rgba(87, 242, 135, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+        .bot-status.offline {
+            background: rgba(237, 66, 69, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+        .server-stats {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text);
+            display: block;
+        }
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .server-actions {
+            padding: 20px;
+            text-align: center;
+        }
+        .manage-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+        .manage-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(88, 101, 242, 0.4);
+        }
+        .manage-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        .no-servers {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+        }
+        .no-servers-icon {
+            font-size: 5rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        .invite-bot {
+            background: var(--surface);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            border: 1px solid var(--border);
+            margin-top: 40px;
+        }
+        .invite-bot h3 {
+            font-size: 1.5rem;
+            color: var(--text);
+            margin-bottom: 15px;
+        }
+        .invite-btn {
+            background: var(--success);
+            color: var(--background);
+            padding: 12px 25px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            transition: all 0.3s ease;
+        }
+        .invite-btn:hover {
+            background: #4ad175;
+            transform: translateY(-2px);
+        }
+        @media (max-width: 768px) {
+            .servers-grid {
+                grid-template-columns: 1fr;
+            }
+            .server-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .server-icon, .server-icon-placeholder {
+                margin: 0 auto;
+            }
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Haki Bot Панель управления</h1>
+        <div class="user-info">
+            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                 alt="${user.username}" class="user-avatar">
+            <div>
+                <div style="font-weight: bold;">${user.global_name || user.username}</div>
+                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
+            </div>
+            <a href="/auth/logout" class="logout-btn">🚪 Выйти</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2 class="page-title">Ваши серверы</h2>
+        
+        ${adminGuilds.length === 0 ? `
+            <div class="no-servers">
+                <div class="no-servers-icon">🏰</div>
+                <h3>Нет доступных серверов</h3>
+                <p>У вас нет прав администратора ни на одном сервере, где присутствует бот.</p>
+            </div>
+            
+            <div class="invite-bot">
+                <h3>📥 Пригласите бота на свой сервер</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    Чтобы использовать панель управления, добавьте бота на ваш сервер с правами администратора.
+                </p>
+                <a href="https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8" 
+                   target="_blank" 
+                   class="invite-btn">
+                    <span>➕</span>
+                    Пригласить бота
+                </a>
+            </div>
+        ` : ''}
+
+        <div class="servers-grid">
+            ${adminGuilds.map(guild => {
+                const botInGuild = client.guilds.cache.has(guild.id);
+                const botMember = botInGuild ? client.guilds.cache.get(guild.id).members.me : null;
+                const hasAdminPerms = botMember ? botMember.permissions.has('Administrator') : false;
+                
+                return `
+                    <div class="server-card">
+                        <div class="server-header">
+                            ${guild.icon ? 
+                                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="server-icon">` :
+                                `<div class="server-icon-placeholder">🏰</div>`
+                            }
+                            <div class="server-info">
+                                <div class="server-name">${guild.name}</div>
+                                <div class="server-members">${guild.approximate_member_count || '?'} участников</div>
+                                
+                                <div class="server-status">
+                                    <div class="bot-status ${botInGuild ? 'online' : 'offline'}">
+                                        ${botInGuild ? '🤖' : '❌'} 
+                                        ${botInGuild ? 'Бот на сервере' : 'Бот не добавлен'}
+                                    </div>
+                                    ${botInGuild && !hasAdminPerms ? 
+                                        '<div class="bot-status offline" style="font-size: 0.7rem;">⚠️ Нет прав</div>' : 
+                                        ''
+                                    }
+                                </div>
+                                
+                                <div class="server-stats">
+                                    <div class="stat">
+                                        <span class="stat-value">
+                                            ${getGuildPermissions(guild.id) ? Object.keys(getGuildPermissions(guild.id)).length : 0}
+                                        </span>
+                                        <span class="stat-label">Команд</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-value">
+                                            ${getModerationSettings(guild.id)?.enabled ? '✅' : '❌'}
+                                        </span>
+                                        <span class="stat-label">Модерация</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="server-actions">
+                            ${botInGuild && hasAdminPerms ? `
+                                <a href="/server/${guild.id}/manage" class="manage-btn">
+                                    <span>⚙️</span>
+                                    Управление сервером
+                                </a>
+                            ` : `
+                                <button class="manage-btn" onclick="showBotInvite('${guild.id}')" style="background: var(--danger);">
+                                    <span>➕</span>
+                                    Добавить бота
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    </div>
+
+    <script>
+        function showBotInvite(guildId) {
+            const inviteLink = 'https://discord.com/oauth2/authorize?client_id=' + CLIENT_ID + '&scope=bot&permissions=8&guild_id=' + guildId;
+            
+            const modal = document.createElement('div');
+            modal.style.position = 'fixed';
+            modal.style.top = '0';
+            modal.style.left = '0';
+            modal.style.width = '100%';
+            modal.style.height = '100%';
+            modal.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            modal.style.display = 'flex';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.style.zIndex = '2000';
+            
+            modal.innerHTML = [
+                '<div style="background: var(--surface); padding: 30px; border-radius: 15px; max-width: 500px; width: 90%; border: 1px solid var(--border);">',
+                    '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">',
+                        '<h3 style="margin: 0; color: var(--text); font-size: 1.3rem;">🤖 Добавить бота на сервер</h3>',
+                        '<button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">×</button>',
+                    '</div>',
+                    
+                    '<div style="color: var(--text-secondary); margin-bottom: 25px;">',
+                        'Для управления сервером боту необходимы администраторские права.',
+                    '</div>',
+                    
+                    '<div style="display: flex; gap: 10px; margin-bottom: 25px;">',
+                        '<input type="text" value="' + inviteLink + '" readonly style="flex: 1; padding: 12px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: monospace; font-size: 0.9rem;">',
+                        '<button onclick="copyToClipboard(\'' + inviteLink.replace(/'/g, "\\\\'") + '\')" style="background: var(--primary); color: white; border: none; padding: 0 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Копировать</button>',
+                    '</div>',
+                    
+                    '<div style="display: flex; justify-content: flex-end; gap: 10px;">',
+                        '<button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: var(--surface-light); color: var(--text); border: 1px solid var(--border); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease;">Закрыть</button>',
+                        '<a href="' + inviteLink + '" target="_blank" style="background: var(--success); color: var(--background); text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; transition: all 0.3s ease;">Открыть ссылку</a>',
+                    '</div>',
+                '</div>'
+            ].join('');
+            
+            document.body.appendChild(modal);
+        }
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                const notification = document.createElement('div');
+                notification.style.position = 'fixed';
+                notification.style.top = '20px';
+                notification.style.right = '20px';
+                notification.style.background = 'var(--success)';
+                notification.style.color = 'white';
+                notification.style.padding = '10px 20px';
+                notification.style.borderRadius = '8px';
+                notification.style.zIndex = '3000';
+                notification.textContent = '✅ Ссылка скопирована!';
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            }).catch(err => {
+                console.error('Ошибка копирования:', err);
+                alert('Не удалось скопировать ссылку. Скопируйте вручную: ' + text);
+            });
+        }
+    </script>
+</body>
+</html>`;
+}
+
+function createServerManagementPage(user, guild, baseUrl) {
+    const botInGuild = client.guilds.cache.has(guild.id);
+    
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${guild.name} - Управление</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #5865F2;
+            --primary-dark: #4752C4;
+            --success: #57F287;
+            --danger: #ED4245;
+            --warning: #FEE75C;
+            --background: #1a1a1a;
+            --surface: #2b2b2b;
+            --surface-light: #36393f;
+            --surface-dark: #202225;
+            --text: #ffffff;
+            --text-secondary: #b9bbbe;
+            --border: #40444b;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--background); 
+            color: var(--text); 
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        .main-content {
+            flex: 1;
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+        .server-icon-sm {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+            flex-shrink: 0;
+        }
+        .server-icon-placeholder-sm {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            border: 2px solid var(--primary);
+            flex-shrink: 0;
+        }
+        .server-info-sm {
+            flex: 1;
+            min-width: 0;
+        }
+        .server-name-sm {
+            font-weight: 700;
+            color: var(--text);
+            font-size: 1.1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .server-members-sm {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        .nav-section {
+            margin-bottom: 30px;
+        }
+        .section-title {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            padding-left: 10px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 8px;
+            background: var(--surface-light);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--text);
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .nav-item:hover {
+            background: var(--surface-dark);
+            border-color: var(--primary);
+            transform: translateX(5px);
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
+        }
+        .nav-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .nav-item.disabled:hover {
+            transform: none;
+            border-color: transparent;
+            background: var(--surface-light);
+        }
+        .nav-icon {
+            font-size: 1.2rem;
+            width: 24px;
+            text-align: center;
+        }
+        .nav-label {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text);
+            text-decoration: none;
+            padding: 12px 20px;
+            background: var(--surface-light);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+            margin-bottom: 30px;
+        }
+        .back-btn:hover {
+            border-color: var(--primary);
+            transform: translateX(-5px);
+        }
+        .page-header {
+            margin-bottom: 40px;
+        }
+        .page-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--text);
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .page-subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        .bot-warning {
+            background: linear-gradient(135deg, var(--warning) 0%, rgba(254, 231, 92, 0.1) 100%);
+            border: 1px solid var(--warning);
+            color: var(--text);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .content-placeholder {
+            background: var(--surface);
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            padding: 50px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+        .content-placeholder-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
         .mobile-menu-btn {
             display: none;
             position: fixed;
@@ -1535,251 +2529,14 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
             cursor: pointer;
             font-size: 1.2rem;
         }
-        .sidebar {
-            width: 280px;
-            background: var(--surface);
-            padding: 20px;
-            border-right: 1px solid var(--border);
-            position: fixed;
-            height: 100vh;
-            overflow-y: auto;
-            transition: transform 0.3s ease;
-            z-index: 1000;
-        }
-        .main-content {
-            margin-left: 280px;
-            padding: 30px;
-            min-height: 100vh;
-        }
-        .user-info {
-            display: flex;
-            align-items: center;
-            padding: 20px;
-            background: var(--surface-light);
-            border-radius: 12px;
-            margin-bottom: 30px;
-            border-left: 4px solid var(--primary);
-        }
-        .user-avatar {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            margin-right: 20px;
-            border: 3px solid var(--primary);
-        }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 15px;
-            margin: 5px 0;
-            background: var(--surface-light);
-            border-radius: 10px;
-            text-decoration: none;
-            color: var(--text);
-            transition: all 0.3s ease;
-            border: 1px solid transparent;
-        }
-        .nav-item:hover {
-            background: var(--surface-dark);
-            border-color: var(--primary);
-            transform: translateX(5px);
-        }
-        .nav-item.active {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-            box-shadow: 0 5px 20px rgba(88, 101, 242, 0.3);
-        }
-        .nav-icon {
-            font-size: 1.3rem;
-            margin-right: 15px;
-            width: 24px;
-            text-align: center;
-        }
-        .logout-btn {
-            background: linear-gradient(135deg, var(--danger) 0%, #c93c3e 100%);
-            color: white;
-            padding: 15px;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 1rem;
-            width: 100%;
-            margin-top: 20px;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-        }
-        .logout-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(237, 66, 69, 0.3);
-        }
-        .header {
-            margin-bottom: 40px;
-        }
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(135deg, var(--primary), var(--success));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .header p {
-            color: var(--text-secondary);
-            font-size: 1.1rem;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 40px;
-        }
-        .stat-card {
-            background: var(--surface);
-            padding: 25px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        .stat-card:hover {
-            transform: translateY(-5px);
-            border-color: var(--primary);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-        .stat-icon {
-            font-size: 2.5rem;
-            margin-bottom: 15px;
-            display: inline-block;
-        }
-        .stat-value {
-            font-size: 2rem;
-            font-weight: 800;
-            color: var(--text);
-            display: block;
-        }
-        .stat-label {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .guilds-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .guild-card {
-            background: var(--surface);
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            overflow: hidden;
-            transition: all 0.3s ease;
-        }
-        .guild-card:hover {
-            transform: translateY(-5px);
-            border-color: var(--primary);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-        .guild-header {
-            padding: 20px;
-            background: var(--surface-light);
-            display: flex;
-            align-items: center;
-        }
-        .guild-icon {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            margin-right: 15px;
-            object-fit: cover;
-        }
-        .guild-icon-placeholder {
-            width: 50px;
-            height: 50px;
-            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            margin-right: 15px;
-            color: white;
-        }
-        .guild-info {
-            flex: 1;
-        }
-        .guild-name {
-            font-weight: 600;
-            color: var(--text);
-            margin-bottom: 5px;
-        }
-        .guild-members {
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-        }
-        .guild-actions {
-            padding: 20px;
-            display: flex;
-            gap: 10px;
-        }
-        .btn {
-            padding: 10px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            flex: 1;
-            text-align: center;
-        }
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
-        .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-2px);
-        }
-        .btn-secondary {
-            background: var(--surface-light);
-            color: var(--text);
-            border: 1px solid var(--border);
-        }
-        .btn-secondary:hover {
-            background: var(--surface-dark);
-            border-color: var(--primary);
-            transform: translateY(-2px);
-        }
-        .no-guilds {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 50px;
-            color: var(--text-secondary);
-        }
-        .no-guilds-icon {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            opacity: 0.5;
-        }
-        @media (max-width: 1024px) {
-            .guilds-grid {
-                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            }
-        }
         @media (max-width: 768px) {
             .mobile-menu-btn {
                 display: block;
             }
             .sidebar {
                 transform: translateX(-100%);
+                transition: transform 0.3s ease;
+                z-index: 1000;
             }
             .sidebar.active {
                 transform: translateX(0);
@@ -1788,22 +2545,8 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
                 margin-left: 0;
                 padding: 80px 20px 30px;
             }
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            .guilds-grid {
-                grid-template-columns: 1fr;
-            }
-            .header h1 {
+            .page-title {
                 font-size: 2rem;
-            }
-        }
-        @media (max-width: 480px) {
-            .guild-actions {
-                flex-direction: column;
-            }
-            .btn {
-                width: 100%;
             }
         }
     </style>
@@ -1812,115 +2555,86 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
     <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
     
     <div class="sidebar" id="sidebar">
-        <div class="user-info">
-            <img src="${user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256` : 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                 alt="${user.username}" class="user-avatar">
-            <div>
-                <div style="font-weight: bold; font-size: 1.1rem;">${user.global_name || user.username}</div>
-                <div style="color: var(--text-secondary); font-size: 0.9rem;">${user.username}</div>
-                <div style="color: var(--success); font-size: 0.8rem; margin-top: 5px; font-weight: 600;">✅ Администратор</div>
+        <div class="sidebar-header">
+            ${guild.icon ? 
+                `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=256" alt="${guild.name}" class="server-icon-sm">` :
+                `<div class="server-icon-placeholder-sm">🏰</div>`
+            }
+            <div class="server-info-sm">
+                <div class="server-name-sm">${guild.name}</div>
+                <div class="server-members-sm">${guild.approximate_member_count || '?'} участников</div>
             </div>
         </div>
-
-        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Навигация</div>
         
-        <a href="/" class="nav-item active">
-            <span class="nav-icon">🏠</span>
-            Главная
-              </a>
-        <a href="/permissions" class="nav-item">
-            <span class="nav-icon">🔐</span>
-            Управление правами
-        </a>
-        <div style="margin: 25px 0 10px 0; color: var(--text-secondary); font-size: 0.9rem; padding: 0 10px; text-transform: uppercase; letter-spacing: 1px;">Быстрые ссылки</div>
+        <div class="nav-section">
+            <div class="section-title">Навигация</div>
+            <a href="/" class="nav-item">
+                <div class="nav-icon">⬅️</div>
+                <div class="nav-label">Назад к серверам</div>
+            </a>
+        </div>
         
-        <a href="/admin/transcripts" class="nav-item">
-            <span class="nav-icon">📄</span>
-            Просмотр транскриптов
-        </a>
-
-        <a href="/auth/logout" class="logout-btn">
-            <span class="nav-icon">🚪</span>
-            Выйти
-        </a>
+        <div class="nav-section">
+            <div class="section-title">Управление сервером</div>
+            <a href="/server/${guild.id}/manage/permissions" class="nav-item" id="nav-permissions">
+                <div class="nav-icon">🔐</div>
+                <div class="nav-label">Управление правами</div>
+            </a>
+            <a href="/server/${guild.id}/manage/moderation" class="nav-item" id="nav-moderation">
+                <div class="nav-icon">🛡️</div>
+                <div class="nav-label">Модерация</div>
+            </a>
+            <a href="/server/${guild.id}/manage/commands" class="nav-item ${!botInGuild ? 'disabled' : ''}" id="nav-commands">
+                <div class="nav-icon">⚙️</div>
+                <div class="nav-label">Настройка команд</div>
+            </a>
+        </div>
+        
+        <div class="nav-section">
+            <div class="section-title">Быстрый доступ</div>
+            <a href="/admin/transcripts" class="nav-item">
+                <div class="nav-icon">📄</div>
+                <div class="nav-label">Транскрипты</div>
+            </a>
+            <a href="/auth/logout" class="nav-item" style="background: rgba(237, 66, 69, 0.2); color: var(--danger); border-color: var(--danger);">
+                <div class="nav-icon">🚪</div>
+                <div class="nav-label">Выйти</div>
+            </a>
+        </div>
     </div>
-
+    
     <div class="main-content">
-        <div class="header">
-            <h1>🤖 Панель управления Haki Bot</h1>
-            <p>Управляйте настройками бота на ваших серверах Discord</p>
+        <div class="page-header">
+            <h1 class="page-title" id="page-title">Выберите раздел</h1>
+            <p class="page-subtitle" id="page-subtitle">Используйте меню слева для навигации</p>
         </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon">🏰</div>
-                <div class="stat-value">${adminGuilds.length}</div>
-                <div class="stat-label">Серверов с правами</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">🔐</div>
-                <div class="stat-value">3</div>
-                <div class="stat-label">Команд с ограничениями</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">📊</div>
-                <div class="stat-value">${adminGuilds.reduce((sum, guild) => sum + (guild.approximate_member_count || 0), 0)}</div>
-                <div class="stat-label">Общее кол-во участников</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">⚙️</div>
-                <div class="stat-value">В сети</div>
-                <div class="stat-label">Статус бота</div>
-            </div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="font-size: 1.8rem; color: var(--text);">Ваши сервера</h2>
-            <div style="color: var(--text-secondary); font-size: 0.9rem;">
-                ${adminGuilds.length} сервер${adminGuilds.length === 1 ? '' : adminGuilds.length < 5 ? 'а' : 'ов'} с правами администратора
-            </div>
-        </div>
-
-        <div class="guilds-grid">
-    ${adminGuilds.length > 0 ? 
-        adminGuilds.map(server => `
-            <div class="guild-card">
-                <div class="guild-header">
-                    ${server.icon ? 
-                        `<img src="https://cdn.discordapp.com/icons/${server.id}/${server.icon}.png?size=256" alt="${server.name}" class="guild-icon">` :
-                        `<div class="guild-icon-placeholder">🏰</div>`
-                    }
-                    <div class="guild-info">
-                        <div class="guild-name">${server.name}</div>
-                        <div class="guild-members">${server.approximate_member_count || 'Неизвестно'} участников</div>
+        
+        ${!botInGuild ? `
+            <div class="bot-warning">
+                <div>⚠️</div>
+                <div>
+                    <strong>Внимание:</strong> Бот не добавлен на этот сервер. 
+                    Некоторые функции управления будут недоступны до добавления бота.
+                    <div style="margin-top: 10px;">
+                        <a href="https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&scope=bot&permissions=8&guild_id=${guild.id}" 
+                           target="_blank" 
+                           style="color: var(--primary); text-decoration: underline;">
+                            Добавить бота на сервер
+                        </a>
                     </div>
                 </div>
-                <div class="guild-actions">
-                    <a href="/permissions/${server.id}" class="btn btn-primary">
-                        <span class="nav-icon">🔐</span>
-                        Права
-                    </a>
-                    <a href="/guild/${server.id}/settings" class="btn btn-secondary">
-                        <span class="nav-icon">⚙️</span>
-                        Настройки
-                    </a>
-                    <a href="/guild/${server.id}/moderation" class="btn btn-secondary" style="background: var(--warning); color: #000;">
-                        <span class="nav-icon">🛡️</span>
-                        Модерация
-                    </a>
-                </div>
             </div>
-        `).join('') : 
-        `<div class="no-guilds">
-            <div class="no-guilds-icon">🏰</div>
-            <h3>Нет доступных серверов</h3>
-            <p>У вас нет прав администратора ни на одном сервере, где присутствует бот.</p>
-            <div style="margin-top: 20px; color: var(--text-secondary); font-size: 0.9rem;">
-                Требуются права администратора для управления настройками бота.
-            </div>
-        </div>`
-    }
-</div>
+        ` : ''}
+        
+        <div class="content-placeholder" id="content-placeholder">
+            <div class="content-placeholder-icon">⚙️</div>
+            <h3>Выберите раздел управления</h3>
+            <p>Используйте меню слева для перехода к нужному разделу настроек</p>
+        </div>
+        
+        <div id="content-area" style="display: none;">
+            <!-- Динамический контент будет загружен здесь -->
+        </div>
     </div>
 
     <script>
@@ -1928,6 +2642,80 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
             const sidebar = document.getElementById('sidebar');
             sidebar.classList.toggle('active');
         }
+        
+        // Навигация по разделам
+        const navItems = {
+            'permissions': {
+                title: 'Управление правами',
+                subtitle: 'Настройка прав доступа к командам',
+                url: '/server/${guild.id}/manage/permissions'
+            },
+            'moderation': {
+                title: 'Настройки модерации',
+                subtitle: 'Управление авто-модерацией и модерацией',
+                url: '/server/${guild.id}/manage/moderation'
+            },
+            'commands': {
+                title: 'Настройка команд',
+                subtitle: 'Конфигурация команд бота',
+                url: '/server/${guild.id}/manage/commands'
+            }
+        };
+        
+        // Устанавливаем активный пункт меню
+        function setActiveNav(itemId) {
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            const navItem = document.getElementById('nav-' + itemId);
+            if (navItem) {
+                navItem.classList.add('active');
+            }
+        }
+        
+        // Загрузка контента
+        async function loadContent(section) {
+            const sectionData = navItems[section];
+            if (!sectionData) return;
+            
+            setActiveNav(section);
+            
+            document.getElementById('page-title').textContent = sectionData.title;
+            document.getElementById('page-subtitle').textContent = sectionData.subtitle;
+            document.getElementById('content-placeholder').style.display = 'none';
+            document.getElementById('content-area').style.display = 'block';
+            
+            try {
+                const response = await fetch(sectionData.url);
+                const html = await response.text();
+                document.getElementById('content-area').innerHTML = html;
+            } catch (error) {
+                document.getElementById('content-area').innerHTML = \`
+                    <div class="content-placeholder">
+                        <div class="content-placeholder-icon">❌</div>
+                        <h3>Ошибка загрузки</h3>
+                        <p>Не удалось загрузить содержимое раздела</p>
+                    </div>
+                \`;
+            }
+        }
+        
+        // Обработчики кликов на меню
+        document.getElementById('nav-permissions').addEventListener('click', (e) => {
+            e.preventDefault();
+            loadContent('permissions');
+        });
+        
+        document.getElementById('nav-moderation').addEventListener('click', (e) => {
+            e.preventDefault();
+            loadContent('moderation');
+        });
+        
+        document.getElementById('nav-commands').addEventListener('click', (e) => {
+            e.preventDefault();
+            loadContent('commands');
+        });
         
         // Закрываем sidebar при клике вне его области на мобильных устройствах
         document.addEventListener('click', (event) => {
@@ -1940,6 +2728,16 @@ function createDashboardPage(user, adminGuilds, baseUrl) {
                 }
             }
         });
+        
+        // Автоматически загружаем контент из URL
+        const url = window.location.pathname;
+        if (url.includes('/permissions')) {
+            loadContent('permissions');
+        } else if (url.includes('/moderation')) {
+            loadContent('moderation');
+        } else if (url.includes('/commands')) {
+            loadContent('commands');
+        }
     </script>
 </body>
 </html>`;
