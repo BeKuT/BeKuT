@@ -1466,6 +1466,7 @@ app.get('/server/:guildId/manage/moderation', requireAdmin, async (req, res) => 
 });
 
 // Страница настройки команд
+// Страница настройки команд (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
     const guildId = req.params.guildId;
     const baseUrl = getBaseUrl();
@@ -1484,8 +1485,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                 category: 'Модерация',
                 description: 'Бан пользователя',
                 enabled: true,
-                defaultRole: 'moderator',
-                settings: { deleteMessages: true }
+                defaultRole: 'moderator'
             },
             { 
                 id: 'kick', 
@@ -1605,7 +1605,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
             }
         ];
         
-        // Получаем настройки команд (из БД или памяти)
+        // Получаем настройки команд
         const commandSettings = getCommandSettings(guildId);
         
         // Группируем команды по категориям
@@ -1614,10 +1614,11 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
             if (!commandsByCategory[cmd.category]) {
                 commandsByCategory[cmd.category] = [];
             }
+            const settings = commandSettings[cmd.id] || {};
             commandsByCategory[cmd.category].push({
                 ...cmd,
-                enabled: commandSettings[cmd.id]?.enabled ?? cmd.enabled,
-                roles: commandSettings[cmd.id]?.roles || [cmd.defaultRole]
+                enabled: settings.enabled !== undefined ? settings.enabled : cmd.enabled,
+                roles: settings.roles || []
             });
         });
         
@@ -1664,10 +1665,10 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                         </div>
                     </div>
                     
-                    <div style="display: flex; gap: 15px; margin-bottom: 20px;">
-                        <button onclick="showAllCommands()" class="category-btn active">Все команды</button>
+                    <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <button onclick="showAllCommands()" class="category-btn active" id="btn-all">Все команды</button>
                         ${Object.keys(commandsByCategory).map(category => `
-                            <button onclick="filterByCategory('${category}')" class="category-btn">
+                            <button onclick="filterByCategory('${category}')" class="category-btn" id="btn-${category}">
                                 ${category} (${commandsByCategory[category].length})
                             </button>
                         `).join('')}
@@ -1676,19 +1677,23 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                 
                 <div id="commands-container">
                     ${Object.entries(commandsByCategory).map(([category, commands]) => `
-                        <div class="command-category" data-category="${category}">
+                        <div class="command-category" id="category-${category}" data-category="${category}">
                             <h3 style="color: var(--text); margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
                                 ${category}
                             </h3>
                             
                             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; margin-bottom: 40px;">
-                                ${commands.map(cmd => `
-                                    <div class="command-card" data-command-id="${cmd.id}">
+                                ${commands.map(cmd => {
+                                    const currentSettings = commandSettings[cmd.id] || {};
+                                    const currentRoles = currentSettings.roles || [];
+                                    
+                                    return `
+                                    <div class="command-card" id="cmd-${cmd.id}" data-command-id="${cmd.id}">
                                         <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
                                             <div style="font-size: 1.8rem;">${cmd.icon}</div>
                                             <div style="flex: 1;">
-                                                <div style="font-weight: 700; color: var(--text); font-size: 1.1rem;">${cmd.name}</div>
-                                                <div style="color: var(--text-secondary); font-size: 0.9rem;">${cmd.description}</div>
+                                                <div style="font-weight: 700; color: var(--text); font-size: 1.1rem;" class="command-name">${cmd.name}</div>
+                                                <div style="color: var(--text-secondary); font-size: 0.9rem;" class="command-desc">${cmd.description}</div>
                                             </div>
                                             <label class="switch">
                                                 <input type="checkbox" id="toggle-${cmd.id}" ${cmd.enabled ? 'checked' : ''} 
@@ -1697,7 +1702,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                                             </label>
                                         </div>
                                         
-                                        <div class="command-details" style="display: none;">
+                                        <div id="details-${cmd.id}" class="command-details" style="display: none;">
                                             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
                                                 <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">
                                                     Права доступа:
@@ -1705,18 +1710,20 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                                                 
                                                 ${roles.length > 0 ? `
                                                     <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px;">
-                                                        ${roles.map(role => `
-                                                            <label class="role-tag" style="display: inline-flex; align-items: center; gap: 5px; cursor: pointer;">
+                                                        ${roles.map(role => {
+                                                            const isChecked = currentRoles.includes(role.id);
+                                                            return `
+                                                            <label class="role-tag" data-role-id="${role.id}" data-command-id="${cmd.id}" style="cursor: pointer;">
                                                                 <input type="checkbox" 
                                                                        value="${role.id}" 
-                                                                       class="role-checkbox" 
-                                                                       data-command="${cmd.id}"
+                                                                       ${isChecked ? 'checked' : ''}
                                                                        style="display: none;">
-                                                                <span class="role-tag-label" style="padding: 5px 12px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 15px; color: var(--text); font-size: 0.85rem; transition: all 0.2s;">
+                                                                <span class="role-tag-label" style="padding: 5px 12px; background: ${isChecked ? 'var(--primary)' : 'var(--surface-light)'}; border: 1px solid ${isChecked ? 'var(--primary)' : 'var(--border)'}; border-radius: 15px; color: ${isChecked ? 'white' : 'var(--text)'}; font-size: 0.85rem; transition: all 0.2s;">
                                                                     ${role.name}
                                                                 </span>
                                                             </label>
-                                                        `).join('')}
+                                                            `;
+                                                        }).join('')}
                                                     </div>
                                                 ` : `
                                                     <div style="color: var(--text-secondary); padding: 10px; background: var(--surface-light); border-radius: 8px; text-align: center; font-size: 0.9rem;">
@@ -1740,13 +1747,14 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                                         
                                         <div style="text-align: center; margin-top: 15px;">
                                             <button onclick="toggleCommandDetails('${cmd.id}')" 
-                                                    class="details-btn">
+                                                    class="details-btn" id="btn-details-${cmd.id}">
                                                 <span>⚙️</span>
                                                 Настройки
                                             </button>
                                         </div>
                                     </div>
-                                `).join('')}
+                                    `;
+                                }).join('')}
                             </div>
                         </div>
                     `).join('')}
@@ -1786,6 +1794,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                     cursor: pointer;
                     font-weight: 600;
                     transition: all 0.3s ease;
+                    border: none;
                 }
                 
                 .category-btn:hover {
@@ -1877,12 +1886,6 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                     background: var(--primary);
                     color: white;
                 }
-                
-                .role-tag input:checked + .role-tag-label {
-                    background: var(--primary);
-                    color: white;
-                    border-color: var(--primary);
-                }
             </style>
             
             <script>
@@ -1899,7 +1902,6 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                         });
                         
                         const data = await response.json();
-                        
                         showMessage(data.success ? '✅ Команда обновлена' : '❌ Ошибка', data.success);
                     } catch (error) {
                         showMessage('❌ Ошибка: ' + error.message, false);
@@ -1907,8 +1909,8 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                 }
                 
                 function toggleCommandDetails(commandId) {
-                    const details = document.querySelector('[data-command-id="' + commandId + '"] .command-details');
-                    const button = document.querySelector('[data-command-id="' + commandId + '"] .details-btn');
+                    const details = document.getElementById('details-' + commandId);
+                    const button = document.getElementById('btn-details-' + commandId);
                     
                     if (details.style.display === 'none') {
                         details.style.display = 'block';
@@ -1920,7 +1922,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                 }
                 
                 async function saveCommandRoles(commandId, guildId) {
-                    const checkboxes = document.querySelectorAll('[data-command="' + commandId + '"]:checked');
+                    const checkboxes = document.querySelectorAll('[data-command-id="' + commandId + '"] input[type="checkbox"]:checked');
                     const roleIds = Array.from(checkboxes).map(cb => cb.value);
                     
                     try {
@@ -2001,19 +2003,52 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                 }
                 
                 // Поиск команд
-                document.getElementById('command-search').addEventListener('input', function(e) {
-                    const searchTerm = e.target.value.toLowerCase();
-                    const commandCards = document.querySelectorAll('.command-card');
+                document.addEventListener('DOMContentLoaded', function() {
+                    const searchInput = document.getElementById('command-search');
+                    if (searchInput) {
+                        searchInput.addEventListener('input', function(e) {
+                            const searchTerm = e.target.value.toLowerCase().trim();
+                            const commandCards = document.querySelectorAll('.command-card');
+                            
+                            if (searchTerm === '') {
+                                // Показываем все карточки если поиск пустой
+                                commandCards.forEach(card => {
+                                    card.style.display = 'block';
+                                });
+                                return;
+                            }
+                            
+                            commandCards.forEach(card => {
+                                const commandName = card.querySelector('.command-name').textContent.toLowerCase();
+                                const commandDesc = card.querySelector('.command-desc').textContent.toLowerCase();
+                                
+                                if (commandName.includes(searchTerm) || commandDesc.includes(searchTerm)) {
+                                    card.style.display = 'block';
+                                } else {
+                                    card.style.display = 'none';
+                                }
+                            });
+                        });
+                    }
                     
-                    commandCards.forEach(card => {
-                        const commandName = card.querySelector('.command-name').textContent.toLowerCase();
-                        const commandDesc = card.querySelector('.command-desc').textContent.toLowerCase();
-                        
-                        if (commandName.includes(searchTerm) || commandDesc.includes(searchTerm)) {
-                            card.style.display = 'block';
-                        } else {
-                            card.style.display = 'none';
-                        }
+                    // Обработчики для ролей
+                    document.querySelectorAll('.role-tag').forEach(tag => {
+                        tag.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            const checkbox = this.querySelector('input[type="checkbox"]');
+                            checkbox.checked = !checkbox.checked;
+                            
+                            const label = this.querySelector('.role-tag-label');
+                            if (checkbox.checked) {
+                                label.style.background = 'var(--primary)';
+                                label.style.borderColor = 'var(--primary)';
+                                label.style.color = 'white';
+                            } else {
+                                label.style.background = 'var(--surface-light)';
+                                label.style.borderColor = 'var(--border)';
+                                label.style.color = 'var(--text)';
+                            }
+                        });
                     });
                 });
                 
@@ -2026,7 +2061,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                     document.querySelectorAll('.category-btn').forEach(btn => {
                         btn.classList.remove('active');
                     });
-                    event.target.classList.add('active');
+                    document.getElementById('btn-all').classList.add('active');
                 }
                 
                 function filterByCategory(category) {
@@ -2041,7 +2076,7 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                     document.querySelectorAll('.category-btn').forEach(btn => {
                         btn.classList.remove('active');
                     });
-                    event.target.classList.add('active');
+                    document.getElementById('btn-' + category).classList.add('active');
                 }
                 
                 // Показать сообщение
@@ -2057,15 +2092,6 @@ app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
                         messageDiv.innerHTML = '';
                     }, 3000);
                 }
-                
-                // Обработчики для чекбоксов ролей
-                document.querySelectorAll('.role-tag').forEach(tag => {
-                    tag.addEventListener('click', function(e) {
-                        const checkbox = this.querySelector('input');
-                        checkbox.checked = !checkbox.checked;
-                        this.classList.toggle('selected');
-                    });
-                });
             </script>
         `;
         
