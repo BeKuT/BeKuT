@@ -1468,28 +1468,618 @@ app.get('/server/:guildId/manage/moderation', requireAdmin, async (req, res) => 
 // Страница настройки команд
 app.get('/server/:guildId/manage/commands', requireAdmin, async (req, res) => {
     const guildId = req.params.guildId;
+    const baseUrl = getBaseUrl();
     
-    const html = `
-        <div style="background: var(--surface); border-radius: 15px; border: 1px solid var(--border); padding: 30px;">
-            <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
-                <div style="font-size: 2.5rem;">⚙️</div>
-                <div>
-                    <h2 style="font-size: 1.8rem; color: var(--text); margin-bottom: 5px;">Настройка команд</h2>
-                    <p style="color: var(--text-secondary);">Конфигурация команд бота на этом сервере</p>
+    try {
+        const discordGuild = client.guilds.cache.get(guildId);
+        const botInGuild = discordGuild ? true : false;
+        
+        // Получаем все слеш-команды
+        const allCommands = [
+            // Команды модерации
+            { 
+                id: 'ban', 
+                name: '/ban', 
+                icon: '🔨', 
+                category: 'Модерация',
+                description: 'Бан пользователя',
+                enabled: true,
+                defaultRole: 'moderator',
+                settings: { deleteMessages: true }
+            },
+            { 
+                id: 'kick', 
+                name: '/kick', 
+                icon: '👢', 
+                category: 'Модерация',
+                description: 'Кик пользователя',
+                enabled: true,
+                defaultRole: 'moderator'
+            },
+            { 
+                id: 'mute', 
+                name: '/mute', 
+                icon: '🔇', 
+                category: 'Модерация',
+                description: 'Временный мут пользователя',
+                enabled: true,
+                defaultRole: 'moderator'
+            },
+            { 
+                id: 'clear', 
+                name: '/clear', 
+                icon: '🗑️', 
+                category: 'Модерация',
+                description: 'Очистка сообщений',
+                enabled: true,
+                defaultRole: 'moderator'
+            },
+            { 
+                id: 'warn', 
+                name: '/warn', 
+                icon: '⚠️', 
+                category: 'Модерация',
+                description: 'Выдать предупреждение',
+                enabled: true,
+                defaultRole: 'moderator'
+            },
+            
+            // Команды управления
+            { 
+                id: 'transcript', 
+                name: '/transcript', 
+                icon: '📄', 
+                category: 'Управление',
+                description: 'Создание транскриптов',
+                enabled: true,
+                defaultRole: 'admin'
+            },
+            { 
+                id: 'ticket', 
+                name: '/ticket', 
+                icon: '🎫', 
+                category: 'Управление',
+                description: 'Настройка системы тикетов',
+                enabled: true,
+                defaultRole: 'admin'
+            },
+            { 
+                id: 'region', 
+                name: '/регион', 
+                icon: '🌍', 
+                category: 'Управление',
+                description: 'Управление голосовыми регионами',
+                enabled: true,
+                defaultRole: 'admin'
+            },
+            
+            // Радио команды
+            { 
+                id: 'play', 
+                name: '/play', 
+                icon: '🎵', 
+                category: 'Радио',
+                description: 'Включить радиостанцию',
+                enabled: true,
+                defaultRole: 'everyone'
+            },
+            { 
+                id: 'stop', 
+                name: '/stop', 
+                icon: '⏹️', 
+                category: 'Радио',
+                description: 'Выключить радио',
+                enabled: true,
+                defaultRole: 'everyone'
+            },
+            
+            // Информационные команды
+            { 
+                id: 'stats', 
+                name: '/стат', 
+                icon: '📊', 
+                category: 'Информация',
+                description: 'Статистика War Thunder',
+                enabled: true,
+                defaultRole: 'everyone'
+            },
+            { 
+                id: 'regiment', 
+                name: '/полк', 
+                icon: '🏰', 
+                category: 'Информация',
+                description: 'Информация о полке',
+                enabled: true,
+                defaultRole: 'everyone'
+            },
+            
+            // Утилиты
+            { 
+                id: 'ping', 
+                name: '/ping', 
+                icon: '🏓', 
+                category: 'Утилиты',
+                description: 'Проверка работоспособности бота',
+                enabled: true,
+                defaultRole: 'everyone'
+            }
+        ];
+        
+        // Получаем настройки команд (из БД или памяти)
+        const commandSettings = getCommandSettings(guildId);
+        
+        // Группируем команды по категориям
+        const commandsByCategory = {};
+        allCommands.forEach(cmd => {
+            if (!commandsByCategory[cmd.category]) {
+                commandsByCategory[cmd.category] = [];
+            }
+            commandsByCategory[cmd.category].push({
+                ...cmd,
+                enabled: commandSettings[cmd.id]?.enabled ?? cmd.enabled,
+                roles: commandSettings[cmd.id]?.roles || [cmd.defaultRole]
+            });
+        });
+        
+        // Получаем роли сервера
+        let roles = [];
+        if (discordGuild) {
+            roles = discordGuild.roles.cache
+                .filter(role => role.name !== '@everyone')
+                .map(role => ({
+                    id: role.id,
+                    name: role.name,
+                    color: role.color,
+                    members: role.members?.size || 0
+                }))
+                .sort((a, b) => b.position - a.position);
+        }
+        
+        const html = `
+            <div style="background: var(--surface); border-radius: 15px; border: 1px solid var(--border); padding: 30px;">
+                <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
+                    <div style="font-size: 2.5rem;">⚙️</div>
+                    <div>
+                        <h2 style="font-size: 1.8rem; color: var(--text); margin-bottom: 5px;">Настройка команд</h2>
+                        <p style="color: var(--text-secondary);">Включение/выключение и настройка прав доступа к командам</p>
+                    </div>
                 </div>
+                
+                ${!botInGuild ? `
+                    <div style="background: linear-gradient(135deg, var(--warning) 0%, rgba(254, 231, 92, 0.1) 100%); border: 1px solid var(--warning); color: var(--text); padding: 15px; border-radius: 10px; margin-bottom: 30px; display: flex; align-items: center; gap: 15px;">
+                        <div>⚠️</div>
+                        <div>
+                            <strong>Внимание:</strong> Бот не добавлен на этот сервер. 
+                            Настройки команд будут применены после добавления бота.
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div style="margin-bottom: 30px;">
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                        <input type="text" id="command-search" placeholder="🔍 Поиск команды..." 
+                               style="flex: 1; padding: 12px 20px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 1rem;">
+                        <div style="color: var(--text-secondary); font-size: 0.9rem;">
+                            Всего команд: ${allCommands.length}
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                        <button onclick="showAllCommands()" class="category-btn active">Все команды</button>
+                        ${Object.keys(commandsByCategory).map(category => `
+                            <button onclick="filterByCategory('${category}')" class="category-btn">
+                                ${category} (${commandsByCategory[category].length})
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div id="commands-container">
+                    ${Object.entries(commandsByCategory).map(([category, commands]) => `
+                        <div class="command-category" data-category="${category}">
+                            <h3 style="color: var(--text); margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+                                ${category}
+                            </h3>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; margin-bottom: 40px;">
+                                ${commands.map(cmd => `
+                                    <div class="command-card" data-command-id="${cmd.id}">
+                                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                                            <div style="font-size: 1.8rem;">${cmd.icon}</div>
+                                            <div style="flex: 1;">
+                                                <div style="font-weight: 700; color: var(--text); font-size: 1.1rem;">${cmd.name}</div>
+                                                <div style="color: var(--text-secondary); font-size: 0.9rem;">${cmd.description}</div>
+                                            </div>
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-${cmd.id}" ${cmd.enabled ? 'checked' : ''} 
+                                                       onchange="toggleCommand('${cmd.id}', '${guildId}')">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </div>
+                                        
+                                        <div class="command-details" style="display: none;">
+                                            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
+                                                <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">
+                                                    Права доступа:
+                                                </div>
+                                                
+                                                ${roles.length > 0 ? `
+                                                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px;">
+                                                        ${roles.map(role => `
+                                                            <label class="role-tag" style="display: inline-flex; align-items: center; gap: 5px; cursor: pointer;">
+                                                                <input type="checkbox" 
+                                                                       value="${role.id}" 
+                                                                       class="role-checkbox" 
+                                                                       data-command="${cmd.id}"
+                                                                       style="display: none;">
+                                                                <span class="role-tag-label" style="padding: 5px 12px; background: var(--surface-light); border: 1px solid var(--border); border-radius: 15px; color: var(--text); font-size: 0.85rem; transition: all 0.2s;">
+                                                                    ${role.name}
+                                                                </span>
+                                                            </label>
+                                                        `).join('')}
+                                                    </div>
+                                                ` : `
+                                                    <div style="color: var(--text-secondary); padding: 10px; background: var(--surface-light); border-radius: 8px; text-align: center; font-size: 0.9rem;">
+                                                        Роли не найдены
+                                                    </div>
+                                                `}
+                                                
+                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                                                    <button onclick="saveCommandRoles('${cmd.id}', '${guildId}')" 
+                                                            style="padding: 8px 15px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">
+                                                        💾 Сохранить роли
+                                                    </button>
+                                                    
+                                                    <button onclick="resetCommandSettings('${cmd.id}', '${guildId}')" 
+                                                            style="padding: 8px 15px; background: var(--surface-light); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.9rem;">
+                                                        Сбросить
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div style="text-align: center; margin-top: 15px;">
+                                            <button onclick="toggleCommandDetails('${cmd.id}')" 
+                                                    class="details-btn">
+                                                <span>⚙️</span>
+                                                Настройки
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="background: var(--surface-dark); padding: 25px; border-radius: 12px; margin-top: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="color: var(--text); font-weight: 600; margin-bottom: 5px;">💡 Управление всеми командами</div>
+                            <div style="color: var(--text-secondary); font-size: 0.9rem;">
+                                Быстрое включение/выключение всех команд
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="enableAllCommands('${guildId}')" 
+                                    style="padding: 12px 25px; background: var(--success); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                                ✅ Включить все
+                            </button>
+                            <button onclick="disableAllCommands('${guildId}')" 
+                                    style="padding: 12px 25px; background: var(--danger); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                                ❌ Выключить все
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="command-message" style="margin-top: 20px;"></div>
             </div>
             
-            <div style="text-align: center; padding: 50px; color: var(--text-secondary);">
-                <div style="font-size: 4rem; margin-bottom: 20px; opacity: 0.5;">🚧</div>
-                <h3 style="font-size: 1.5rem; color: var(--text); margin-bottom: 15px;">Раздел в разработке</h3>
-                <p>Настройка команд будет доступна в ближайшем обновлении</p>
+            <style>
+                .category-btn {
+                    padding: 10px 20px;
+                    background: var(--surface-light);
+                    color: var(--text);
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-weight: 600;
+                    transition: all 0.3s ease;
+                }
+                
+                .category-btn:hover {
+                    background: var(--surface-dark);
+                    border-color: var(--primary);
+                }
+                
+                .category-btn.active {
+                    background: var(--primary);
+                    color: white;
+                    border-color: var(--primary);
+                }
+                
+                .command-card {
+                    background: var(--surface-light);
+                    padding: 20px;
+                    border-radius: 12px;
+                    border: 1px solid var(--border);
+                    transition: all 0.3s ease;
+                }
+                
+                .command-card:hover {
+                    border-color: var(--primary);
+                    transform: translateY(-3px);
+                    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+                }
+                
+                .switch {
+                    position: relative;
+                    display: inline-block;
+                    width: 50px;
+                    height: 26px;
+                }
+                
+                .switch input {
+                    opacity: 0;
+                    width: 0;
+                    height: 0;
+                }
+                
+                .slider {
+                    position: absolute;
+                    cursor: pointer;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: var(--surface-dark);
+                    transition: .4s;
+                    border-radius: 34px;
+                    border: 1px solid var(--border);
+                }
+                
+                .slider:before {
+                    position: absolute;
+                    content: "";
+                    height: 18px;
+                    width: 18px;
+                    left: 4px;
+                    bottom: 3px;
+                    background-color: white;
+                    transition: .4s;
+                    border-radius: 50%;
+                }
+                
+                input:checked + .slider {
+                    background-color: var(--success);
+                }
+                
+                input:checked + .slider:before {
+                    transform: translateX(22px);
+                }
+                
+                .details-btn {
+                    padding: 8px 15px;
+                    background: transparent;
+                    color: var(--primary);
+                    border: 1px solid var(--primary);
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 5px;
+                    transition: all 0.3s ease;
+                }
+                
+                .details-btn:hover {
+                    background: var(--primary);
+                    color: white;
+                }
+                
+                .role-tag input:checked + .role-tag-label {
+                    background: var(--primary);
+                    color: white;
+                    border-color: var(--primary);
+                }
+            </style>
+            
+            <script>
+                // Функции для управления командами
+                async function toggleCommand(commandId, guildId) {
+                    const checkbox = document.getElementById('toggle-' + commandId);
+                    const enabled = checkbox.checked;
+                    
+                    try {
+                        const response = await fetch('/api/commands/' + guildId + '/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ commandId, enabled })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        showMessage(data.success ? '✅ Команда обновлена' : '❌ Ошибка', data.success);
+                    } catch (error) {
+                        showMessage('❌ Ошибка: ' + error.message, false);
+                    }
+                }
+                
+                function toggleCommandDetails(commandId) {
+                    const details = document.querySelector('[data-command-id="' + commandId + '"] .command-details');
+                    const button = document.querySelector('[data-command-id="' + commandId + '"] .details-btn');
+                    
+                    if (details.style.display === 'none') {
+                        details.style.display = 'block';
+                        button.innerHTML = '<span>🔧</span> Скрыть настройки';
+                    } else {
+                        details.style.display = 'none';
+                        button.innerHTML = '<span>⚙️</span> Настройки';
+                    }
+                }
+                
+                async function saveCommandRoles(commandId, guildId) {
+                    const checkboxes = document.querySelectorAll('[data-command="' + commandId + '"]:checked');
+                    const roleIds = Array.from(checkboxes).map(cb => cb.value);
+                    
+                    try {
+                        const response = await fetch('/api/commands/' + guildId + '/roles', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ commandId, roleIds })
+                        });
+                        
+                        const data = await response.json();
+                        showMessage(data.success ? '✅ Роли сохранены' : '❌ Ошибка', data.success);
+                    } catch (error) {
+                        showMessage('❌ Ошибка: ' + error.message, false);
+                    }
+                }
+                
+                async function resetCommandSettings(commandId, guildId) {
+                    if (!confirm('Сбросить настройки этой команды к значениям по умолчанию?')) return;
+                    
+                    try {
+                        const response = await fetch('/api/commands/' + guildId + '/reset', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ commandId })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            showMessage('✅ Настройки сброшены', true);
+                            setTimeout(() => location.reload(), 1000);
+                        } else {
+                            showMessage('❌ Ошибка: ' + data.error, false);
+                        }
+                    } catch (error) {
+                        showMessage('❌ Ошибка: ' + error.message, false);
+                    }
+                }
+                
+                async function enableAllCommands(guildId) {
+                    if (!confirm('Включить все команды на этом сервере?')) return;
+                    
+                    try {
+                        const response = await fetch('/api/commands/' + guildId + '/enable-all', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            showMessage('✅ Все команды включены', true);
+                            setTimeout(() => location.reload(), 1000);
+                        }
+                    } catch (error) {
+                        showMessage('❌ Ошибка: ' + error.message, false);
+                    }
+                }
+                
+                async function disableAllCommands(guildId) {
+                    if (!confirm('Выключить все команды на этом сервере?')) return;
+                    
+                    try {
+                        const response = await fetch('/api/commands/' + guildId + '/disable-all', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            showMessage('❌ Все команды выключены', true);
+                            setTimeout(() => location.reload(), 1000);
+                        }
+                    } catch (error) {
+                        showMessage('❌ Ошибка: ' + error.message, false);
+                    }
+                }
+                
+                // Поиск команд
+                document.getElementById('command-search').addEventListener('input', function(e) {
+                    const searchTerm = e.target.value.toLowerCase();
+                    const commandCards = document.querySelectorAll('.command-card');
+                    
+                    commandCards.forEach(card => {
+                        const commandName = card.querySelector('.command-name').textContent.toLowerCase();
+                        const commandDesc = card.querySelector('.command-desc').textContent.toLowerCase();
+                        
+                        if (commandName.includes(searchTerm) || commandDesc.includes(searchTerm)) {
+                            card.style.display = 'block';
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                });
+                
+                // Фильтрация по категориям
+                function showAllCommands() {
+                    document.querySelectorAll('.command-category').forEach(cat => {
+                        cat.style.display = 'block';
+                    });
+                    
+                    document.querySelectorAll('.category-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    event.target.classList.add('active');
+                }
+                
+                function filterByCategory(category) {
+                    document.querySelectorAll('.command-category').forEach(cat => {
+                        if (cat.dataset.category === category) {
+                            cat.style.display = 'block';
+                        } else {
+                            cat.style.display = 'none';
+                        }
+                    });
+                    
+                    document.querySelectorAll('.category-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    event.target.classList.add('active');
+                }
+                
+                // Показать сообщение
+                function showMessage(text, isSuccess) {
+                    const messageDiv = document.getElementById('command-message');
+                    messageDiv.innerHTML = \`
+                        <div style="padding: 15px; border-radius: 10px; background: \${isSuccess ? 'rgba(87, 242, 135, 0.2)' : 'rgba(237, 66, 69, 0.2)'}; border: 1px solid \${isSuccess ? 'var(--success)' : 'var(--danger)'}; color: \${isSuccess ? 'var(--success)' : 'var(--danger)'};">
+                            \${text}
+                        </div>
+                    \`;
+                    
+                    setTimeout(() => {
+                        messageDiv.innerHTML = '';
+                    }, 3000);
+                }
+                
+                // Обработчики для чекбоксов ролей
+                document.querySelectorAll('.role-tag').forEach(tag => {
+                    tag.addEventListener('click', function(e) {
+                        const checkbox = this.querySelector('input');
+                        checkbox.checked = !checkbox.checked;
+                        this.classList.toggle('selected');
+                    });
+                });
+            </script>
+        `;
+        
+        res.send(html);
+        
+    } catch (error) {
+        console.error('Commands page error:', error);
+        res.status(500).send(`
+            <div style="color: var(--danger); text-align: center; padding: 40px;">
+                ❌ Ошибка загрузки страницы: ${error.message}
             </div>
-        </div>
-    `;
-    
-    res.send(html);
+        `);
+    }
 });
-
 // API для сохранения разрешений
 app.post('/api/permissions/:guildId', requireAdmin, express.json(), (req, res) => {
     const guildId = req.params.guildId;
@@ -1602,6 +2192,179 @@ app.post('/api/guild/:guildId/moderation', requireAdmin, express.json(), async (
 
 
 // ==================== API МАРШРУТЫ ====================
+
+// API для управления командами
+const commandSettingsStorage = new Map();
+
+// Функция получения настроек команд с дефолтными значениями
+function getCommandSettings(guildId) {
+    if (!commandSettingsStorage.has(guildId)) {
+        // Настройки по умолчанию
+        const defaultSettings = {
+            'ping': { enabled: true, roles: [] },
+            'transcript': { enabled: true, roles: [] },
+            'settranscript': { enabled: true, roles: [] },
+            'transcriptsettings': { enabled: true, roles: [] },
+            'translation': { enabled: true, roles: [] },
+            'autodelete': { enabled: true, roles: [] },
+            'play': { enabled: true, roles: [] },
+            'stop': { enabled: true, roles: [] },
+            'stations': { enabled: true, roles: [] },
+            'testvoice': { enabled: true, roles: [] },
+            'сервер': { enabled: true, roles: [] },
+            'ticket': { enabled: true, roles: [] },
+            'стат': { enabled: true, roles: [] },
+            'полк': { enabled: true, roles: [] },
+            'регион': { enabled: true, roles: [] },
+            'ban': { enabled: true, roles: [] },
+            'bans': { enabled: true, roles: [] },
+            'kick': { enabled: true, roles: [] },
+            'mute': { enabled: true, roles: [] },
+            'unmute': { enabled: true, roles: [] },
+            'warn': { enabled: true, roles: [] },
+            'warnings': { enabled: true, roles: [] },
+            'clearwarns': { enabled: true, roles: [] },
+            'clear': { enabled: true, roles: [] },
+            'modsetup': { enabled: true, roles: [] }
+        };
+        commandSettingsStorage.set(guildId, defaultSettings);
+    }
+    return commandSettingsStorage.get(guildId);
+}
+
+// Функция сохранения настроек
+function saveCommandSettings(guildId, settings) {
+    commandSettingsStorage.set(guildId, settings);
+    console.log(`💾 Command settings saved for guild: ${guildId}`);
+}
+// Включение/выключение команды
+app.post('/api/commands/:guildId/toggle', requireAdmin, express.json(), (req, res) => {
+    const { guildId } = req.params;
+    const { commandId, enabled } = req.body;
+    
+    try {
+        const settings = getCommandSettings(guildId);
+        if (!settings[commandId]) {
+            settings[commandId] = {};
+        }
+        settings[commandId].enabled = enabled;
+        
+        // Логируем изменение
+        console.log(`Command ${commandId} ${enabled ? 'enabled' : 'disabled'} for guild ${guildId}`);
+        
+        res.json({ success: true, message: `Команда ${commandId} ${enabled ? 'включена' : 'выключена'}` });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Сохранение ролей для команды
+app.post('/api/commands/:guildId/roles', requireAdmin, express.json(), (req, res) => {
+    const { guildId } = req.params;
+    const { commandId, roleIds } = req.body;
+    
+    try {
+        const settings = getCommandSettings(guildId);
+        if (!settings[commandId]) {
+            settings[commandId] = {};
+        }
+        settings[commandId].roles = roleIds;
+        
+        res.json({ 
+            success: true, 
+            message: `Роли сохранены для команды ${commandId}`,
+            roles: roleIds.length
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Сброс настроек команды
+app.post('/api/commands/:guildId/reset', requireAdmin, express.json(), (req, res) => {
+    const { guildId } = req.params;
+    const { commandId } = req.body;
+    
+    try {
+        const settings = getCommandSettings(guildId);
+        delete settings[commandId];
+        
+        res.json({ 
+            success: true, 
+            message: `Настройки команды ${commandId} сброшены`
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Включение всех команд
+app.post('/api/commands/:guildId/enable-all', requireAdmin, express.json(), (req, res) => {
+    const { guildId } = req.params;
+    
+    try {
+        const settings = getCommandSettings(guildId);
+        const allCommands = [
+            'ban', 'kick', 'mute', 'clear', 'warn',
+            'transcript', 'ticket', 'region',
+            'play', 'stop',
+            'stats', 'regiment', 'ping'
+        ];
+        
+        allCommands.forEach(cmdId => {
+            if (!settings[cmdId]) settings[cmdId] = {};
+            settings[cmdId].enabled = true;
+        });
+        
+        res.json({ 
+            success: true, 
+            message: `Все команды включены`,
+            count: allCommands.length
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Выключение всех команд
+app.post('/api/commands/:guildId/disable-all', requireAdmin, express.json(), (req, res) => {
+    const { guildId } = req.params;
+    
+    try {
+        const settings = getCommandSettings(guildId);
+        const allCommands = [
+            'ban', 'kick', 'mute', 'clear', 'warn',
+            'transcript', 'ticket', 'region',
+            'play', 'stop',
+            'stats', 'regiment', 'ping'
+        ];
+        
+        allCommands.forEach(cmdId => {
+            if (!settings[cmdId]) settings[cmdId] = {};
+            settings[cmdId].enabled = false;
+        });
+        
+        res.json({ 
+            success: true, 
+            message: `Все команды выключены`,
+            count: allCommands.length
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Получение настроек всех команд
+app.get('/api/commands/:guildId', requireAdmin, (req, res) => {
+    const { guildId } = req.params;
+    const settings = getCommandSettings(guildId);
+    
+    res.json({ 
+        success: true, 
+        settings,
+        count: Object.keys(settings).length
+    });
+});
 
 // Просмотр транскрипта по ID
 app.get('/transcript/:id', (req, res) => {
@@ -6679,7 +7442,41 @@ client.on('interactionCreate', async interaction => {
                 flags: 64 
             });
         }
-
+try {
+            // Проверяем, включена ли команда в настройках
+            const commandSettings = getCommandSettings(guild.id);
+            
+            // Проверяем, есть ли настройки для этой команды и если она отключена
+            if (commandSettings[commandName] && commandSettings[commandName].enabled === false) {
+                return interaction.reply({ 
+                    content: '❌ Эта команда отключена на этом сервере.', 
+                    flags: 64 
+                });
+            }
+            
+            // Проверяем права доступа (если настроены роли)
+            if (commandSettings[commandName]?.roles && commandSettings[commandName].roles.length > 0) {
+                // Исключение: команду ping могут использовать все, даже без прав
+                if (commandName !== 'ping') {
+                    const hasRequiredRole = member.roles.cache.some(role => 
+                        commandSettings[commandName].roles.includes(role.id)
+                    );
+                    
+                    // Разрешаем администраторам использовать любые команды
+                    const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator);
+                    
+                    if (!hasRequiredRole && !isAdmin) {
+                        return interaction.reply({ 
+                            content: '❌ У вас нет прав для использования этой команды.', 
+                            flags: 64 
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error checking command settings:', error);
+        }
+      
         try {
             switch(commandName) {
                 case 'ping':
@@ -7925,7 +8722,7 @@ client.on('interactionCreate', async interaction => {
                         content: '❌ Неизвестная команда!', 
                         flags: 64 
                     });
-            }
+                    }
         } catch (error) {
             console.error('Ошибка обработки слеш-команды:', error);
             
@@ -7940,7 +8737,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 });
-
 // ==================== АВТОМАТИЧЕСКАЯ МОДЕРАЦИЯ ====================
 
 const userMessageCache = new Map();
