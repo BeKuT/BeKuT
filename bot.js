@@ -8739,7 +8739,7 @@ try {
                     break;
 
                 case 'регион':
-    const action = options.getString('действие'); // Исправлено на action
+    let regionAction = options.getString('действие'); // Используем let вместо const
     
     // Проверка прав доступа к команде
     if (!checkRegionAccess(member)) {
@@ -8752,7 +8752,7 @@ try {
     await interaction.deferReply({ flags: 64 });
     
     try {
-        switch(action) { // Исправлено на action
+        switch(regionAction) {
             case 'set':
                 const channelId = options.getString('channel_id');
                 const region = options.getString('регион'); // Исправлено на region
