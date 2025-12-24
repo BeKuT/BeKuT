@@ -8739,9 +8739,127 @@ try {
                     break;
 
                 case 'регион':
-                    // Используется отдельный обработчик для команды /регион
-                    // Этот код перемещен в начало файла
-                    break;
+    const action = options.getString('действие'); // Исправлено на action
+    
+    // Проверка прав доступа к команде
+    if (!checkRegionAccess(member)) {
+        return interaction.reply({ 
+            content: '❌ У вас нет прав для использования этой команды!', 
+            flags: 64 
+        });
+    }
+    
+    await interaction.deferReply({ flags: 64 });
+    
+    try {
+        switch(action) { // Исправлено на action
+            case 'set':
+                const channelId = options.getString('channel_id');
+                const region = options.getString('регион'); // Исправлено на region
+                
+                if (!channelId || !region) {
+                    return interaction.editReply('❌ Укажите ID канала и код региона!');
+                }
+                
+                // Проверка валидности кода региона
+                if (!availableRegions.includes(region.toLowerCase())) {
+                    return interaction.editReply('❌ Неверный код региона! Используйте `/регион список` для просмотра доступных регионов.');
+                }
+                
+                // Получение голосового канала
+                const voiceChannel = await guild.channels.fetch(channelId);
+                if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+                    return interaction.editReply('❌ Укажите ID голосового канала!');
+                }
+                
+                // Проверка прав бота
+                if (!voiceChannel.permissionsFor(guild.members.me).has(PermissionsBitField.Flags.ManageChannels)) {
+                    return interaction.editReply('❌ У бота нет прав для управления этим каналам!');
+                }
+                
+                // Изменение региона
+                await voiceChannel.setRTCRegion(region.toLowerCase());
+                
+                // Сохранение настроек
+                const regionSettings = voiceRegionSettings.get(guild.id) || {};
+                voiceRegionSettings.set(guild.id, {
+                    ...regionSettings,
+                    [voiceChannel.id]: region.toLowerCase()
+                });
+                
+                await interaction.editReply(`✅ Регион голосового канала <#${voiceChannel.id}> изменен на **${getRegionName(region.toLowerCase())}**`);
+                break;
+                
+            case 'статус':
+                const currentRegionSettings = voiceRegionSettings.get(guild.id) || {};
+                const channelsWithRegions = Object.entries(currentRegionSettings);
+                
+                if (channelsWithRegions.length === 0) {
+                    await interaction.editReply('❌ На этом сервере нет настроенных регионов голосовых каналов.');
+                } else {
+                    const regionList = channelsWithRegions.map(([channelId, regionCode]) => {
+                        const channel = guild.channels.cache.get(channelId);
+                        return channel ? `• <#${channelId}>: **${getRegionName(regionCode)}**` : `• Канал ${channelId}: **${getRegionName(regionCode)}**`;
+                    }).join('\n');
+                    
+                    const embed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('🌍 Настроенные голосовые регионы')
+                        .setDescription(regionList)
+                        .setFooter({ text: `Используйте /регион сброс для сброса настроек` })
+                        .setTimestamp();
+                    
+                    await interaction.editReply({ embeds: [embed] });
+                }
+                break;
+                
+            case 'сброс':
+                voiceRegionSettings.delete(guild.id);
+                await interaction.editReply('✅ Настройки регионов сброшены для этого сервера.');
+                break;
+                
+            case 'список':
+                const regionsList = availableRegions.map(regionCode => 
+                    `• **${regionCode}** - ${getRegionName(regionCode)}`
+                ).join('\n');
+                
+                const embed = new EmbedBuilder()
+                    .setColor('#57F287')
+                    .setTitle('🌍 Доступные регионы Discord')
+                    .setDescription(regionsList)
+                    .setFooter({ text: 'Используйте /регион set для установки региона' })
+                    .setTimestamp();
+                
+                await interaction.editReply({ embeds: [embed] });
+                break;
+                
+            case 'доступ':
+                const hasAccess = checkRegionAccess(member);
+                const allowedRoles = ALLOWED_REGION_ROLES.map(roleId => {
+                    const role = guild.roles.cache.get(roleId);
+                    return role ? `• ${role.name}` : `• Роль ${roleId}`;
+                }).join('\n');
+                
+                const accessEmbed = new EmbedBuilder()
+                    .setColor(hasAccess ? '#57F287' : '#ED4245')
+                    .setTitle('🔐 Доступ к команде /регион')
+                    .addFields(
+                        { name: '📊 Ваш доступ', value: hasAccess ? '✅ Разрешено' : '❌ Запрещено', inline: true },
+                        { name: '👥 Разрешенные роли', value: ALLOWED_REGION_ROLES.length > 0 ? allowedRoles : 'Все пользователи', inline: false }
+                    )
+                    .setTimestamp();
+                
+                await interaction.editReply({ embeds: [accessEmbed] });
+                break;
+                
+            default:
+                await interaction.editReply('❌ Неизвестное действие! Используйте: set, статус, сброс, список, доступ');
+        }
+    } catch (error) {
+        console.error('Ошибка команды регион:', error);
+        await interaction.editReply(`❌ Ошибка: ${error.message}`);
+    }
+    break;
 
                 default:
                     await interaction.reply({ 
