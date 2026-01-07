@@ -32,9 +32,23 @@ const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
-// Путь для сохранения данных
-const DATA_PATH = process.env.DATA_PATH || '/data';
-const SETTINGS_FILE = join(DATA_PATH, 'bot_settings.json');
+// ==================== ПУТИ ДЛЯ СОХРАНЕНИЯ ====================
+const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : './data';
+const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
+const TRANSCRIPTS_DIR = join(DATA_DIR, 'transcripts');
+
+// Создаем директории если не существуют
+function ensureDirs() {
+    if (!existsSync(DATA_DIR)) {
+        mkdirSync(DATA_DIR, { recursive: true });
+        console.log(`📁 Создана директория для данных: ${DATA_DIR}`);
+    }
+    if (!existsSync(TRANSCRIPTS_DIR)) {
+        mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
+        console.log(`📁 Создана директория для транскриптов: ${TRANSCRIPTS_DIR}`);
+    }
+}
+ensureDirs();
 
 // Функция сохранения всех настроек
 function saveAllSettings() {
@@ -118,6 +132,56 @@ if (!token) {
 }
 
 console.log('✅ Token loaded successfully');
+
+function loadAllTranscripts() {
+    console.log('🔍 Ищу сохраненные транскрипты...');
+    
+    // Список возможных мест где могут быть транскрипты
+    const possibleDirs = [
+        TRANSCRIPTS_DIR,
+        '/data/transcripts',
+        '/tmp/data/transcripts',
+        '/tmp/transcripts',
+        './data/transcripts',
+        join(process.cwd(), 'data', 'transcripts')
+    ];
+    
+    let loadedCount = 0;
+    
+    for (const dir of possibleDirs) {
+        try {
+            if (existsSync(dir)) {
+                const files = readdirSync(dir)
+                    .filter(file => file.endsWith('.json'))
+                    .map(file => join(dir, file));
+                
+                console.log(`📁 Найдено ${files.length} файлов в ${dir}`);
+                
+                for (const file of files) {
+                    try {
+                        const data = JSON.parse(readFileSync(file, 'utf8'));
+                        transcriptsStorage.set(data.id, {
+                            html: data.html,
+                            createdAt: data.createdAt,
+                            ticketInfo: data.ticketInfo
+                        });
+                        loadedCount++;
+                        console.log(`✅ Загружен транскрипт: ${data.id}`);
+                    } catch (error) {
+                        console.error(`❌ Ошибка загрузки файла ${file}:`, error.message);
+                    }
+                }
+            }
+        } catch (error) {
+            console.log(`❌ Не могу проверить ${dir}: ${error.message}`);
+        }
+    }
+    
+    console.log(`📊 Итого загружено ${loadedCount} транскриптов`);
+    console.log(`📊 В памяти: ${transcriptsStorage.size} транскриптов`);
+    
+    return loadedCount;
+}
 
 // ==================== ДИСКОРД БОТ ====================
 
