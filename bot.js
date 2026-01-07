@@ -21,6 +21,8 @@ import express from 'express';
 import path from 'path';
 import session from 'express-session';
 import { setTimeout as setTimeoutAsync } from 'timers/promises';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
 const token = process.env.DISCORD_TOKEN;
@@ -29,6 +31,76 @@ const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+
+// Путь для сохранения данных
+const DATA_PATH = process.env.DATA_PATH || '/data';
+const SETTINGS_FILE = join(DATA_PATH, 'bot_settings.json');
+
+// Функция сохранения всех настроек
+function saveAllSettings() {
+    try {
+        const settings = {
+            commandSettings: Object.fromEntries(commandSettingsStorage),
+            transcriptsStorage: Object.fromEntries(transcriptsStorage),
+            commandPermissions: Object.fromEntries(commandPermissions),
+            moderationSettings: Object.fromEntries(moderationSettings),
+            serverSettings: Object.fromEntries(serverSettings),
+            autoDeleteSettings: Object.fromEntries(autoDeleteSettings),
+            voiceRegionSettings: Object.fromEntries(voiceRegionSettings),
+            ticketSettings: Object.fromEntries(ticketSettings),
+            voiceRegionSettings: Object.fromEntries(voiceRegionSettings),
+            lastSave: new Date().toISOString()
+        };
+        
+        writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+        console.log('💾 Все настройки сохранены');
+    } catch (error) {
+        console.error('❌ Ошибка сохранения настроек:', error);
+    }
+}
+
+// Функция загрузки настроек
+function loadAllSettings() {
+    try {
+        if (!existsSync(SETTINGS_FILE)) {
+            console.log('📁 Файл настроек не найден, создаю новый');
+            return;
+        }
+        
+        const data = readFileSync(SETTINGS_FILE, 'utf8');
+        const settings = JSON.parse(data);
+        
+        // Восстанавливаем Map из объектов
+        if (settings.commandSettings) {
+            commandSettingsStorage = new Map(Object.entries(settings.commandSettings));
+        }
+        if (settings.transcriptsStorage) {
+            transcriptsStorage = new Map(Object.entries(settings.transcriptsStorage));
+        }
+        if (settings.commandPermissions) {
+            commandPermissions = new Map(Object.entries(settings.commandPermissions));
+        }
+        if (settings.moderationSettings) {
+            moderationSettings = new Map(Object.entries(settings.moderationSettings));
+        }
+        if (settings.serverSettings) {
+            serverSettings = new Map(Object.entries(settings.serverSettings));
+        }
+        if (settings.autoDeleteSettings) {
+            autoDeleteSettings = new Map(Object.entries(settings.autoDeleteSettings));
+        }
+        if (settings.voiceRegionSettings) {
+            voiceRegionSettings = new Map(Object.entries(settings.voiceRegionSettings));
+        }
+        if (settings.ticketSettings) {
+            ticketSettings = new Map(Object.entries(settings.ticketSettings));
+        }
+        
+        console.log(`✅ Настройки загружены из ${SETTINGS_FILE}`);
+    } catch (error) {
+        console.error('❌ Ошибка загрузки настроек:', error);
+    }
+}
 
 // ДОБАВЬТЕ эти переменные для тикетов
 const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
@@ -2258,11 +2330,32 @@ function getCommandSettings(guildId) {
     return commandSettingsStorage.get(guildId);
 }
 
-// Функция сохранения настроек
+// Пример для commandSettings
 function saveCommandSettings(guildId, settings) {
     commandSettingsStorage.set(guildId, settings);
     console.log(`💾 Command settings saved for guild: ${guildId}`);
+    
+    // Отложенное сохранение (чтобы не сохранять слишком часто)
+    if (!global.saveTimeout) {
+        global.saveTimeout = setTimeout(() => {
+            saveAllSettings();
+            global.saveTimeout = null;
+        }, 5000); // Сохраняем через 5 секунд после последнего изменения
+    }
 }
+
+// Аналогично для других функций:
+function saveModerationSettings(guildId, settings) {
+    moderationSettings.set(guildId, settings);
+    console.log(`💾 Moderation settings saved for guild: ${guildId}`);
+    if (!global.saveTimeout) {
+        global.saveTimeout = setTimeout(() => {
+            saveAllSettings();
+            global.saveTimeout = null;
+        }, 5000);
+    }
+}
+
 // Включение/выключение команды
 app.post('/api/commands/:guildId/toggle', requireAdmin, express.json(), (req, res) => {
     const { guildId } = req.params;
@@ -10814,6 +10907,26 @@ process.on('unhandledRejection', error => {
 process.on('uncaughtException', error => {
     console.error('❌ Uncaught exception:', error);
 });
+
+// Загрузите настройки при запуске
+loadAllSettings();
+
+// Автосохранение каждые 5 минут
+setInterval(saveAllSettings, 5 * 60 * 1000);
+
+// Сохранение при завершении
+process.on('SIGTERM', () => {
+    console.log('💾 Полное сохранение перед завершением...');
+    saveAllSettings();
+    process.exit(0);
+});
+
+process.on('SIGINT', () => {
+    console.log('💾 Полное сохранение перед завершением...');
+    saveAllSettings();
+    process.exit(0);
+});
+
 
 // Запуск бота
 client.login(token).catch(error => {
