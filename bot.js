@@ -2354,6 +2354,32 @@ function saveModerationSettings(guildId, settings) {
             global.saveTimeout = null;
         }, 5000);
     }
+    try {
+        // Создаем копию настроек
+        const settingsToSave = { ...settings };
+        
+        // Сохраняем warnings как Map
+        settingsToSave.warnings = settings.warnings instanceof Map ? settings.warnings : new Map();
+        
+        // Сохраняем autoMod с проверками
+        if (!settingsToSave.autoMod) {
+            settingsToSave.autoMod = { ...DEFAULT_MODERATION_SETTINGS.autoMod };
+        }
+        
+        // Сохраняем autoModThresholds с проверками
+        if (!settingsToSave.autoModThresholds) {
+            settingsToSave.autoModThresholds = { ...DEFAULT_MODERATION_SETTINGS.autoModThresholds };
+        }
+        
+        moderationSettings.set(guildId, settingsToSave);
+        console.log(`💾 Moderation settings saved for guild: ${guildId}`);
+        console.log(`📊 AutoMod saved:`, settingsToSave.autoMod);
+        
+        return settingsToSave;
+    } catch (error) {
+        console.error('❌ Error saving moderation settings:', error);
+        return settings;
+    }
 }
 
 // Включение/выключение команды
@@ -10813,35 +10839,6 @@ function getModerationSettings(guildId) {
     return settings;
 }
 
-// Функция сохранения настроек модерации
-function saveModerationSettings(guildId, settings) {
-    try {
-        // Создаем копию настроек
-        const settingsToSave = { ...settings };
-        
-        // Сохраняем warnings как Map
-        settingsToSave.warnings = settings.warnings instanceof Map ? settings.warnings : new Map();
-        
-        // Сохраняем autoMod с проверками
-        if (!settingsToSave.autoMod) {
-            settingsToSave.autoMod = { ...DEFAULT_MODERATION_SETTINGS.autoMod };
-        }
-        
-        // Сохраняем autoModThresholds с проверками
-        if (!settingsToSave.autoModThresholds) {
-            settingsToSave.autoModThresholds = { ...DEFAULT_MODERATION_SETTINGS.autoModThresholds };
-        }
-        
-        moderationSettings.set(guildId, settingsToSave);
-        console.log(`💾 Moderation settings saved for guild: ${guildId}`);
-        console.log(`📊 AutoMod saved:`, settingsToSave.autoMod);
-        
-        return settingsToSave;
-    } catch (error) {
-        console.error('❌ Error saving moderation settings:', error);
-        return settings;
-    }
-}
 
 // Функция для получения пользовательских предупреждений
 function getUserWarnings(guildId, userId) {
