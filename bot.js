@@ -31,7 +31,19 @@ const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? {
+        rejectUnauthorized: false,
+        // Добавьте эти параметры для Railway PostgreSQL
+        sslmode: 'require',
+        ssl: true
+    } : false,
+    // Дополнительные параметры для стабильности
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+    max: 20
+});
 // ==================== ПУТИ ДЛЯ СОХРАНЕНИЯ ====================
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : './data';
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
