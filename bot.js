@@ -21,7 +21,7 @@ import express from 'express';
 import path from 'path';
 import session from 'express-session';
 import { setTimeout as setTimeoutAsync } from 'timers/promises';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 // ⬇️⬇️⬇️ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ⬇️⬇️⬇️
@@ -31,21 +31,10 @@ const PORT = process.env.PORT || 3000;
 const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? {
-        rejectUnauthorized: false,
-        // Добавьте эти параметры для Railway PostgreSQL
-        sslmode: 'require',
-        ssl: true
-    } : false,
-    // Дополнительные параметры для стабильности
-    connectionTimeoutMillis: 5000,
-    idleTimeoutMillis: 30000,
-    max: 20
-});
 // ==================== ПУТИ ДЛЯ СОХРАНЕНИЯ ====================
-const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : './data';
+// В production на Railway /data может быть недоступен, поэтому используем переменную окружения
+// или стандартную папку ./data (Railway автоматически подхватывает PORT)
+const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? '/data' : './data');
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 const TRANSCRIPTS_DIR = join(DATA_DIR, 'transcripts');
 
@@ -74,7 +63,6 @@ function saveAllSettings() {
             autoDeleteSettings: Object.fromEntries(autoDeleteSettings),
             voiceRegionSettings: Object.fromEntries(voiceRegionSettings),
             ticketSettings: Object.fromEntries(ticketSettings),
-            voiceRegionSettings: Object.fromEntries(voiceRegionSettings),
             lastSave: new Date().toISOString()
         };
         
@@ -212,12 +200,12 @@ const client = new Client({
         Partials.Reaction // Добавьте это для реакций
     ]
 });
-// Хранилища
-const transcriptsStorage = new Map();
+// Хранилища (объявлены через let, так как loadAllSettings() перезаписывает их при старте)
+let transcriptsStorage = new Map();
 const translationMessages = new Map();
 const translationCooldown = new Set();
 const TRANSLATION_COOLDOWN_TIME = 30000;
-const commandPermissions = new Map();
+let commandPermissions = new Map();
 
 
 // ==================== НАСТРОЙКИ СЛЕШ-КОМАНД ====================
@@ -2368,7 +2356,7 @@ app.post('/api/guild/:guildId/moderation', requireAdmin, express.json(), async (
 // ==================== API МАРШРУТЫ ====================
 
 // API для управления командами
-const commandSettingsStorage = new Map();
+let commandSettingsStorage = new Map();
 
 // Функция получения настроек команд с дефолтными значениями
 function getCommandSettings(guildId) {
@@ -7335,7 +7323,7 @@ function createErrorPage(title, message) {
 // ==================== СИСТЕМА НАСТРОЕК ТРАНСКРИПТОВ ====================
 
 // Хранилище настроек для каждого сервера
-const serverSettings = new Map();
+let serverSettings = new Map();
 
 // Функция для получения настроек сервера
 function getServerSettings(guildId) {
@@ -7604,7 +7592,7 @@ function checkRegionAccess(member) {
 // ==================== СИСТЕМА УПРАВЛЕНИЯ РЕГИОНАМИ ДИСКОРДА ====================
 
 // Хранилище настроек регионов для голосовых каналов
-const voiceRegionSettings = new Map();
+let voiceRegionSettings = new Map();
 
 // Доступные регионы Discord - ПЕРЕМЕСТИТЕ ЭТО В НАЧАЛО КОДА, ПЕРЕД ИСПОЛЬЗОВАНИЕМ
 const availableRegions = [
@@ -9362,7 +9350,7 @@ async function translateWithAPI(text, targetLang) {
 // ==================== СИСТЕМА ТИКЕТОВ СЛЕШ-КОМАНД ====================
 
 // Хранилище настроек тикетов (оставить как есть)
-const ticketSettings = new Map();
+let ticketSettings = new Map();
 
 // Обработчик слеш-команды /ticket
 client.on('interactionCreate', async interaction => {
@@ -10009,7 +9997,7 @@ client.on('messageDelete', async (message) => {
 
 // ==================== СИСТЕМА АВТОМАТИЧЕСКОГО УДАЛЕНИЯ С ИСКЛЮЧЕНИЕМ РОЛИ ====================
 
-const autoDeleteSettings = new Map();
+let autoDeleteSettings = new Map();
 
 // Стандартные настройки
 const DEFAULT_SETTINGS = {
@@ -10806,7 +10794,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 // ==================== СИСТЕМА МОДЕРАЦИИ ====================
 
-const moderationSettings = new Map();
+let moderationSettings = new Map();
 const mutedUsers = new Map();
 
 // Настройки по умолчанию (полная структура с autoMod)
@@ -10955,22 +10943,22 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('✅ Permissions system initialized');
 });
 
-// Обработка graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('🔄 Received SIGTERM, shutting down gracefully...');
+// Обработка graceful shutdown (с сохранением настроек перед завершением)
+function gracefulShutdown(signal) {
+    console.log(`🔄 Received ${signal}, shutting down gracefully...`);
+    try {
+        saveAllSettings();
+    } catch (e) {
+        console.error('❌ Ошибка сохранения при завершении:', e);
+    }
     server.close(() => {
         console.log('✅ Server closed');
         process.exit(0);
     });
-});
+}
 
-process.on('SIGINT', () => {
-    console.log('🔄 Received SIGINT, shutting down gracefully...');
-    server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-    });
-});
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Обработка ошибок
 process.on('unhandledRejection', error => {
@@ -10981,24 +10969,12 @@ process.on('uncaughtException', error => {
     console.error('❌ Uncaught exception:', error);
 });
 
-// Загрузите настройки при запуске
+// Загрузите настройки и транскрипты при запуске
 loadAllSettings();
+loadAllTranscripts();
 
 // Автосохранение каждые 5 минут
 setInterval(saveAllSettings, 5 * 60 * 1000);
-
-// Сохранение при завершении
-process.on('SIGTERM', () => {
-    console.log('💾 Полное сохранение перед завершением...');
-    saveAllSettings();
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    console.log('💾 Полное сохранение перед завершением...');
-    saveAllSettings();
-    process.exit(0);
-});
 
 
 // Запуск бота
